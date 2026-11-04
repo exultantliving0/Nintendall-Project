@@ -41,6 +41,66 @@ const SystemInfo& systemInfo(System s) {
     return table()[0];
 }
 
+// RetroPad ids (see libretro.h): B=0 Y=1 Select=2 Start=3 Up=4 Down=5 Left=6 Right=7
+// A=8 X=9 L=10 R=11 L2=12 R2=13 L3=14 R3=15
+namespace {
+constexpr int kB = 0, kY = 1, kSelect = 2, kStart = 3, kUp = 4, kDown = 5, kLeft = 6, kRight = 7, kA = 8, kX = 9,
+              kL = 10, kR = 11, kL2 = 12, kR2 = 13, kL3 = 14, kR3 = 15;
+}
+
+const std::vector<ButtonLabel>& systemButtons(System s) {
+    static const std::vector<ButtonLabel> nes = {
+        {kUp, "Up"}, {kDown, "Down"}, {kLeft, "Left"}, {kRight, "Right"},
+        {kA, "A"},   {kB, "B"},       {kStart, "Start"}, {kSelect, "Select"},
+    };
+    static const std::vector<ButtonLabel> fds = {
+        {kUp, "Up"}, {kDown, "Down"},   {kLeft, "Left"},     {kRight, "Right"},
+        {kA, "A"},   {kB, "B"},         {kStart, "Start"},   {kSelect, "Select"},
+        {kR, "Flip Disk Side"},
+    };
+    static const std::vector<ButtonLabel> gba = {
+        {kUp, "Up"}, {kDown, "Down"}, {kLeft, "Left"},   {kRight, "Right"},
+        {kA, "A"},   {kB, "B"},       {kL, "L"},         {kR, "R"},
+        {kStart, "Start"}, {kSelect, "Select"},
+    };
+    static const std::vector<ButtonLabel> snes = {
+        {kUp, "Up"}, {kDown, "Down"}, {kLeft, "Left"}, {kRight, "Right"},
+        {kA, "A"},   {kB, "B"},       {kX, "X"},       {kY, "Y"},
+        {kL, "L"},   {kR, "R"},       {kStart, "Start"}, {kSelect, "Select"},
+    };
+    static const std::vector<ButtonLabel> all = {
+        {kUp, "Up"}, {kDown, "Down"}, {kLeft, "Left"}, {kRight, "Right"},
+        {kA, "A"},   {kB, "B"},       {kX, "X"},       {kY, "Y"},
+        {kL, "L"},   {kR, "R"},       {kL2, "L2"},     {kR2, "R2"},
+        {kL3, "L3"}, {kR3, "R3"},     {kStart, "Start"}, {kSelect, "Select"},
+    };
+    switch (s) {
+    case System::NES:
+    case System::GB:
+    case System::GBC: return nes;
+    case System::FDS: return fds;
+    case System::GBA: return gba;
+    case System::SNES:
+    case System::NDS: return snes;
+    default: return all;  // no game yet, or systems that aren't playable yet
+    }
+}
+
+int systemPlayers(System s) {
+    switch (s) {
+    case System::NES:
+    case System::FDS:
+    case System::SNES: return 2;
+    case System::GB:
+    case System::GBC:
+    case System::GBA:
+    case System::NDS:
+    case System::N3DS:
+    case System::WiiU: return 1;
+    default: return 4;
+    }
+}
+
 const std::vector<System>& allSystems() {
     static const std::vector<System> all = {
         System::NES, System::FDS, System::SNES, System::N64,      System::GB,  System::GBC,

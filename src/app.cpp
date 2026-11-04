@@ -15,8 +15,6 @@ namespace fs = std::filesystem;
 namespace {
 
 const Color kBlack{0, 0, 0};
-const Color kHint{140, 140, 140};
-const Color kHintDim{90, 90, 90};
 const Color kWhite{255, 255, 255};
 
 constexpr int kDefaultBaseW = 256, kDefaultBaseH = 240;  // NES picture, used before any game is loaded
@@ -548,7 +546,7 @@ void App::doAction(int a) {
     case ActFastForward: fastForwardToggled_ = !fastForwardToggled_; break;
     case ActSaveState: saveState(); break;
     case ActLoadState: loadState(); break;
-    case ActButtonConfig: buttonConfig_.open(); break;
+    case ActButtonConfig: buttonConfig_.open(system_); break;
     case ActFullscreen: video_.toggleFullscreen(); break;
     case ActControls:
         showMessage("Controls",
@@ -703,14 +701,6 @@ void App::draw() {
 
     if (core_ && video_.hasFrame()) {
         video_.drawGame(area);
-    } else if (!core_) {
-        // Empty window: just a hint to drop a game in.
-        const std::string title = "Drag and drop a game here";
-        const std::string sub = "or choose File > Open";
-        const int th = text_.lineHeight(Text::Large), sh = text_.lineHeight();
-        const int y = area.y + (area.h - th - sh - int(6 * s)) / 2;
-        text_.draw(area.x + (area.w - text_.width(title, Text::Large)) / 2, y, title, kHint, Text::Large);
-        text_.draw(area.x + (area.w - text_.width(sub)) / 2, y + th + int(6 * s), sub, kHintDim);
     }
 
     if (core_ && paused_) {

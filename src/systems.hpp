@@ -31,7 +31,17 @@ struct SystemInfo {
     const char* note;      // extra requirement (BIOS, keys...) or nullptr
 };
 
+// A button on a system's controller, as a libretro RetroPad id plus the name shown to players.
+struct ButtonLabel {
+    int id;
+    const char* label;
+};
+
 const SystemInfo& systemInfo(System s);
+// The buttons this system's controller has, in display order. Unknown = every button.
+const std::vector<ButtonLabel>& systemButtons(System s);
+// How many players the system supports (shown as tabs in Button Config).
+int systemPlayers(System s);
 const std::vector<System>& allSystems();
 System systemFromExtension(const std::string& ext);  // ext lowercase with dot
 bool isKnownGameExtension(const std::string& ext);
