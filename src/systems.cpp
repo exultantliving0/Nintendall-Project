@@ -30,7 +30,7 @@ static const std::vector<SystemInfo>& table() {
          {".wud", ".wux", ".wua", ".rpx", ".wuhb"}, "cemu", "Cemu", true, "Needs your own console keys (keys.txt)"},
         {System::N3DS, "3ds", "3DS", "Nintendo 3DS",
          {".3ds", ".cci", ".cxi", ".cia", ".3dsx", ".app", ".zcci", ".zcxi", ".zcia", ".z3dsx"},
-         "azahar", "Azahar", true, "Needs decrypted games"},
+         "azahar", "Azahar", false, "Needs decrypted games"},
     };
     return t;
 }
@@ -68,6 +68,13 @@ const std::vector<ButtonLabel>& systemButtons(System s) {
         {kA, "A"},   {kB, "B"},       {kX, "X"},       {kY, "Y"},
         {kL, "L"},   {kR, "R"},       {kStart, "Start"}, {kSelect, "Select"},
     };
+    static const std::vector<ButtonLabel> n3ds = {
+        {kUp, "D-Pad Up"}, {kDown, "D-Pad Down"}, {kLeft, "D-Pad Left"}, {kRight, "D-Pad Right"},
+        {16, "Circle Pad Up"}, {17, "Circle Pad Down"}, {18, "Circle Pad Left"}, {19, "Circle Pad Right"},
+        {kA, "A"}, {kB, "B"}, {kX, "X"}, {kY, "Y"},
+        {kL, "L"}, {kR, "R"}, {kL2, "ZL"}, {kR2, "ZR"},
+        {kStart, "Start"}, {kSelect, "Select"}, {kL3, "Home"},
+    };
     static const std::vector<ButtonLabel> all = {
         {kUp, "Up"}, {kDown, "Down"}, {kLeft, "Left"}, {kRight, "Right"},
         {kA, "A"},   {kB, "B"},       {kX, "X"},       {kY, "Y"},
@@ -82,6 +89,7 @@ const std::vector<ButtonLabel>& systemButtons(System s) {
     case System::GBA: return gba;
     case System::SNES:
     case System::NDS: return snes;
+    case System::N3DS: return n3ds;
     default: return all;  // no game yet, or systems that aren't playable yet
     }
 }

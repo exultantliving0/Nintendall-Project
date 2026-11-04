@@ -2,6 +2,7 @@
 
 #include <SDL.h>
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -39,6 +40,8 @@ static void RETRO_CALLCONV cbInputPoll() {}  // SDL is polled once per frame by 
 static int16_t RETRO_CALLCONV cbInputState(unsigned port, unsigned device, unsigned index, unsigned id) {
     return g_core ? g_core->inputState(port, device, index, id) : 0;
 }
+static uintptr_t RETRO_CALLCONV cbGetFramebuffer() { return g_core ? g_core->hwFramebuffer() : 0; }
+static retro_proc_address_t RETRO_CALLCONV cbGetProcAddress(const char* sym) { return HwRender::procAddress(sym); }
 static bool RETRO_CALLCONV cbRumble(unsigned port, enum retro_rumble_effect effect, uint16_t strength) {
     return g_core && g_core->host().onRumble(port, effect, strength);
 }
@@ -128,25 +131,44 @@ bool LibretroCore::loadGame(const fs::path& gamePath, std::string& error) {
         gi.data = gameData_.data();
         gi.size = gameData_.size();
     }
+    if (hwActive_) hw_.makeCurrent();
     if (!api_.load_game(&gi)) {
         error = libraryName_ + " couldn't start this game";
-        if (hwRequested_) error += " (it needs GPU rendering, which isn't supported yet)";
+        if (hwRequested_ && !hwActive_) error += " (GPU rendering unavailable: " + hwError_ + ")";
         return false;
     }
     gameLoaded_ = true;
     api_.get_system_av_info(&av_);
     if (av_.timing.fps <= 0) av_.timing.fps = 60.0;
     if (av_.timing.sample_rate <= 0) av_.timing.sample_rate = 44100.0;
+    if (hwActive_) {
+        // The GL context exists; give the core its framebuffer and let it set up.
+        resizeHwFramebuffer();
+        hw_.makeCurrent();
+        if (hwCallback_.context_reset) hwCallback_.context_reset();
+    }
     return true;
+}
+
+void LibretroCore::resizeHwFramebuffer() {
+    const unsigned w = av_.geometry.max_width ? av_.geometry.max_width : av_.geometry.base_width;
+    const unsigned h = av_.geometry.max_height ? av_.geometry.max_height : av_.geometry.base_height;
+    hw_.resize(std::max(w, 16u), std::max(h, 16u));
 }
 
 void LibretroCore::unload() {
     if (lib_) {
+        if (hwActive_) hw_.makeCurrent();  // GPU cores free their GL objects during these calls
+        // Let the core release its GPU objects while the game is still loaded
+        // (Azahar crashes if this comes after retro_unload_game).
+        if (hwActive_ && gameLoaded_ && hwCallback_.context_destroy) hwCallback_.context_destroy();
         if (gameLoaded_) api_.unload_game();
         if (initialized_) api_.deinit();
         if (initialized_) saveOptions();
         SDL_UnloadObject(lib_);
     }
+    hw_.destroy();
+    hwActive_ = false;
     lib_ = nullptr;
     gameLoaded_ = initialized_ = false;
     gameData_.clear();
@@ -154,21 +176,27 @@ void LibretroCore::unload() {
 }
 
 void LibretroCore::run() {
+    if (hwActive_) hw_.makeCurrent();
     if (frameTimeCb_.callback) frameTimeCb_.callback(frameTimeCb_.reference);
     audioBuf_.clear();
     api_.run();
     if (!audioBuf_.empty()) host_.onAudio(audioBuf_.data(), audioBuf_.size() / 2);
 }
 
-void LibretroCore::reset() { api_.reset(); }
+void LibretroCore::reset() {
+    if (hwActive_) hw_.makeCurrent();
+    api_.reset();
+}
 
 std::vector<uint8_t> LibretroCore::saveState() {
+    if (hwActive_) hw_.makeCurrent();
     std::vector<uint8_t> buf(api_.serialize_size());
     if (buf.empty() || !api_.serialize(buf.data(), buf.size())) buf.clear();
     return buf;
 }
 
 bool LibretroCore::loadState(const std::vector<uint8_t>& data) {
+    if (hwActive_) hw_.makeCurrent();
     return !data.empty() && api_.unserialize(data.data(), data.size());
 }
 
@@ -337,20 +365,35 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
         av_.geometry.base_width = g->base_width;
         av_.geometry.base_height = g->base_height;
         av_.geometry.aspect_ratio = g->aspect_ratio;
+        if (hwActive_) resizeHwFramebuffer();
         host_.onAvInfoChanged();
         return true;
     }
     case RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO:
         av_ = *static_cast<const retro_system_av_info*>(data);
+        if (hwActive_) resizeHwFramebuffer();
         host_.onAvInfoChanged();
         return true;
-    case RETRO_ENVIRONMENT_SET_HW_RENDER:
-    case RETRO_ENVIRONMENT_SET_HW_SHARED_CONTEXT:
+    case RETRO_ENVIRONMENT_SET_HW_RENDER: {
+        // GPU rendering: give the core an OpenGL context + framebuffer of its own.
+        auto* cb = static_cast<retro_hw_render_callback*>(data);
         hwRequested_ = true;
-        cbLog(RETRO_LOG_WARN, "Core asked for GPU rendering; not supported yet.\n");
-        return false;
+        hwActive_ = false;
+        if (!hw_.create(*cb, hwError_)) {
+            cbLog(RETRO_LOG_WARN, "GPU rendering unavailable: %s\n", hwError_.c_str());
+            return false;
+        }
+        cb->get_current_framebuffer = cbGetFramebuffer;
+        cb->get_proc_address = cbGetProcAddress;
+        hwCallback_ = *cb;
+        hwActive_ = true;
+        return true;
+    }
+    case RETRO_ENVIRONMENT_SET_HW_SHARED_CONTEXT:
+        return true;
     case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER:
-        return false;
+        *static_cast<unsigned*>(data) = RETRO_HW_CONTEXT_OPENGL_CORE;
+        return true;
     case RETRO_ENVIRONMENT_SET_ROTATION:
         // e.g. the DS "sideways" layouts: the core sends the picture upright and we turn it.
         rotation_ = *static_cast<const unsigned*>(data) % 4;
@@ -379,6 +422,11 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
         static_cast<retro_rumble_interface*>(data)->set_rumble_state = cbRumble;
         return true;
     case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
+        if (g_verboseCoreLog)  // handy when mapping a new system's buttons
+            for (auto* d = static_cast<const retro_input_descriptor*>(data); d && d->description; ++d)
+                std::fprintf(stderr, "[input] port %u device %u index %u id %u = %s\n", d->port, d->device, d->index,
+                             d->id, d->description);
+        return true;
     case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO:
         return true;
 
@@ -418,12 +466,23 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
     case RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS:
         return true;
     default:
+        if (g_verboseCoreLog) std::fprintf(stderr, "[env] unsupported request %u (0x%x)\n", cmd & 0xFFFF, cmd);
         return false;
     }
 }
 
 void LibretroCore::videoRefresh(const void* data, unsigned w, unsigned h, size_t pitch) {
-    if (!data || data == RETRO_HW_FRAME_BUFFER_VALID) return;  // duplicate frame: keep showing the last one
+    if (data == RETRO_HW_FRAME_BUFFER_VALID) {
+        // GPU-drawn frame: copy it out of the framebuffer.
+        if (const uint32_t* px = hwActive_ ? hw_.readFrame(w, h) : nullptr) {
+            host_.onVideo(px, w, h, size_t(w) * 4, RETRO_PIXEL_FORMAT_XRGB8888);
+            // Uploading may have switched to the window's own GL context (SDL's OpenGL renderer).
+            // The core keeps drawing after this callback returns, so give it its context back.
+            hw_.makeCurrent();
+        }
+        return;
+    }
+    if (!data) return;  // duplicate frame: keep showing the last one
     host_.onVideo(data, w, h, pitch, pixelFormat_);
 }
 

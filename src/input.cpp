@@ -6,10 +6,12 @@
 namespace {
 
 // Names used in the config file, indexed by RetroPad button id.
-const char* const kIds[Input::kButtons] = {"b", "y",     "select", "start", "up", "down", "left", "right",
-                                           "a", "x",     "l",      "r",     "l2", "r2",   "l3",   "r3"};
-const char* const kLabels[Input::kButtons] = {"B", "Y",      "Select", "Start", "Up", "Down", "Left", "Right",
-                                              "A", "X",      "L",      "R",     "L2", "R2",   "L3",   "R3"};
+const char* const kIds[Input::kBindable] = {"b",  "y",  "select", "start", "up", "down", "left", "right",
+                                            "a",  "x",  "l",      "r",     "l2", "r2",   "l3",   "r3",
+                                            "stick_up", "stick_down", "stick_left", "stick_right"};
+const char* const kLabels[Input::kBindable] = {"B",  "Y",  "Select", "Start", "Up", "Down", "Left", "Right",
+                                               "A",  "X",  "L",      "R",     "L2", "R2",   "L3",   "R3",
+                                               "Stick Up", "Stick Down", "Stick Left", "Stick Right"};
 
 constexpr int16_t kStickThreshold = 16000;
 constexpr int16_t kTriggerThreshold = 12000;
@@ -39,6 +41,10 @@ void Input::resetDefaults(int player) {
         m.keys[RETRO_DEVICE_ID_JOYPAD_R2] = SDL_SCANCODE_3;
         m.keys[RETRO_DEVICE_ID_JOYPAD_START] = SDL_SCANCODE_RETURN;
         m.keys[RETRO_DEVICE_ID_JOYPAD_SELECT] = SDL_SCANCODE_RSHIFT;
+        m.keys[kStickUp] = SDL_SCANCODE_I;
+        m.keys[kStickDown] = SDL_SCANCODE_K;
+        m.keys[kStickLeft] = SDL_SCANCODE_J;
+        m.keys[kStickRight] = SDL_SCANCODE_L;
     }
     // Controllers: by physical position (bottom face button = RetroPad B, right = A...).
     m.pad[RETRO_DEVICE_ID_JOYPAD_B] = btn(SDL_CONTROLLER_BUTTON_A);
@@ -103,7 +109,7 @@ void Input::load(const Config& cfg) {
     for (int p = 0; p < kMaxPlayers; ++p) {
         resetDefaults(p);
         const std::string prefix = "p" + std::to_string(p + 1) + ".";
-        for (int b = 0; b < kButtons; ++b) {
+        for (int b = 0; b < kBindable; ++b) {
             const std::string k = cfg.get(prefix + "key." + kIds[b]);
             if (!k.empty()) maps_[p].keys[b] = k == "none" ? SDL_SCANCODE_UNKNOWN : SDL_GetScancodeFromName(k.c_str());
             const std::string pd = cfg.get(prefix + "pad." + kIds[b]);
@@ -115,15 +121,15 @@ void Input::load(const Config& cfg) {
 void Input::save(Config& cfg) const {
     for (int p = 0; p < kMaxPlayers; ++p) {
         const std::string prefix = "p" + std::to_string(p + 1) + ".";
-        for (int b = 0; b < kButtons; ++b) {
+        for (int b = 0; b < kBindable; ++b) {
             const SDL_Scancode k = maps_[p].keys[b];
             cfg.set(prefix + "key." + kIds[b], k == SDL_SCANCODE_UNKNOWN ? "none" : SDL_GetScancodeName(k));
-            cfg.set(prefix + "pad." + kIds[b], padToString(maps_[p].pad[b]));
+            if (!isStickDirection(b)) cfg.set(prefix + "pad." + kIds[b], padToString(maps_[p].pad[b]));
         }
     }
 }
 
-const char* Input::buttonLabel(int button) { return button >= 0 && button < kButtons ? kLabels[button] : "?"; }
+const char* Input::buttonLabel(int button) { return button >= 0 && button < kBindable ? kLabels[button] : "?"; }
 
 std::string Input::keyName(SDL_Scancode key) {
     if (key == SDL_SCANCODE_UNKNOWN) return "";
@@ -285,11 +291,14 @@ int16_t Input::state(unsigned port, unsigned device, unsigned index, unsigned id
     }
     case RETRO_DEVICE_ANALOG: {
         SDL_GameController* gc = controllerForPort(int(port));
-        if (!gc) return 0;
+        if (!gc) return index == RETRO_DEVICE_INDEX_ANALOG_LEFT ? int16_t(keyStick(port, id)) : int16_t(0);
         auto clamp = [](int v) { return int16_t(std::max(-32767, std::min(32767, v))); };
-        if (index == RETRO_DEVICE_INDEX_ANALOG_LEFT)
+        if (index == RETRO_DEVICE_INDEX_ANALOG_LEFT) {
+            const int v = keyStick(port, id);
+            if (v != 0) return int16_t(v);
             return clamp(SDL_GameControllerGetAxis(gc, id == RETRO_DEVICE_ID_ANALOG_X ? SDL_CONTROLLER_AXIS_LEFTX
                                                                                       : SDL_CONTROLLER_AXIS_LEFTY));
+        }
         if (index == RETRO_DEVICE_INDEX_ANALOG_RIGHT)
             return clamp(SDL_GameControllerGetAxis(gc, id == RETRO_DEVICE_ID_ANALOG_X ? SDL_CONTROLLER_AXIS_RIGHTX
                                                                                       : SDL_CONTROLLER_AXIS_RIGHTY));
@@ -303,6 +312,16 @@ int16_t Input::state(unsigned port, unsigned device, unsigned index, unsigned id
     default:
         return 0;
     }
+}
+
+// Left stick pushed by keyboard keys (full tilt), or 0 if none are held.
+int Input::keyStick(unsigned port, unsigned axis) const {
+    if (!keyboardEnabled_) return 0;
+    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+    const PlayerMap& m = maps_[port];
+    auto held = [&](int b) { return m.keys[b] != SDL_SCANCODE_UNKNOWN && keys[m.keys[b]]; };
+    if (axis == RETRO_DEVICE_ID_ANALOG_X) return (held(kStickRight) ? 32767 : 0) - (held(kStickLeft) ? 32767 : 0);
+    return (held(kStickDown) ? 32767 : 0) - (held(kStickUp) ? 32767 : 0);
 }
 
 bool Input::rumble(unsigned port, retro_rumble_effect effect, uint16_t strength) {

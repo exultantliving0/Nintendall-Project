@@ -22,10 +22,10 @@ controller support (via SDL), saves and save states.
 | SNES | bsnes | runs (tested with test files only) |
 | Game Boy / Game Boy Color | SameBoy | runs (tested with test files only) |
 | Game Boy Advance | mGBA | runs (tested with test files only) |
-| Nintendo DS | melonDS DS | included, not yet tested with a real game |
+| Nintendo DS | melonDS DS | runs (tested with homebrew) |
 | Nintendo 64 | Mupen64Plus-Next | coming soon: needs GPU rendering |
 | GameCube / Wii | Dolphin | coming soon: needs GPU rendering |
-| 3DS | Azahar | coming soon: needs GPU rendering |
+| 3DS | Azahar | runs, drawn on the GPU (tested with homebrew; needs decrypted games) |
 | Wii U | Cemu | coming soon: needs GPU rendering |
 
 ## How auto-detection works
@@ -126,6 +126,23 @@ resizes to fit, and the layout is remembered for each game.
 
 The mouse is the stylus: click and drag on the touch screen, in any layout.
 
+### Nintendo 3DS
+
+3DS games are drawn on the graphics card with OpenGL 4.3 (most PCs from 2013
+on). If a PC can't provide that, Nintendall automatically falls back to the
+much slower software renderer. The Layout menu has Vertical, Side by Side,
+Large + Small Screen, Single Screen and Swap Screens for 3DS (no sideways
+layouts). Controls: the Circle Pad is a controller's left stick or I / J / K / L
+on the keyboard, the C-Stick is the right stick, ZL / ZR are the triggers (1 / 3),
+and the mouse is the stylus. Games must be decrypted dumps (.3ds / .cci / .cxi / .3dsx).
+
+### GPU rendering
+
+Cores that draw with OpenGL (3DS now; N64, GameCube/Wii and Wii U later) get
+their own OpenGL context on a hidden window and render into an offscreen
+framebuffer. Nintendall copies each finished frame into the normal window, so
+the window itself can use any renderer (Direct3D on Windows). See `src/hwrender.*`.
+
 ## Where files go
 
 User data lives in `~/.local/share/Nintendall/` (Linux),
@@ -147,6 +164,7 @@ beside it instead.
 | `src/detect.*` | works out the system from a file / zip / folder |
 | `src/systems.*` | the list of systems, extensions and the emulator for each |
 | `src/core.*` | loads a libretro core and implements the libretro API |
+| `src/hwrender.*` | OpenGL context + framebuffer for GPU-drawn cores (3DS) |
 | `src/app.*` | main window, menu actions, game loop, saves |
 | `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |
 | `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |

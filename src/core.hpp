@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "hwrender.hpp"
 #include "libretro.h"
 
 // What a running core needs from the app (screen, speakers, controllers...).
@@ -53,6 +54,8 @@ public:
     const std::string& name() const { return libraryName_; }
     const std::string& version() const { return libraryVersion_; }
     bool wantsHardwareRendering() const { return hwRequested_; }
+    bool usingHardwareRendering() const { return hwActive_; }
+    uintptr_t hwFramebuffer() const { return hw_.framebuffer(); }
     bool shutdownRequested() const { return shutdownRequested_; }
     // Screen rotation the core asked for, in 90 degree counter-clockwise steps (0-3).
     unsigned rotation() const { return rotation_; }
@@ -123,6 +126,11 @@ private:
     retro_pixel_format pixelFormat_ = RETRO_PIXEL_FORMAT_0RGB1555;
     retro_frame_time_callback frameTimeCb_{};
     bool hwRequested_ = false;
+    bool hwActive_ = false;
+    std::string hwError_;
+    HwRender hw_;
+    retro_hw_render_callback hwCallback_{};
+    void resizeHwFramebuffer();
     bool shutdownRequested_ = false;
     unsigned rotation_ = 0;
     std::vector<int16_t> audioBuf_;

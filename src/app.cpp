@@ -38,20 +38,25 @@ bool usesStickAsDpad(System s) {
 
 bool ctrlHeld(const SDL_Keysym& k) { return (k.mod & (KMOD_CTRL | KMOD_GUI)) != 0; }
 
-// Nintendo DS screen layouts (values of melonDS DS's "Screen Layout" option).
+// Two-screen layouts. DS values are melonDS DS's "Screen Layout" option; 3DS values are
+// Azahar's "Screen Layout" option (nullptr = the 3DS emulator can't do that layout).
 struct DsLayout {
     const char* label;
-    const char* value;    // normal
-    const char* swapped;  // with Swap Screens on
+    const char* value;    // DS, normal
+    const char* swapped;  // DS, with Swap Screens on
+    const char* ctr;      // 3DS (swap is a separate option there)
 };
 const DsLayout kDsLayouts[] = {
-    {"Vertical", "top-bottom", "bottom-top"},
-    {"Side by Side", "left-right", "right-left"},
-    {"Large + Small Screen", "largescreen-top", "largescreen-bottom"},
-    {"Single Screen", "top", "bottom"},
-    {"Sideways (Rotate Left)", "rotate-left", "rotate-left"},
-    {"Sideways (Rotate Right)", "rotate-right", "rotate-right"},
+    {"Vertical", "top-bottom", "bottom-top", "default"},
+    {"Side by Side", "left-right", "right-left", "side_by_side"},
+    {"Large + Small Screen", "largescreen-top", "largescreen-bottom", "large_screen"},
+    {"Single Screen", "top", "bottom", "single_screen"},
+    {"Sideways (Rotate Left)", "rotate-left", "rotate-left", nullptr},
+    {"Sideways (Rotate Right)", "rotate-right", "rotate-right", nullptr},
 };
+
+bool hasTwoScreens(System s) { return s == System::NDS || s == System::N3DS; }
+bool layoutAvailable(System s, int i) { return s == System::NDS || (s == System::N3DS && kDsLayouts[i].ctr); }
 constexpr int kDsLayoutCount = int(sizeof kDsLayouts / sizeof kDsLayouts[0]);
 constexpr int kFirstSideways = 4;
 
@@ -267,21 +272,33 @@ bool App::startGame(const fs::path& path) {
     }
 
     // 4. Start the emulator with the game.
-    core_ = std::make_unique<LibretroCore>(*this, paths_.system, paths_.saves,
-                                           paths_.config / (std::string(sys.core) + ".opt"));
     std::string err;
-    const bool coreLoaded = core_->load(corePath, err);
-    if (coreLoaded && det.system == System::NDS) {
-        system_ = det.system;
-        gameTitle_ = path.stem().u8string();
-        loadLayout();
-        core_->forceOption("melonds_show_current_layout", "disabled");  // we have our own menu
-        applyLayout();
-    }
-    if (!coreLoaded || !core_->loadGame(gameFile, err)) {
-        system_ = System::Unknown;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        core_ = std::make_unique<LibretroCore>(*this, paths_.system, paths_.saves,
+                                               paths_.config / (std::string(sys.core) + ".opt"));
+        const bool coreLoaded = core_->load(corePath, err);
+        if (coreLoaded && (det.system == System::NDS || det.system == System::N3DS)) {
+            system_ = det.system;
+            gameTitle_ = path.stem().u8string();
+            loadLayout();
+            if (det.system == System::NDS)
+                core_->forceOption("melonds_show_current_layout", "disabled");  // we have our own menu
+            else  // 3DS: draw with the GPU; software rendering is the slow fallback
+                core_->forceOption("citra_graphics_api", attempt == 0 ? "OpenGL" : "Software");
+            applyLayout();
+        }
+        if (coreLoaded && core_->loadGame(gameFile, err)) break;
+
+        // If this PC couldn't give the 3DS emulator OpenGL, try once more with software rendering.
+        const bool retry = attempt == 0 && det.system == System::N3DS && core_->wantsHardwareRendering() &&
+                           !core_->usingHardwareRendering();
         std::fprintf(stderr, "Core failed: %s\n", err.c_str());
         core_.reset();
+        if (!retry) break;
+        std::fprintf(stderr, "Retrying with software rendering\n");
+    }
+    if (!core_) {
+        system_ = System::Unknown;
         if (!extracted_.empty()) fs::remove(extracted_, ec);
         extracted_.clear();
         showMessage("Couldn't start the game",
@@ -485,10 +502,16 @@ void App::loadLayout() {
 }
 
 void App::applyLayout() {
-    if (!core_ || system_ != System::NDS) return;
+    if (!core_ || !hasTwoScreens(system_)) return;
+    if (!layoutAvailable(system_, layout_)) layout_ = 0;  // e.g. a sideways layout saved for a 3DS game
     const DsLayout& l = kDsLayouts[layout_];
-    core_->forceOption("melonds_number_of_screen_layouts", "1");
-    core_->forceOption("melonds_screen_layout1", layoutSwap_ ? l.swapped : l.value);
+    if (system_ == System::NDS) {
+        core_->forceOption("melonds_number_of_screen_layouts", "1");
+        core_->forceOption("melonds_screen_layout1", layoutSwap_ ? l.swapped : l.value);
+    } else {
+        core_->forceOption("citra_layout_option", l.ctr);
+        core_->forceOption("citra_swap_screen", layoutSwap_ ? "Bottom" : "Top");
+    }
 }
 
 void App::fitWindowToGame() {
@@ -501,14 +524,15 @@ void App::fitWindowToGame() {
     const float pr = video_.pixelRatio();
     const int bar = menu_.height(text_);
 
-    // Largest size (up to 3x) that fits on the screen, in half steps below 2x.
+    // Largest size (up to 3x) that fits on the screen.
     SDL_Rect usable{0, 0, 1280, 720};
     const int display = SDL_GetWindowDisplayIndex(win);
     SDL_GetDisplayUsableBounds(display < 0 ? 0 : display, &usable);
     const double maxH = usable.h * pr - 80 * text_.scale() - bar;
     const double maxW = usable.w * pr - 40 * text_.scale();
     double scale = std::min({3.0, maxH / baseH, maxW / (baseH * aspect)});
-    scale = scale >= 2.0 ? std::floor(scale) : std::max(1.0, std::floor(scale * 2) / 2);
+    // Whole steps from 2x, half steps from 1x, and below 1x (very large pictures) just fit the screen.
+    scale = scale >= 2.0 ? std::floor(scale) : scale >= 1.0 ? std::floor(scale * 2) / 2 : scale;
     const int h = int(std::lround(baseH * scale)) + bar;
     const int w = int(std::lround(baseH * scale * aspect));
     SDL_SetWindowSize(win, int(w / pr), int(h / pr));
@@ -654,7 +678,8 @@ void App::doAction(int a) {
         return;
     }
     if ((a >= ActLayout && a < ActLayout + kDsLayoutCount) || a == ActLayoutSwap) {
-        if (!core_ || system_ != System::NDS) return;
+        if (!core_ || !hasTwoScreens(system_)) return;
+        if (a != ActLayoutSwap && !layoutAvailable(system_, a - ActLayout)) return;
         if (a == ActLayoutSwap) layoutSwap_ = !layoutSwap_;
         else layout_ = a - ActLayout;
         cfg_.set("layout." + configSafe(gameTitle_), std::to_string(layout_) + (layoutSwap_ ? ",swap" : ""));
@@ -825,15 +850,17 @@ void App::buildMenus() {
     }
     menus.push_back(state);
 
-    // Layout: how the two DS screens are arranged (other systems have one screen).
-    const bool ds = game && system_ == System::NDS;
+    // Layout: how the two DS / 3DS screens are arranged (other systems have one screen).
+    const bool twoScreens = game && hasTwoScreens(system_);
     Menu layout{"Layout", {}};
     for (int i = 0; i < kDsLayoutCount; ++i) {
         if (i == kFirstSideways) layout.items.push_back({});
-        layout.items.push_back({kDsLayouts[i].label, "", ActLayout + i, ds, ds && layout_ == i});
+        const bool ok = twoScreens && layoutAvailable(system_, i);
+        layout.items.push_back({kDsLayouts[i].label, "", ActLayout + i, ok, ok && layout_ == i});
     }
     layout.items.push_back({});
-    layout.items.push_back({"Swap Screens", "", ActLayoutSwap, ds && layout_ < kFirstSideways, ds && layoutSwap_});
+    layout.items.push_back({"Swap Screens", "", ActLayoutSwap, twoScreens && layout_ < kFirstSideways,
+                            twoScreens && layoutSwap_});
     menus.push_back(layout);
 
     Menu options{"Options", {}};

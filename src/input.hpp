@@ -24,6 +24,9 @@ class Input {
 public:
     static constexpr int kMaxPlayers = 4;
     static constexpr int kButtons = 16;  // RetroPad button ids 0..15
+    // Extra keyboard-only bindings that push the left analog stick (3DS Circle Pad).
+    static constexpr int kStickUp = 16, kStickDown = 17, kStickLeft = 18, kStickRight = 19;
+    static constexpr int kBindable = 20;
 
     void init(const std::string& mappingDbPath);
     void shutdown();
@@ -53,6 +56,7 @@ public:
     void save(Config& cfg) const;
 
     static const char* buttonLabel(int button);  // "Up", "A", "Start"...
+    static bool isStickDirection(int button) { return button >= kStickUp && button <= kStickRight; }
     static std::string keyName(SDL_Scancode key);
     static std::string padName(PadBind bind);
     static uint16_t parseButtons(const std::string& list);
@@ -64,10 +68,11 @@ private:
         uint16_t rumbleStrong = 0, rumbleWeak = 0;
     };
     struct PlayerMap {
-        SDL_Scancode keys[kButtons]{};
-        PadBind pad[kButtons]{};
+        SDL_Scancode keys[kBindable]{};
+        PadBind pad[kBindable]{};  // stick directions (16-19) always use the real left stick
     };
     uint16_t buttonMask(unsigned port) const;
+    int keyStick(unsigned port, unsigned axis) const;
     static bool padActive(SDL_GameController* gc, PadBind b);
 
     std::vector<Pad> pads_;
