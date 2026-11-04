@@ -16,7 +16,7 @@ struct Color {
 // In headless mode (tests/benchmarks) no window is created; frames are just kept in memory.
 class Video {
 public:
-    bool init(bool headless, bool fullscreen, std::string& error);
+    bool init(bool headless, bool fullscreen, int width, int height, std::string& error);
     void shutdown();
 
     // Game picture
@@ -24,19 +24,21 @@ public:
     void setAspect(double aspect) { aspect_ = aspect; }
     void clearFrame();
     bool hasFrame() const { return frameW_ > 0; }
-    void drawGame();
+    void drawGame(const SDL_Rect& area);  // letterboxed into `area`
     bool saveScreenshot(const std::filesystem::path& path) const;
 
     // 2D drawing (UI)
     void clear(Color c);
     void fillRect(int x, int y, int w, int h, Color c);
-    void drawText(int x, int y, const std::string& text, int scale, Color c);
-    static int textWidth(const std::string& text, int scale);
+    void line(int x1, int y1, int x2, int y2, Color c);
     void present();
+    SDL_Renderer* renderer() const { return renderer_; }
 
     int width() const { return outW_; }
     int height() const { return outH_; }
     void toggleFullscreen();
+    bool isFullscreen() const;
+    float pixelRatio() const;  // renderer pixels per window unit (2 on Retina Macs)
     void setVsync(bool on);
     bool vsync() const { return vsync_; }
     double displayHz() const;
@@ -46,14 +48,12 @@ public:
 
 private:
     void ensureTexture(unsigned w, unsigned h, Uint32 format);
-    void buildFontTexture();
 
     bool headless_ = false;
     bool vsync_ = false;
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     SDL_Texture* frameTex_ = nullptr;
-    SDL_Texture* fontTex_ = nullptr;
     int texW_ = 0, texH_ = 0;
     Uint32 texFormat_ = 0;
     int outW_ = 960, outH_ = 720;

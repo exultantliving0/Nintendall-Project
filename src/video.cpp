@@ -3,17 +3,16 @@
 #include <algorithm>
 #include <cstring>
 
-#include "font.hpp"
 #include "png.hpp"
 
-bool Video::init(bool headless, bool fullscreen, std::string& error) {
+bool Video::init(bool headless, bool fullscreen, int width, int height, std::string& error) {
     headless_ = headless;
     if (headless_) return true;
 
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");  // sharp pixels
     Uint32 flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
     if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
-    window_ = SDL_CreateWindow("Nintendall", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 960, 720, flags);
+    window_ = SDL_CreateWindow("Nintendall", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
     if (!window_) {
         error = std::string("Couldn't create window: ") + SDL_GetError();
         return false;
@@ -26,17 +25,15 @@ bool Video::init(bool headless, bool fullscreen, std::string& error) {
     }
     vsync_ = true;
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-    buildFontTexture();
     onResize();
     return true;
 }
 
 void Video::shutdown() {
     if (frameTex_) SDL_DestroyTexture(frameTex_);
-    if (fontTex_) SDL_DestroyTexture(fontTex_);
     if (renderer_) SDL_DestroyRenderer(renderer_);
     if (window_) SDL_DestroyWindow(window_);
-    frameTex_ = fontTex_ = nullptr;
+    frameTex_ = nullptr;
     renderer_ = nullptr;
     window_ = nullptr;
 }
@@ -50,6 +47,17 @@ void Video::toggleFullscreen() {
     const bool fs = SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN_DESKTOP;
     SDL_SetWindowFullscreen(window_, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
     onResize();
+}
+
+bool Video::isFullscreen() const {
+    return window_ && (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN_DESKTOP);
+}
+
+float Video::pixelRatio() const {
+    if (!window_) return 1.0f;
+    int ww = 0, wh = 0;
+    SDL_GetWindowSize(window_, &ww, &wh);
+    return ww > 0 ? float(outW_) / float(ww) : 1.0f;
 }
 
 void Video::setVsync(bool on) {
@@ -112,16 +120,16 @@ void Video::clearFrame() {
     frame_.clear();
 }
 
-void Video::drawGame() {
-    if (!renderer_ || !frameTex_ || frameW_ == 0) return;
+void Video::drawGame(const SDL_Rect& area) {
+    if (!renderer_ || !frameTex_ || frameW_ == 0 || area.w <= 0 || area.h <= 0) return;
     const double aspect = aspect_ > 0 ? aspect_ : double(frameW_) / frameH_;
-    int w = outW_, h = int(outW_ / aspect);
-    if (h > outH_) {
-        h = outH_;
-        w = int(outH_ * aspect);
+    int w = area.w, h = int(area.w / aspect);
+    if (h > area.h) {
+        h = area.h;
+        w = int(area.h * aspect);
     }
     SDL_Rect src{0, 0, int(frameW_), int(frameH_)};
-    SDL_Rect dst{(outW_ - w) / 2, (outH_ - h) / 2, w, h};
+    SDL_Rect dst{area.x + (area.w - w) / 2, area.y + (area.h - h) / 2, w, h};
     SDL_RenderCopy(renderer_, frameTex_, &src, &dst);
 }
 
@@ -158,21 +166,6 @@ bool Video::saveScreenshot(const std::filesystem::path& path) const {
 
 // --- 2D drawing ---------------------------------------------------------------
 
-void Video::buildFontTexture() {
-    // 95 glyphs side by side, white on transparent; tinted at draw time.
-    const int w = 95 * font::kCellW, h = font::kGlyphH;
-    std::vector<uint32_t> px(size_t(w) * h, 0);
-    for (int g = 0; g < 95; ++g) {
-        const uint8_t* rows = font::glyph(char(32 + g));
-        for (int y = 0; y < font::kGlyphH; ++y)
-            for (int x = 0; x < font::kGlyphW; ++x)
-                if (rows[y] & (0x10 >> x)) px[size_t(y) * w + g * font::kCellW + x] = 0xFFFFFFFF;
-    }
-    fontTex_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, w, h);
-    SDL_UpdateTexture(fontTex_, nullptr, px.data(), w * 4);
-    SDL_SetTextureBlendMode(fontTex_, SDL_BLENDMODE_BLEND);
-}
-
 void Video::clear(Color c) {
     if (!renderer_) return;
     SDL_SetRenderDrawColor(renderer_, c.r, c.g, c.b, 255);
@@ -186,21 +179,10 @@ void Video::fillRect(int x, int y, int w, int h, Color c) {
     SDL_RenderFillRect(renderer_, &r);
 }
 
-int Video::textWidth(const std::string& text, int scale) { return int(text.size()) * font::kCellW * scale; }
-
-void Video::drawText(int x, int y, const std::string& text, int scale, Color c) {
-    if (!renderer_ || !fontTex_) return;
-    SDL_SetTextureColorMod(fontTex_, c.r, c.g, c.b);
-    SDL_SetTextureAlphaMod(fontTex_, c.a);
-    int cx = x;
-    for (char ch : text) {
-        unsigned char u = static_cast<unsigned char>(ch);
-        if (u < 32 || u > 126) u = '?';
-        SDL_Rect src{(u - 32) * font::kCellW, 0, font::kGlyphW, font::kGlyphH};
-        SDL_Rect dst{cx, y, font::kGlyphW * scale, font::kGlyphH * scale};
-        if (u != ' ') SDL_RenderCopy(renderer_, fontTex_, &src, &dst);
-        cx += font::kCellW * scale;
-    }
+void Video::line(int x1, int y1, int x2, int y2, Color c) {
+    if (!renderer_) return;
+    SDL_SetRenderDrawColor(renderer_, c.r, c.g, c.b, c.a);
+    SDL_RenderDrawLine(renderer_, x1, y1, x2, y2);
 }
 
 void Video::present() {

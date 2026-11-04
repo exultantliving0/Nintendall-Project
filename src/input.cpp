@@ -5,51 +5,173 @@
 
 namespace {
 
-// RetroPad button -> controller button, by physical position
-// (bottom face button = RetroPad B, right = A, left = Y, top = X).
-struct PadMap {
-    unsigned retro;
-    SDL_GameControllerButton button;
-};
-const PadMap kPadMap[] = {
-    {RETRO_DEVICE_ID_JOYPAD_B, SDL_CONTROLLER_BUTTON_A},
-    {RETRO_DEVICE_ID_JOYPAD_A, SDL_CONTROLLER_BUTTON_B},
-    {RETRO_DEVICE_ID_JOYPAD_Y, SDL_CONTROLLER_BUTTON_X},
-    {RETRO_DEVICE_ID_JOYPAD_X, SDL_CONTROLLER_BUTTON_Y},
-    {RETRO_DEVICE_ID_JOYPAD_SELECT, SDL_CONTROLLER_BUTTON_BACK},
-    {RETRO_DEVICE_ID_JOYPAD_START, SDL_CONTROLLER_BUTTON_START},
-    {RETRO_DEVICE_ID_JOYPAD_UP, SDL_CONTROLLER_BUTTON_DPAD_UP},
-    {RETRO_DEVICE_ID_JOYPAD_DOWN, SDL_CONTROLLER_BUTTON_DPAD_DOWN},
-    {RETRO_DEVICE_ID_JOYPAD_LEFT, SDL_CONTROLLER_BUTTON_DPAD_LEFT},
-    {RETRO_DEVICE_ID_JOYPAD_RIGHT, SDL_CONTROLLER_BUTTON_DPAD_RIGHT},
-    {RETRO_DEVICE_ID_JOYPAD_L, SDL_CONTROLLER_BUTTON_LEFTSHOULDER},
-    {RETRO_DEVICE_ID_JOYPAD_R, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER},
-    {RETRO_DEVICE_ID_JOYPAD_L3, SDL_CONTROLLER_BUTTON_LEFTSTICK},
-    {RETRO_DEVICE_ID_JOYPAD_R3, SDL_CONTROLLER_BUTTON_RIGHTSTICK},
-};
-
-// Keyboard defaults for player 1 (same layout as other popular emulators).
-struct KeyMap {
-    unsigned retro;
-    SDL_Scancode key;
-};
-const KeyMap kKeyMap[] = {
-    {RETRO_DEVICE_ID_JOYPAD_UP, SDL_SCANCODE_UP},       {RETRO_DEVICE_ID_JOYPAD_DOWN, SDL_SCANCODE_DOWN},
-    {RETRO_DEVICE_ID_JOYPAD_LEFT, SDL_SCANCODE_LEFT},   {RETRO_DEVICE_ID_JOYPAD_RIGHT, SDL_SCANCODE_RIGHT},
-    {RETRO_DEVICE_ID_JOYPAD_A, SDL_SCANCODE_X},         {RETRO_DEVICE_ID_JOYPAD_B, SDL_SCANCODE_Z},
-    {RETRO_DEVICE_ID_JOYPAD_X, SDL_SCANCODE_S},         {RETRO_DEVICE_ID_JOYPAD_Y, SDL_SCANCODE_A},
-    {RETRO_DEVICE_ID_JOYPAD_L, SDL_SCANCODE_Q},         {RETRO_DEVICE_ID_JOYPAD_R, SDL_SCANCODE_W},
-    {RETRO_DEVICE_ID_JOYPAD_L2, SDL_SCANCODE_1},        {RETRO_DEVICE_ID_JOYPAD_R2, SDL_SCANCODE_3},
-    {RETRO_DEVICE_ID_JOYPAD_START, SDL_SCANCODE_RETURN}, {RETRO_DEVICE_ID_JOYPAD_SELECT, SDL_SCANCODE_RSHIFT},
-    {RETRO_DEVICE_ID_JOYPAD_SELECT, SDL_SCANCODE_BACKSPACE},
-};
+// Names used in the config file, indexed by RetroPad button id.
+const char* const kIds[Input::kButtons] = {"b", "y",     "select", "start", "up", "down", "left", "right",
+                                           "a", "x",     "l",      "r",     "l2", "r2",   "l3",   "r3"};
+const char* const kLabels[Input::kButtons] = {"B", "Y",      "Select", "Start", "Up", "Down", "Left", "Right",
+                                              "A", "X",      "L",      "R",     "L2", "R2",   "L3",   "R3"};
 
 constexpr int16_t kStickThreshold = 16000;
 constexpr int16_t kTriggerThreshold = 12000;
 
+PadBind btn(SDL_GameControllerButton b) { return {PadBind::Button, uint8_t(b)}; }
+
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// Mapping
+
+void Input::resetDefaults(int player) {
+    PlayerMap& m = maps_[player];
+    for (auto& k : m.keys) k = SDL_SCANCODE_UNKNOWN;
+    if (player == 0) {
+        m.keys[RETRO_DEVICE_ID_JOYPAD_UP] = SDL_SCANCODE_UP;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_DOWN] = SDL_SCANCODE_DOWN;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_LEFT] = SDL_SCANCODE_LEFT;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_RIGHT] = SDL_SCANCODE_RIGHT;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_A] = SDL_SCANCODE_X;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_B] = SDL_SCANCODE_Z;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_X] = SDL_SCANCODE_S;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_Y] = SDL_SCANCODE_A;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_L] = SDL_SCANCODE_Q;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_R] = SDL_SCANCODE_W;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_L2] = SDL_SCANCODE_1;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_R2] = SDL_SCANCODE_3;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_START] = SDL_SCANCODE_RETURN;
+        m.keys[RETRO_DEVICE_ID_JOYPAD_SELECT] = SDL_SCANCODE_RSHIFT;
+    }
+    // Controllers: by physical position (bottom face button = RetroPad B, right = A...).
+    m.pad[RETRO_DEVICE_ID_JOYPAD_B] = btn(SDL_CONTROLLER_BUTTON_A);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_A] = btn(SDL_CONTROLLER_BUTTON_B);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_Y] = btn(SDL_CONTROLLER_BUTTON_X);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_X] = btn(SDL_CONTROLLER_BUTTON_Y);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_SELECT] = btn(SDL_CONTROLLER_BUTTON_BACK);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_START] = btn(SDL_CONTROLLER_BUTTON_START);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_UP] = btn(SDL_CONTROLLER_BUTTON_DPAD_UP);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_DOWN] = btn(SDL_CONTROLLER_BUTTON_DPAD_DOWN);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_LEFT] = btn(SDL_CONTROLLER_BUTTON_DPAD_LEFT);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_RIGHT] = btn(SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_L] = btn(SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_R] = btn(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_L2] = {PadBind::AxisPos, uint8_t(SDL_CONTROLLER_AXIS_TRIGGERLEFT)};
+    m.pad[RETRO_DEVICE_ID_JOYPAD_R2] = {PadBind::AxisPos, uint8_t(SDL_CONTROLLER_AXIS_TRIGGERRIGHT)};
+    m.pad[RETRO_DEVICE_ID_JOYPAD_L3] = btn(SDL_CONTROLLER_BUTTON_LEFTSTICK);
+    m.pad[RETRO_DEVICE_ID_JOYPAD_R3] = btn(SDL_CONTROLLER_BUTTON_RIGHTSTICK);
+}
+
+void Input::setKey(int player, int button, SDL_Scancode key) {
+    PlayerMap& m = maps_[player];
+    if (key != SDL_SCANCODE_UNKNOWN)
+        for (auto& k : m.keys)
+            if (k == key) k = SDL_SCANCODE_UNKNOWN;  // one key can't drive two buttons
+    m.keys[button] = key;
+}
+
+void Input::setPad(int player, int button, PadBind bind) {
+    PlayerMap& m = maps_[player];
+    if (bind.kind != PadBind::None)
+        for (auto& p : m.pad)
+            if (p == bind) p = PadBind{};
+    m.pad[button] = bind;
+}
+
+static std::string padToString(PadBind b) {
+    switch (b.kind) {
+    case PadBind::Button: return std::string("button:") + SDL_GameControllerGetStringForButton(SDL_GameControllerButton(b.index));
+    case PadBind::AxisPos: return std::string("axis+:") + SDL_GameControllerGetStringForAxis(SDL_GameControllerAxis(b.index));
+    case PadBind::AxisNeg: return std::string("axis-:") + SDL_GameControllerGetStringForAxis(SDL_GameControllerAxis(b.index));
+    default: return "none";
+    }
+}
+
+static PadBind padFromString(const std::string& s, PadBind fallback) {
+    if (s == "none") return {};
+    const auto colon = s.find(':');
+    if (colon == std::string::npos) return fallback;
+    const std::string kind = s.substr(0, colon), name = s.substr(colon + 1);
+    if (kind == "button") {
+        const auto b = SDL_GameControllerGetButtonFromString(name.c_str());
+        if (b != SDL_CONTROLLER_BUTTON_INVALID) return {PadBind::Button, uint8_t(b)};
+    } else if (kind == "axis+" || kind == "axis-") {
+        const auto a = SDL_GameControllerGetAxisFromString(name.c_str());
+        if (a != SDL_CONTROLLER_AXIS_INVALID) return {kind == "axis+" ? PadBind::AxisPos : PadBind::AxisNeg, uint8_t(a)};
+    }
+    return fallback;
+}
+
+void Input::load(const Config& cfg) {
+    for (int p = 0; p < kMaxPlayers; ++p) {
+        resetDefaults(p);
+        const std::string prefix = "p" + std::to_string(p + 1) + ".";
+        for (int b = 0; b < kButtons; ++b) {
+            const std::string k = cfg.get(prefix + "key." + kIds[b]);
+            if (!k.empty()) maps_[p].keys[b] = k == "none" ? SDL_SCANCODE_UNKNOWN : SDL_GetScancodeFromName(k.c_str());
+            const std::string pd = cfg.get(prefix + "pad." + kIds[b]);
+            if (!pd.empty()) maps_[p].pad[b] = padFromString(pd, maps_[p].pad[b]);
+        }
+    }
+}
+
+void Input::save(Config& cfg) const {
+    for (int p = 0; p < kMaxPlayers; ++p) {
+        const std::string prefix = "p" + std::to_string(p + 1) + ".";
+        for (int b = 0; b < kButtons; ++b) {
+            const SDL_Scancode k = maps_[p].keys[b];
+            cfg.set(prefix + "key." + kIds[b], k == SDL_SCANCODE_UNKNOWN ? "none" : SDL_GetScancodeName(k));
+            cfg.set(prefix + "pad." + kIds[b], padToString(maps_[p].pad[b]));
+        }
+    }
+}
+
+const char* Input::buttonLabel(int button) { return button >= 0 && button < kButtons ? kLabels[button] : "?"; }
+
+std::string Input::keyName(SDL_Scancode key) {
+    if (key == SDL_SCANCODE_UNKNOWN) return "";
+    const char* n = SDL_GetScancodeName(key);
+    return n && *n ? n : "Key " + std::to_string(int(key));
+}
+
+std::string Input::padName(PadBind b) {
+    if (b.kind == PadBind::Button) {
+        switch (SDL_GameControllerButton(b.index)) {
+        case SDL_CONTROLLER_BUTTON_A: return "Bottom button";
+        case SDL_CONTROLLER_BUTTON_B: return "Right button";
+        case SDL_CONTROLLER_BUTTON_X: return "Left button";
+        case SDL_CONTROLLER_BUTTON_Y: return "Top button";
+        case SDL_CONTROLLER_BUTTON_BACK: return "Select / Back";
+        case SDL_CONTROLLER_BUTTON_GUIDE: return "Home / Guide";
+        case SDL_CONTROLLER_BUTTON_START: return "Start";
+        case SDL_CONTROLLER_BUTTON_LEFTSTICK: return "Left stick click";
+        case SDL_CONTROLLER_BUTTON_RIGHTSTICK: return "Right stick click";
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return "Left bumper";
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return "Right bumper";
+        case SDL_CONTROLLER_BUTTON_DPAD_UP: return "D-pad Up";
+        case SDL_CONTROLLER_BUTTON_DPAD_DOWN: return "D-pad Down";
+        case SDL_CONTROLLER_BUTTON_DPAD_LEFT: return "D-pad Left";
+        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return "D-pad Right";
+        default: return std::string("Button ") + std::to_string(int(b.index));
+        }
+    }
+    if (b.kind == PadBind::AxisPos || b.kind == PadBind::AxisNeg) {
+        const bool pos = b.kind == PadBind::AxisPos;
+        switch (SDL_GameControllerAxis(b.index)) {
+        case SDL_CONTROLLER_AXIS_TRIGGERLEFT: return "Left trigger";
+        case SDL_CONTROLLER_AXIS_TRIGGERRIGHT: return "Right trigger";
+        case SDL_CONTROLLER_AXIS_LEFTX: return pos ? "Left stick Right" : "Left stick Left";
+        case SDL_CONTROLLER_AXIS_LEFTY: return pos ? "Left stick Down" : "Left stick Up";
+        case SDL_CONTROLLER_AXIS_RIGHTX: return pos ? "Right stick Right" : "Right stick Left";
+        case SDL_CONTROLLER_AXIS_RIGHTY: return pos ? "Right stick Down" : "Right stick Up";
+        default: return "Axis";
+        }
+    }
+    return "";
+}
+
+// ---------------------------------------------------------------------------
+// Devices
+
 void Input::init(const std::string& mappingDbPath) {
+    for (int p = 0; p < kMaxPlayers; ++p) resetDefaults(p);
     // Extra controller mappings (community gamecontrollerdb.txt) if the user provides one.
     if (!mappingDbPath.empty()) SDL_GameControllerAddMappingsFromFile(mappingDbPath.c_str());
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
@@ -102,29 +224,45 @@ SDL_GameController* Input::controllerForPort(int port) const {
     return port >= 0 && port < int(pads_.size()) ? pads_[size_t(port)].gc : nullptr;
 }
 
+int Input::portForController(SDL_JoystickID id) const {
+    for (size_t i = 0; i < pads_.size(); ++i)
+        if (pads_[i].id == id) return int(i);
+    return -1;
+}
+
 std::string Input::controllerName(int port) const {
     SDL_GameController* gc = controllerForPort(port);
     const char* n = gc ? SDL_GameControllerName(gc) : nullptr;
     return n ? n : "";
 }
 
+// ---------------------------------------------------------------------------
+// Game input
+
+bool Input::padActive(SDL_GameController* gc, PadBind b) {
+    switch (b.kind) {
+    case PadBind::Button: return SDL_GameControllerGetButton(gc, SDL_GameControllerButton(b.index));
+    case PadBind::AxisPos: {
+        const auto axis = SDL_GameControllerAxis(b.index);
+        const bool trigger = axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT;
+        return SDL_GameControllerGetAxis(gc, axis) > (trigger ? kTriggerThreshold : kStickThreshold);
+    }
+    case PadBind::AxisNeg: return SDL_GameControllerGetAxis(gc, SDL_GameControllerAxis(b.index)) < -kStickThreshold;
+    default: return false;
+    }
+}
+
 uint16_t Input::buttonMask(unsigned port) const {
-    uint16_t mask = 0;
-    if (port == 0) {
-        mask |= forced_;
-        if (keyboardEnabled_) {
-            const Uint8* keys = SDL_GetKeyboardState(nullptr);
-            for (const auto& k : kKeyMap)
-                if (keys[k.key]) mask |= uint16_t(1u << k.retro);
-        }
+    uint16_t mask = port == 0 ? forced_ : 0;
+    const PlayerMap& m = maps_[port];
+    if (keyboardEnabled_) {
+        const Uint8* keys = SDL_GetKeyboardState(nullptr);
+        for (int b = 0; b < kButtons; ++b)
+            if (m.keys[b] != SDL_SCANCODE_UNKNOWN && keys[m.keys[b]]) mask |= uint16_t(1u << b);
     }
     if (SDL_GameController* gc = controllerForPort(int(port))) {
-        for (const auto& m : kPadMap)
-            if (SDL_GameControllerGetButton(gc, m.button)) mask |= uint16_t(1u << m.retro);
-        if (SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > kTriggerThreshold)
-            mask |= 1u << RETRO_DEVICE_ID_JOYPAD_L2;
-        if (SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > kTriggerThreshold)
-            mask |= 1u << RETRO_DEVICE_ID_JOYPAD_R2;
+        for (int b = 0; b < kButtons; ++b)
+            if (padActive(gc, m.pad[b])) mask |= uint16_t(1u << b);
         if (stickAsDpad_) {
             const int x = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX);
             const int y = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY);
@@ -182,22 +320,14 @@ void Input::stopAllRumble() {
 }
 
 uint16_t Input::parseButtons(const std::string& list) {
-    static const struct { const char* name; unsigned id; } names[] = {
-        {"b", RETRO_DEVICE_ID_JOYPAD_B},       {"y", RETRO_DEVICE_ID_JOYPAD_Y},
-        {"select", RETRO_DEVICE_ID_JOYPAD_SELECT}, {"start", RETRO_DEVICE_ID_JOYPAD_START},
-        {"up", RETRO_DEVICE_ID_JOYPAD_UP},     {"down", RETRO_DEVICE_ID_JOYPAD_DOWN},
-        {"left", RETRO_DEVICE_ID_JOYPAD_LEFT}, {"right", RETRO_DEVICE_ID_JOYPAD_RIGHT},
-        {"a", RETRO_DEVICE_ID_JOYPAD_A},       {"x", RETRO_DEVICE_ID_JOYPAD_X},
-        {"l", RETRO_DEVICE_ID_JOYPAD_L},       {"r", RETRO_DEVICE_ID_JOYPAD_R},
-    };
     uint16_t mask = 0;
     size_t start = 0;
     while (start <= list.size()) {
-        size_t comma = list.find(',', start);
+        const size_t comma = list.find(',', start);
         std::string tok = list.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
         std::transform(tok.begin(), tok.end(), tok.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-        for (const auto& n : names)
-            if (tok == n.name) mask |= uint16_t(1u << n.id);
+        for (int b = 0; b < kButtons; ++b)
+            if (tok == kIds[b]) mask |= uint16_t(1u << b);
         if (comma == std::string::npos) break;
         start = comma + 1;
     }

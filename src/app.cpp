@@ -2,57 +2,27 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
 
+#include "filedialog.hpp"
+
 namespace fs = std::filesystem;
 
 namespace {
 
-const Color kBg{16, 16, 26};
-const Color kPanel{28, 28, 44};
-const Color kAccent{232, 48, 64};
-const Color kText{236, 236, 246};
-const Color kDim{130, 130, 156};
-const Color kGood{96, 220, 128};
-const Color kSelect{58, 58, 104};
-const Color kWarn{250, 190, 80};
+const Color kBlack{0, 0, 0};
+const Color kHint{140, 140, 140};
+const Color kHintDim{90, 90, 90};
+const Color kWhite{255, 255, 255};
+
+constexpr int kDefaultBaseW = 256, kDefaultBaseH = 240;  // NES picture, used before any game is loaded
+constexpr double kDefaultAspect = 256.0 * 8.0 / 7.0 / 240.0;
 
 double nowSeconds() { return double(SDL_GetPerformanceCounter()) / double(SDL_GetPerformanceFrequency()); }
-
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-    return s;
-}
-
-// Fit a string into maxChars, keeping the end visible if keepEnd (for paths).
-std::string fit(const std::string& s, int maxChars, bool keepEnd = false) {
-    if (maxChars <= 3) return "";
-    if (int(s.size()) <= maxChars) return s;
-    if (keepEnd) return "..." + s.substr(s.size() - size_t(maxChars - 3));
-    return s.substr(0, size_t(maxChars - 3)) + "...";
-}
-
-std::vector<std::string> wrap(const std::string& text, int maxChars) {
-    std::vector<std::string> lines;
-    size_t start = 0;
-    while (start <= text.size()) {
-        size_t nl = text.find('\n', start);
-        std::string para = text.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
-        while (int(para.size()) > maxChars) {
-            size_t cut = para.rfind(' ', size_t(maxChars));
-            if (cut == std::string::npos || cut == 0) cut = size_t(maxChars);
-            lines.push_back(para.substr(0, cut));
-            para = para.substr(cut + (para[cut] == ' ' ? 1 : 0));
-        }
-        lines.push_back(para);
-        if (nl == std::string::npos) break;
-        start = nl + 1;
-    }
-    return lines;
-}
 
 // Systems that have no analog stick, so the left stick should drive the D-pad.
 bool usesStickAsDpad(System s) {
@@ -68,6 +38,8 @@ bool usesStickAsDpad(System s) {
     }
 }
 
+bool ctrlHeld(const SDL_Keysym& k) { return (k.mod & (KMOD_CTRL | KMOD_GUI)) != 0; }
+
 }  // namespace
 
 // ============================================================================
@@ -78,19 +50,44 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
     paths_.init();
     cfg_.load(paths_.data / "nintendall.cfg");
 
+    // Default window: the largest of 3x / 2x NES size that fits on the screen.
+    float dpi = 1.0f;
+#if defined(_WIN32)
+    float hdpi = 96.0f;
+    if (!opt.headless && SDL_GetDisplayDPI(0, nullptr, &hdpi, nullptr) == 0 && hdpi > 0) dpi = hdpi / 96.0f;
+#endif
+    int winScale = 3;
+    SDL_Rect usable{0, 0, 1280, 720};
+    if (!opt.headless) SDL_GetDisplayUsableBounds(0, &usable);
+    while (winScale > 1 && (kDefaultBaseH * winScale + 60) * dpi > usable.h) --winScale;
+    const int winH = int((kDefaultBaseH * winScale + 24) * dpi);
+    const int winW = int(kDefaultBaseH * winScale * kDefaultAspect * dpi);
+
     std::string err;
-    if (!video_.init(opt.headless, opt.fullscreen, err)) {
+    if (!video_.init(opt.headless, opt.fullscreen, winW, winH, err)) {
         std::fprintf(stderr, "%s\n", err.c_str());
         return 1;
     }
     if (!opt.headless) {
+        const std::vector<fs::path> fonts = {
+#if defined(_WIN32)
+            fs::u8path(SDL_getenv("WINDIR") ? SDL_getenv("WINDIR") : "C:\\Windows") / "Fonts" / "segoeui.ttf",
+#endif
+            paths_.base / "fonts" / "DejaVuSans.ttf",
+            paths_.base / ".." / "assets" / "fonts" / "DejaVuSans.ttf",
+        };
+        if (!text_.init(video_.renderer(), fonts, err)) {
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Nintendall", err.c_str(), video_.window());
+            return 1;
+        }
+        text_.setScale(uiScale());
         audio_.init();
         fs::path db = paths_.base / "gamecontrollerdb.txt";
         if (!fs::exists(db)) db = paths_.data / "gamecontrollerdb.txt";
         input_.init(fs::exists(db) ? db.u8string() : "");
+        input_.load(cfg_);
     }
     input_.setForcedButtons(opt.holdButtons);
-    refreshCores();
 
     // Headless: load the game, run N frames as fast as possible, report, exit.
     if (opt.headless) {
@@ -108,47 +105,39 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         return 0;
     }
 
-    // Normal start: a game path launches straight into the game; a folder opens the library there.
     std::error_code ec;
-    fs::path libDir = fs::u8path(cfg_.get("last_dir"));
-    if (libDir.empty() || !fs::is_directory(libDir, ec)) {
-        const char* home = SDL_getenv("HOME");
-        if (!home) home = SDL_getenv("USERPROFILE");
-        libDir = home ? fs::u8path(home) : fs::current_path();
-    }
-    if (!start.empty() && fs::is_directory(start, ec) && detectGame(start).system == System::Unknown) {
-        libDir = start;
-    }
-    openDir(libDir);
-    if (!start.empty() && !(fs::is_directory(start, ec) && detectGame(start).system == System::Unknown)) {
-        startGame(start);
-    }
+    draw();  // show the window before any message box can pop up
+    if (!start.empty() && !fs::is_directory(start, ec)) startGame(start);
+    else if (!start.empty() && detectGame(start).system != System::Unknown) startGame(start);  // Wii U folder
 
     nextFrame_ = nowSeconds();
     while (!quit_) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) handleEvent(e);
-        updateHeldNav();
+        if (buttonConfig_.takeChanged()) saveConfig();
 
-        if (screen_ == Screen::Game) {
-            gameFrame();
-            continue;
-        }
-        video_.clear(kBg);
-        switch (screen_) {
-        case Screen::Library: drawLibrary(); break;
-        case Screen::Pause: drawPause(); break;
-        case Screen::Error: drawError(); break;
-        default: break;
-        }
-        drawOsd();
-        video_.present();
-        pace(1.0 / 60.0);
+        const bool modal = menu_.isOpen() || buttonConfig_.isOpen();
+        const bool running = core_ && !paused_ && !focusLost_ && !modal;
+        input_.setKeyboardEnabled(!modal);
+        if (wasRunning_ && !running) audio_.clear();  // silence while paused / in menus
+        if (running && !wasRunning_) nextFrame_ = nowSeconds();
+        wasRunning_ = running;
+
+        if (running) runFrames();
+        text_.setScale(uiScale());
+        draw();
+
+        // Hide the mouse pointer while playing fullscreen.
+        const bool hideCursor = running && video_.isFullscreen() && SDL_GetTicks() - lastMouseMove_ > 2000;
+        SDL_ShowCursor(hideCursor ? SDL_DISABLE : SDL_ENABLE);
+
+        if (running) pace(fastForward_ ? 1.0 / 120.0 : 1.0 / core_->avInfo().timing.fps);
+        else pace(1.0 / 60.0);
     }
 
     stopGame();
-    cfg_.set("last_dir", cwd_.u8string());
-    cfg_.save();
+    saveConfig();
+    text_.shutdown();
     input_.shutdown();
     audio_.shutdown();
     video_.shutdown();
@@ -156,59 +145,72 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
 }
 
 void App::pace(double frameSeconds) {
-    // Timer-based pacing. With vsync on, the present() call usually does the waiting already.
-    double now = nowSeconds();
+    // Timer-based pacing. With vsync on, present() usually does most of the waiting.
+    const double now = nowSeconds();
     if (now - nextFrame_ > 0.1 || nextFrame_ - now > 0.5) nextFrame_ = now;  // fell behind / clock jump
     nextFrame_ += frameSeconds;
-    double wait = nextFrame_ - now;
+    const double wait = nextFrame_ - now;
     if (wait > 0.002) SDL_Delay(Uint32((wait - 0.0015) * 1000));
     while (nowSeconds() < nextFrame_) {
     }
 }
 
-int App::uiScale() const {
-    const int h = video_.height();
-    return h >= 1300 ? 4 : h >= 900 ? 3 : h >= 480 ? 2 : 1;
+void App::runFrames() {
+    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+    fastForward_ = fastForwardToggled_ || keys[SDL_SCANCODE_TAB];
+    const int runs = fastForward_ ? 4 : 1;
+    for (int i = 0; i < runs && core_; ++i) core_->run();
+    if (core_ && core_->shutdownRequested()) {
+        stopGame();
+        return;
+    }
+    saveSram(false);
+}
+
+void App::saveConfig() {
+    input_.save(cfg_);
+    cfg_.save();
 }
 
 // ============================================================================
 // Starting and stopping games
 
 bool App::startGame(const fs::path& path) {
-    stopGame();
     std::error_code ec;
     if (!fs::exists(path, ec)) {
-        showError("File not found", path.u8string());
+        showMessage("File not found", path.u8string(), true);
         return false;
     }
 
     // 1. Work out which system this game is for.
     const Detection det = detectGame(path);
     if (det.system == System::Unknown) {
-        showError("Couldn't recognize this game",
-                  path.filename().u8string() + "\n\n" + det.detail +
-                      "\n\nNintendall supports NES, SNES, N64, Game Boy (Color/Advance), DS, 3DS, GameCube, Wii "
-                      "and Wii U games.");
+        showMessage("Couldn't open this file",
+                    path.filename().u8string() + "\n\nThis doesn't look like a game Nintendall can play (" +
+                        det.detail + ").",
+                    true);
         return false;
     }
     const SystemInfo& sys = systemInfo(det.system);
     std::fprintf(stderr, "Detected %s (%s)\n", sys.fullName, det.detail.c_str());
 
-    // 2. Every system has one bundled emulator. GPU-drawn systems aren't ready yet.
     if (sys.needsGpu) {
-        showError(std::string(sys.fullName) + " support is coming soon",
-                  std::string("Detected: ") + det.detail + "\n\nThe " + sys.emulator +
-                      " emulator for this system is included, but it draws with the GPU, and GPU rendering "
-                      "in Nintendall is still being built.");
+        showMessage("Coming soon", std::string(sys.fullName) +
+                                       " games aren't supported yet. Support is coming in a future update.",
+                    false);
         return false;
     }
     const fs::path corePath = paths_.findCore(sys.core);
     if (corePath.empty()) {
-        showError("Nintendall is missing a file",
-                  std::string("The ") + sys.emulator + " emulator (" + coreFileName(sys.core) +
-                      ") should be in the cores folder next to Nintendall. Reinstalling Nintendall should fix this.");
+        showMessage("Nintendall is missing a file",
+                    std::string("The ") + sys.fullName + " emulator (" + coreFileName(sys.core) +
+                        ") is missing from the cores folder. Reinstalling Nintendall should fix this.",
+                    true);
         return false;
     }
+
+    // 2. Checks passed: close whatever is running.
+    stopGame();
 
     // 3. If the game is inside a zip, pull it out to a temporary file.
     fs::path gameFile = det.launchPath;
@@ -220,14 +222,14 @@ bool App::startGame(const fs::path& path) {
             for (const auto& e : z.entries())
                 if (e.name == det.zipEntry) entry = &e;
         if (!entry || !z.read(*entry, data)) {
-            showError("Couldn't unzip game", path.u8string());
+            showMessage("Couldn't unzip game", path.u8string(), true);
             return false;
         }
         extracted_ = paths_.cache / fs::u8path(det.zipEntry).filename();
         std::ofstream out(extracted_, std::ios::binary);
         out.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));
         if (!out) {
-            showError("Couldn't unzip game", "Writing " + extracted_.u8string() + " failed");
+            showMessage("Couldn't unzip game", "Writing " + extracted_.u8string() + " failed", true);
             return false;
         }
         gameFile = extracted_;
@@ -238,16 +240,18 @@ bool App::startGame(const fs::path& path) {
                                            paths_.config / (std::string(sys.core) + ".opt"));
     std::string err;
     if (!core_->load(corePath, err) || !core_->loadGame(gameFile, err)) {
+        std::fprintf(stderr, "Core failed: %s\n", err.c_str());
         core_.reset();
         if (!extracted_.empty()) fs::remove(extracted_, ec);
         extracted_.clear();
-        showError("The game couldn't be started",
-                  err + "\n\nThe file may be damaged, or be a format this emulator can't read." +
-                      (sys.note ? std::string("\n\nNote: ") + sys.note : ""));
+        showMessage("Couldn't start the game",
+                    path.filename().u8string() + "\n\nThe file may be damaged, or be in a format that isn't supported." +
+                        (sys.note ? std::string("\n\nNote: ") + sys.note : ""),
+                    true);
         return false;
     }
 
-    // 5. Game is running.
+    // 5. Running.
     system_ = det.system;
     gamePath_ = path;
     gameTitle_ = path.stem().u8string();
@@ -258,13 +262,10 @@ bool App::startGame(const fs::path& path) {
     input_.setStickAsDpad(usesStickAsDpad(system_));
     video_.clearFrame();
     loadSram();
-    fastForward_ = fastForwardToggled_ = false;
-    slot_ = 1;
-    screen_ = Screen::Game;
+    paused_ = fastForward_ = fastForwardToggled_ = false;
     nextFrame_ = nowSeconds();
-    if (video_.window())
-        SDL_SetWindowTitle(video_.window(), ("Nintendall - " + gameTitle_ + "  [" + sys.name + " / " + core_->name() + "]").c_str());
-    osd(std::string(sys.name) + " detected - running with " + core_->name() + "   (Esc / Guide = menu)", 4000);
+    addRecent(path);
+    if (video_.window()) SDL_SetWindowTitle(video_.window(), ("Nintendall - " + gameTitle_).c_str());
     std::fprintf(stderr, "Running %s with core %s %s (%ux%u @ %.3f fps, %.0f Hz audio)\n", gameTitle_.c_str(),
                  core_->name().c_str(), core_->version().c_str(), av.geometry.base_width, av.geometry.base_height,
                  av.timing.fps, av.timing.sample_rate);
@@ -282,33 +283,34 @@ void App::stopGame() {
     extracted_.clear();
     video_.clearFrame();
     system_ = System::Unknown;
+    paused_ = false;
     if (video_.window()) SDL_SetWindowTitle(video_.window(), "Nintendall");
-    if (screen_ == Screen::Game || screen_ == Screen::Pause) screen_ = Screen::Library;
 }
 
-void App::gameFrame() {
-    const Uint8* keys = SDL_GetKeyboardState(nullptr);
-    fastForward_ = fastForwardToggled_ || keys[SDL_SCANCODE_TAB];
-    const int runs = fastForward_ ? 4 : 1;
-    for (int i = 0; i < runs && core_; ++i) core_->run();
-    if (!core_) return;
-    if (core_->shutdownRequested()) {
-        stopGame();
-        return;
-    }
-    saveSram(false);
+void App::addRecent(const fs::path& path) {
+    std::vector<std::string> list = recentGames();
+    const std::string p = fs::absolute(path).u8string();
+    list.erase(std::remove(list.begin(), list.end(), p), list.end());
+    list.insert(list.begin(), p);
+    if (list.size() > size_t(kRecent)) list.resize(size_t(kRecent));
+    for (int i = 0; i < kRecent; ++i) cfg_.set("recent." + std::to_string(i + 1), i < int(list.size()) ? list[size_t(i)] : "");
+    cfg_.save();
+}
 
-    video_.clear({0, 0, 0});
-    video_.drawGame();
-    if (fastForward_) video_.drawText(12, 12, ">> FAST", uiScale(), kWarn);
-    drawOsd();
-    video_.present();
-    pace(fastForward_ ? 1.0 / 120.0 : 1.0 / core_->avInfo().timing.fps);
+std::vector<std::string> App::recentGames() const {
+    std::vector<std::string> list;
+    for (int i = 0; i < kRecent; ++i) {
+        const std::string p = cfg_.get("recent." + std::to_string(i + 1));
+        if (!p.empty()) list.push_back(p);
+    }
+    return list;
 }
 
 // ---- battery saves ----------------------------------------------------------
 
-static fs::path sramPath(const Paths& p, const fs::path& game) { return p.saves / fs::u8path(game.stem().u8string() + ".srm"); }
+static fs::path sramPath(const Paths& p, const fs::path& game) {
+    return p.saves / fs::u8path(game.stem().u8string() + ".srm");
+}
 
 void App::loadSram() {
     lastSram_.clear();
@@ -316,10 +318,7 @@ void App::loadSram() {
     const size_t size = core_ ? core_->saveRamSize() : 0;
     if (!mem || size == 0) return;
     std::ifstream f(sramPath(paths_, gamePath_), std::ios::binary);
-    if (f) {
-        f.read(reinterpret_cast<char*>(mem), std::streamsize(size));
-        std::fprintf(stderr, "Loaded battery save (%zu bytes)\n", size_t(f.gcount()));
-    }
+    if (f) f.read(reinterpret_cast<char*>(mem), std::streamsize(size));
     lastSram_.assign(mem, mem + size);
     lastSramCheck_ = SDL_GetTicks();
 }
@@ -348,12 +347,12 @@ void App::saveState() {
     if (!core_) return;
     const auto data = core_->saveState();
     if (data.empty()) {
-        osd("This core can't save states");
+        osd("Save states aren't available for this game");
         return;
     }
     std::ofstream f(statePath(slot_), std::ios::binary);
     f.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));
-    osd(f ? "Saved state to slot " + std::to_string(slot_) : std::string("Saving state failed"));
+    osd(f ? "State saved (slot " + std::to_string(slot_) + ")" : std::string("Saving the state failed"));
 }
 
 void App::loadState() {
@@ -364,15 +363,16 @@ void App::loadState() {
         return;
     }
     std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    osd(core_->loadState(data) ? "Loaded state from slot " + std::to_string(slot_) : std::string("Loading state failed"));
+    osd(core_->loadState(data) ? "State loaded (slot " + std::to_string(slot_) + ")" : std::string("Loading the state failed"));
 }
 
 void App::takeScreenshot() {
+    if (!core_) return;
     char stamp[32];
     const std::time_t t = std::time(nullptr);
     std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&t));
     const fs::path p = paths_.screenshots / fs::u8path(gameTitle_ + "-" + stamp + ".png");
-    osd(video_.saveScreenshot(p) ? "Screenshot saved: " + p.filename().u8string() : std::string("Screenshot failed"));
+    osd(video_.saveScreenshot(p) ? "Screenshot saved" : "Screenshot failed");
 }
 
 // ============================================================================
@@ -412,7 +412,7 @@ void App::onAvInfoChanged() {
 }
 
 // ============================================================================
-// Events and navigation
+// Events
 
 void App::handleEvent(const SDL_Event& e) {
     std::string msg;
@@ -420,413 +420,178 @@ void App::handleEvent(const SDL_Event& e) {
         if (!msg.empty()) osd(msg);
         return;
     }
+
+    // Mouse position in renderer pixels.
+    const float pr = video_.pixelRatio();
+    if (e.type == SDL_MOUSEMOTION) {
+        mouseX_ = int(e.motion.x * pr);
+        mouseY_ = int(e.motion.y * pr);
+        lastMouseMove_ = SDL_GetTicks();
+    } else if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) {
+        mouseX_ = int(e.button.x * pr);
+        mouseY_ = int(e.button.y * pr);
+        lastMouseMove_ = SDL_GetTicks();
+    }
+
     switch (e.type) {
     case SDL_QUIT:
         quit_ = true;
         return;
     case SDL_WINDOWEVENT:
         if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) video_.onResize();
+        if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) focusLost_ = true;
+        if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) focusLost_ = false;
         return;
     case SDL_DROPFILE: {
-        // Drag a game onto the window: detect it and play it, from any screen.
+        // Drag a game onto the window: detect it and play it.
         const fs::path p = fs::u8path(e.drop.file);
         SDL_free(e.drop.file);
+        menu_.close();
+        buttonConfig_.close();
         startGame(p);
         return;
     }
-    case SDL_KEYDOWN: {
-        const SDL_Keycode k = e.key.keysym.sym;
-        if (k == SDLK_F11 || (k == SDLK_RETURN && (e.key.keysym.mod & KMOD_ALT))) {
-            video_.toggleFullscreen();
+    default:
+        break;
+    }
+
+    // Button Config window is modal: it gets everything.
+    if (buttonConfig_.isOpen()) {
+        buttonConfig_.handleEvent(e, mouseX_, mouseY_, input_);
+        return;
+    }
+
+    // Fullscreen toggle works everywhere.
+    if (e.type == SDL_KEYDOWN && !e.key.repeat &&
+        (e.key.keysym.sym == SDLK_F11 || (e.key.keysym.sym == SDLK_RETURN && (e.key.keysym.mod & KMOD_ALT)))) {
+        menu_.close();
+        video_.toggleFullscreen();
+        return;
+    }
+
+    // Menu bar
+    if (menuVisible() || menu_.isOpen()) {
+        buildMenus();
+        int action = 0;
+        if (menu_.handleEvent(e, mouseX_, mouseY_, action)) {
+            if (action) doAction(action);
             return;
         }
-        if (screen_ == Screen::Library && k == SDLK_F5) {  // rescan folder + installed cores
-            refreshCores();
-            openDir(cwd_);
-            osd("Refreshed");
-            return;
-        }
-        if (screen_ == Screen::Game) {
-            if (e.key.repeat) return;
-            switch (k) {
-            case SDLK_ESCAPE: screen_ = Screen::Pause; pauseSel_ = 0; audio_.clear(); return;
-            case SDLK_F5: saveState(); return;
-            case SDLK_F9: loadState(); return;
-            case SDLK_F6: slot_ = std::max(1, slot_ - 1); osd("State slot " + std::to_string(slot_)); return;
-            case SDLK_F7: slot_ = std::min(9, slot_ + 1); osd("State slot " + std::to_string(slot_)); return;
-            case SDLK_F12: takeScreenshot(); return;
-            case SDLK_SPACE:
-                if (e.key.keysym.mod & KMOD_CTRL) {
-                    fastForwardToggled_ = !fastForwardToggled_;
-                }
-                return;
+    }
+
+    if (e.type == SDL_KEYDOWN && !e.key.repeat) {
+        const SDL_Keysym& k = e.key.keysym;
+        if (ctrlHeld(k)) {
+            switch (k.sym) {
+            case SDLK_o: doAction(ActOpen); return;
+            case SDLK_r: doAction(ActReset); return;
+            case SDLK_p: doAction(ActPause); return;
+            case SDLK_w: doAction(ActCloseGame); return;
             default: return;
             }
         }
-        dispatchNav(navFromKey(e.key));
-        return;
+        switch (k.sym) {
+        case SDLK_F10: menu_.openFirst(); return;
+        case SDLK_ESCAPE:
+            if (video_.isFullscreen()) video_.toggleFullscreen();
+            return;
+        case SDLK_PAUSE: doAction(ActPause); return;
+        case SDLK_F5: doAction(ActSaveState); return;
+        case SDLK_F9: doAction(ActLoadState); return;
+        case SDLK_F6: doAction(ActSlot + std::max(1, slot_ - 1)); return;
+        case SDLK_F7: doAction(ActSlot + std::min(kSlots, slot_ + 1)); return;
+        case SDLK_F12: takeScreenshot(); return;
+        default: return;
+        }
     }
-    case SDL_CONTROLLERBUTTONDOWN: {
+
+    if (e.type == SDL_CONTROLLERBUTTONDOWN && core_) {
+        // Home/Guide button, or Select+Start together, pauses.
         SDL_GameController* gc = SDL_GameControllerFromInstanceID(e.cbutton.which);
         const Uint8 b = e.cbutton.button;
-        if (screen_ == Screen::Game) {
-            // Guide button, or Select+Start together, opens the menu.
-            const bool combo = gc && ((b == SDL_CONTROLLER_BUTTON_START && SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_BACK)) ||
-                                      (b == SDL_CONTROLLER_BUTTON_BACK && SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_START)));
-            if (b == SDL_CONTROLLER_BUTTON_GUIDE || combo) {
-                screen_ = Screen::Pause;
-                pauseSel_ = 0;
-                audio_.clear();
-            }
-            return;
-        }
-        const Nav n = navFromButton(b);
-        if (n == Nav::Up || n == Nav::Down) {
-            heldNav_ = n;
-            heldSince_ = lastRepeat_ = SDL_GetTicks();
-        }
-        dispatchNav(n);
+        const bool combo = gc && ((b == SDL_CONTROLLER_BUTTON_START && SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_BACK)) ||
+                                  (b == SDL_CONTROLLER_BUTTON_BACK && SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_START)));
+        if (b == SDL_CONTROLLER_BUTTON_GUIDE || combo) doAction(ActPause);
+    }
+}
+
+void App::doAction(int a) {
+    if (a >= ActRecent && a < ActRecent + kRecent) {
+        const auto list = recentGames();
+        const size_t i = size_t(a - ActRecent);
+        if (i < list.size()) startGame(fs::u8path(list[i]));
         return;
     }
-    case SDL_CONTROLLERBUTTONUP:
-        if (navFromButton(e.cbutton.button) == heldNav_) heldNav_ = Nav::None;
-        return;
-    case SDL_CONTROLLERAXISMOTION: {
-        if (screen_ == Screen::Game || e.caxis.axis != SDL_CONTROLLER_AXIS_LEFTY) return;
-        const Nav n = e.caxis.value < -20000 ? Nav::Up : e.caxis.value > 20000 ? Nav::Down : Nav::None;
-        if (n != heldNav_) {
-            heldNav_ = n;
-            heldSince_ = lastRepeat_ = SDL_GetTicks();
-            if (n != Nav::None) dispatchNav(n);
-        }
+    if (a > ActSlot && a <= ActSlot + kSlots) {
+        slot_ = a - ActSlot;
+        osd("State slot " + std::to_string(slot_));
         return;
     }
-    default:
+    if (a > ActWindowSize && a <= ActWindowSize + 4) {
+        setWindowScale(a - ActWindowSize);
         return;
     }
-}
-
-void App::updateHeldNav() {
-    if (heldNav_ == Nav::None || screen_ == Screen::Game) return;
-    const Uint32 now = SDL_GetTicks();
-    if (now - heldSince_ > 400 && now - lastRepeat_ > 70) {
-        lastRepeat_ = now;
-        dispatchNav(heldNav_);
-    }
-}
-
-App::Nav App::navFromKey(const SDL_KeyboardEvent& k) const {
-    switch (k.keysym.sym) {
-    case SDLK_UP: return Nav::Up;
-    case SDLK_DOWN: return Nav::Down;
-    case SDLK_LEFT: return Nav::Left;
-    case SDLK_RIGHT: return Nav::Right;
-    case SDLK_PAGEUP: return Nav::PageUp;
-    case SDLK_PAGEDOWN: return Nav::PageDown;
-    case SDLK_HOME: return Nav::Home;
-    case SDLK_END: return Nav::End;
-    case SDLK_RETURN:
-    case SDLK_KP_ENTER:
-    case SDLK_x: return Nav::Accept;
-    case SDLK_BACKSPACE:
-    case SDLK_z: return Nav::Back;
-    case SDLK_ESCAPE: return Nav::Menu;
-    default: return Nav::None;
-    }
-}
-
-App::Nav App::navFromButton(Uint8 b) const {
-    switch (b) {
-    case SDL_CONTROLLER_BUTTON_DPAD_UP: return Nav::Up;
-    case SDL_CONTROLLER_BUTTON_DPAD_DOWN: return Nav::Down;
-    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: return Nav::Left;
-    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return Nav::Right;
-    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return Nav::PageUp;
-    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return Nav::PageDown;
-    case SDL_CONTROLLER_BUTTON_A: return Nav::Accept;   // bottom button
-    case SDL_CONTROLLER_BUTTON_B: return Nav::Back;     // right button
-    case SDL_CONTROLLER_BUTTON_START:
-    case SDL_CONTROLLER_BUTTON_GUIDE: return Nav::Menu;
-    default: return Nav::None;
-    }
-}
-
-void App::dispatchNav(Nav n) {
-    if (n == Nav::None) return;
-    switch (screen_) {
-    case Screen::Library:
-        if (n == Nav::Menu) {  // Esc twice on the library quits
-            if (!SDL_TICKS_PASSED(SDL_GetTicks(), quitArmedUntil_)) quit_ = true;
-            quitArmedUntil_ = SDL_GetTicks() + 2000;
-            osd("Press Esc / Start again to quit", 2000);
-            return;
-        }
-        libraryNav(n);
-        return;
-    case Screen::Pause: pauseNav(n); return;
-    case Screen::Error:
-        if (n == Nav::Accept || n == Nav::Back || n == Nav::Menu) screen_ = errorReturn_;
-        return;
-    default: return;
-    }
-}
-
-// ============================================================================
-// Library (file browser)
-
-bool App::systemReady(System s) const {
-    const SystemInfo& si = systemInfo(s);
-    return !si.needsGpu && !paths_.findCore(si.core).empty();
-}
-
-void App::refreshCores() {
-    systemReady_.clear();
-    for (System s : allSystems()) systemReady_.push_back(systemReady(s));
-}
-
-void App::openDir(const fs::path& dirIn, const fs::path& select) {
-    std::error_code ec;
-    fs::path dir = fs::weakly_canonical(dirIn, ec);
-    if (ec || !fs::is_directory(dir, ec)) dir = dirIn;
-    cwd_ = dir;
-    entries_.clear();
-    sel_ = scroll_ = 0;
-
-    if (dir.has_parent_path() && dir.parent_path() != dir) {
-        Entry up;
-        up.path = dir.parent_path();
-        up.name = "..";
-        up.isDir = up.isParent = true;
-        up.detected = true;
-        entries_.push_back(up);
-    }
-
-    std::vector<Entry> dirs, files;
-    for (fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end;
-         it.increment(ec)) {
-        const fs::path p = it->path();
-        const std::string name = p.filename().u8string();
-        if (name.empty() || name[0] == '.') continue;
-        Entry e;
-        e.path = p;
-        e.name = name;
-        std::error_code ec2;
-        if (it->is_directory(ec2)) {
-            e.isDir = true;
-            dirs.push_back(e);
-        } else if (isKnownGameExtension(lowerExt(p))) {
-            files.push_back(e);
-        }
-    }
-    auto byName = [](const Entry& a, const Entry& b) { return lower(a.name) < lower(b.name); };
-    std::sort(dirs.begin(), dirs.end(), byName);
-    std::sort(files.begin(), files.end(), byName);
-    entries_.insert(entries_.end(), dirs.begin(), dirs.end());
-    entries_.insert(entries_.end(), files.begin(), files.end());
-
-    if (!select.empty())
-        for (size_t i = 0; i < entries_.size(); ++i)
-            if (entries_[i].path == select) sel_ = int(i);
-}
-
-void App::detectEntry(Entry& e) {
-    if (e.detected) return;
-    e.detected = true;
-    e.det = detectGame(e.path);
-}
-
-void App::libraryNav(Nav n) {
-    const int count = int(entries_.size());
-    const int page = 10;
-    switch (n) {
-    case Nav::Up: sel_ = sel_ > 0 ? sel_ - 1 : count - 1; break;
-    case Nav::Down: sel_ = sel_ < count - 1 ? sel_ + 1 : 0; break;
-    case Nav::PageUp: sel_ = std::max(0, sel_ - page); break;
-    case Nav::PageDown: sel_ = std::min(count - 1, sel_ + page); break;
-    case Nav::Home: sel_ = 0; break;
-    case Nav::End: sel_ = count - 1; break;
-    case Nav::Back:
-    case Nav::Left:
-        if (cwd_.has_parent_path() && cwd_.parent_path() != cwd_) openDir(cwd_.parent_path(), cwd_);
+    switch (a) {
+    case ActOpen: openFileDialog(); break;
+    case ActCloseGame: stopGame(); break;
+    case ActExit: quit_ = true; break;
+    case ActPause:
+        if (core_) paused_ = !paused_;
         break;
-    case Nav::Accept:
-    case Nav::Right: {
-        if (sel_ < 0 || sel_ >= count) break;
-        Entry& e = entries_[size_t(sel_)];
-        if (e.isParent) {
-            openDir(e.path, cwd_);
-        } else if (e.isDir) {
-            detectEntry(e);
-            if (e.det.system != System::Unknown && n == Nav::Accept) startGame(e.path);  // Wii U game folder
-            else openDir(e.path);
-        } else if (n == Nav::Accept) {
-            startGame(e.path);
+    case ActReset:
+        if (core_) {
+            core_->reset();
+            paused_ = false;
+            osd("Reset");
         }
         break;
-    }
-    default: break;
-    }
-    sel_ = std::clamp(sel_, 0, std::max(0, count - 1));
-}
-
-void App::drawLibrary() {
-    const int s = uiScale();
-    const int W = video_.width(), H = video_.height();
-    const int cw = 6 * s, lh = 9 * s + 6;
-    const int margin = 8 * s;
-
-    // Header
-    video_.fillRect(0, 0, W, 34 * s, kPanel);
-    video_.drawText(margin, 6 * s, "NINTENDALL", s * 2, kAccent);
-    video_.drawText(margin + Video::textWidth("NINTENDALL", s * 2) + cw, 13 * s, "v" NINTENDALL_VERSION, s, kDim);
-
-    // Which systems have an emulator core installed.
-    int x = margin;
-    const int sy = 24 * s;
-    const auto& systems = allSystems();
-    for (size_t i = 0; i < systems.size(); ++i) {
-        const std::string n = systemInfo(systems[i]).name;
-        video_.drawText(x, sy, n, s, systemReady_[i] ? kGood : kDim);
-        x += Video::textWidth(n, s) + cw * 2;
-    }
-
-    // Current folder
-    const int maxChars = (W - margin * 2) / cw;
-    video_.drawText(margin, 38 * s, fit(cwd_.u8string(), maxChars, true), s, kText);
-
-    // File list
-    const int top = 38 * s + lh + 4;
-    const int bottom = H - lh * 2 - 4;
-    const int rows = std::max(1, (bottom - top) / lh);
-    if (sel_ < scroll_) scroll_ = sel_;
-    if (sel_ >= scroll_ + rows) scroll_ = sel_ - rows + 1;
-    scroll_ = std::max(0, std::min(scroll_, int(entries_.size()) - rows));
-
-    if (entries_.empty() || (entries_.size() == 1 && entries_[0].isParent)) {
-        video_.drawText(margin, top + lh * 2, "No games in this folder.", s, kDim);
-        video_.drawText(margin, top + lh * 3, "Browse to your games, or drag a game file onto this window.", s, kDim);
-    }
-    const int tagChars = 14;
-    for (int r = 0; r < rows && scroll_ + r < int(entries_.size()); ++r) {
-        Entry& e = entries_[size_t(scroll_ + r)];
-        const int y = top + r * lh;
-        if (scroll_ + r == sel_) video_.fillRect(margin / 2, y - 3, W - margin, lh, kSelect);
-
-        detectEntry(e);
-        std::string tag;
-        Color tagColor = kDim;
-        if (e.det.system != System::Unknown) {
-            const SystemInfo& si = systemInfo(e.det.system);
-            tag = si.name;
-            const bool ready = systemReady(e.det.system);
-            tagColor = ready ? kGood : kWarn;
-            if (!ready) tag += si.needsGpu ? " (coming soon)" : " (missing)";
-        } else if (!e.isDir) {
-            tag = "?";
-        }
-        const std::string label = e.isDir && e.det.system == System::Unknown ? e.name + "/" : e.name;
-        video_.drawText(margin, y, fit(label, maxChars - tagChars - 1), s,
-                        e.isDir && e.det.system == System::Unknown ? kDim : kText);
-        if (!tag.empty()) video_.drawText(W - margin - Video::textWidth(tag, s), y, tag, s, tagColor);
-    }
-
-    // Footer
-    video_.fillRect(0, H - lh * 2, W, lh * 2, kPanel);
-    const std::string pads = input_.controllerCount() == 0 ? "No controller (keyboard: arrows, X/Z, Enter)"
-                                                           : std::to_string(input_.controllerCount()) + " controller(s): " + input_.controllerName(0);
-    video_.drawText(margin, H - lh * 2 + 4, fit("Enter/A Play  Bksp/B Back  F5 Rescan  F11 Fullscreen  Esc x2 Quit", maxChars), s, kDim);
-    video_.drawText(margin, H - lh + 2, fit(pads, maxChars), s, kDim);
-}
-
-// ============================================================================
-// Pause menu
-
-static const char* kPauseItems[] = {"Resume", "Reset game", "Save state", "Load state", "State slot", "Fullscreen", "Quit to library"};
-constexpr int kPauseCount = 7;
-
-void App::pauseNav(Nav n) {
-    switch (n) {
-    case Nav::Up: pauseSel_ = (pauseSel_ + kPauseCount - 1) % kPauseCount; break;
-    case Nav::Down: pauseSel_ = (pauseSel_ + 1) % kPauseCount; break;
-    case Nav::Left:
-        if (pauseSel_ == 4) slot_ = std::max(1, slot_ - 1);
+    case ActFastForward: fastForwardToggled_ = !fastForwardToggled_; break;
+    case ActSaveState: saveState(); break;
+    case ActLoadState: loadState(); break;
+    case ActButtonConfig: buttonConfig_.open(); break;
+    case ActFullscreen: video_.toggleFullscreen(); break;
+    case ActControls:
+        showMessage("Controls",
+                    "Keyboard (change these in Options > Button Config):\n"
+                    "  Arrow keys = D-pad\n  X = A,  Z = B,  S = X,  A = Y\n  Q / W = L / R,  1 / 3 = L2 / R2\n"
+                    "  Enter = Start,  Right Shift = Select\n\n"
+                    "Shortcuts:\n  Ctrl+O = Open game\n  Ctrl+P = Pause,  Ctrl+R = Reset\n"
+                    "  F5 = Save state,  F9 = Load state,  F6 / F7 = Change slot\n"
+                    "  Hold Tab = Fast forward\n  F11 = Fullscreen,  Esc = Leave fullscreen\n  F12 = Screenshot\n\n"
+                    "Controllers work automatically. Home button, or Select + Start, pauses.",
+                    false);
         break;
-    case Nav::Right:
-        if (pauseSel_ == 4) slot_ = std::min(9, slot_ + 1);
-        break;
-    case Nav::Back:
-    case Nav::Menu:
-        screen_ = Screen::Game;
-        nextFrame_ = nowSeconds();
-        break;
-    case Nav::Accept:
-        switch (pauseSel_) {
-        case 0: screen_ = Screen::Game; nextFrame_ = nowSeconds(); break;
-        case 1: core_->reset(); screen_ = Screen::Game; osd("Game reset"); break;
-        case 2: saveState(); screen_ = Screen::Game; break;
-        case 3: loadState(); screen_ = Screen::Game; break;
-        case 4: slot_ = slot_ % 9 + 1; break;
-        case 5: video_.toggleFullscreen(); break;
-        case 6: stopGame(); screen_ = Screen::Library; break;
-        }
-        nextFrame_ = nowSeconds();
+    case ActAbout:
+        showMessage("About Nintendall", std::string("Nintendall ") + NINTENDALL_VERSION +
+                                            "\n\nOpen or drag in a game and Nintendall plays it.\n\n"
+                                            "Built with open-source software. See THIRD_PARTY_LICENSES.md "
+                                            "in the Nintendall folder.",
+                    false);
         break;
     default: break;
     }
 }
 
-void App::drawPause() {
-    video_.clear({0, 0, 0});
-    video_.drawGame();
-    const int W = video_.width(), H = video_.height();
-    video_.fillRect(0, 0, W, H, {0, 0, 0, 170});
-
-    const int s = uiScale();
-    const int lh = 9 * s + 8;
-    const int boxW = 30 * 6 * s, boxH = lh * (kPauseCount + 3);
-    const int bx = (W - boxW) / 2, by = (H - boxH) / 2;
-    video_.fillRect(bx, by, boxW, boxH, kPanel);
-    video_.fillRect(bx, by, boxW, 3 * s, kAccent);
-    video_.drawText(bx + 8 * s, by + 8 * s, fit(gameTitle_, 28), s, kText);
-    video_.drawText(bx + 8 * s, by + 8 * s + lh, std::string(systemInfo(system_).name) + " / " + (core_ ? core_->name() : ""), s, kDim);
-    for (int i = 0; i < kPauseCount; ++i) {
-        const int y = by + 8 * s + lh * (i + 2) + 4;
-        if (i == pauseSel_) video_.fillRect(bx + 4 * s, y - 4, boxW - 8 * s, lh, kSelect);
-        std::string label = kPauseItems[i];
-        if (i == 2 || i == 3) label += " (slot " + std::to_string(slot_) + ")";
-        if (i == 4) label += ":  < " + std::to_string(slot_) + " >";
-        video_.drawText(bx + 12 * s, y, label, s, i == pauseSel_ ? kText : kDim);
+void App::openFileDialog() {
+    menu_.close();
+    audio_.clear();
+    bool unavailable = false;
+    const std::string path = openGameDialog(video_.window(), unavailable);
+    nextFrame_ = nowSeconds();
+    if (unavailable) {
+        showMessage("Open Game", "Drag and drop a game file onto the Nintendall window to play it.", false);
+        return;
     }
+    if (!path.empty()) startGame(fs::u8path(path));
 }
 
-// ============================================================================
-// Errors and on-screen messages
-
-void App::showError(const std::string& title, const std::string& text) {
+void App::showMessage(const std::string& title, const std::string& text, bool error) {
     std::fprintf(stderr, "%s: %s\n", title.c_str(), text.c_str());
-    if (opt_.headless) return;
-    errorTitle_ = title;
-    errorText_ = text;
-    errorReturn_ = Screen::Library;
-    screen_ = Screen::Error;
-}
-
-void App::drawError() {
-    drawLibrary();
-    const int W = video_.width(), H = video_.height();
-    video_.fillRect(0, 0, W, H, {0, 0, 0, 190});
-    const int s = uiScale();
-    const int lh = 9 * s + 4;
-    const int boxW = std::min(W - 16 * s, 70 * 6 * s);
-    const int maxChars = (boxW - 16 * s) / (6 * s);
-    const auto lines = wrap(errorText_, maxChars);
-    const int boxH = lh * (int(lines.size()) + 5);
-    const int bx = (W - boxW) / 2, by = std::max(0, (H - boxH) / 2);
-    video_.fillRect(bx, by, boxW, boxH, kPanel);
-    video_.fillRect(bx, by, boxW, 3 * s, kAccent);
-    video_.drawText(bx + 8 * s, by + 8 * s, fit(errorTitle_, maxChars), s, kAccent);
-    for (size_t i = 0; i < lines.size(); ++i) video_.drawText(bx + 8 * s, by + 8 * s + lh * int(i + 2), lines[i], s, kText);
-    video_.drawText(bx + 8 * s, by + boxH - lh, "Press Enter / A to continue", s, kDim);
+    if (opt_.headless || !video_.window()) return;
+    audio_.clear();
+    SDL_ShowSimpleMessageBox(error ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_INFORMATION, title.c_str(), text.c_str(),
+                             video_.window());
+    nextFrame_ = nowSeconds();
 }
 
 void App::osd(const std::string& msg, unsigned ms) {
@@ -835,13 +600,140 @@ void App::osd(const std::string& msg, unsigned ms) {
     if (opt_.headless) std::fprintf(stderr, "[osd] %s\n", msg.c_str());
 }
 
-void App::drawOsd() {
-    if (osdText_.empty() || SDL_TICKS_PASSED(SDL_GetTicks(), osdUntil_)) return;
-    const int s = uiScale();
-    const int maxChars = (video_.width() - 24 * s) / (6 * s);
-    const std::string t = fit(osdText_, maxChars);
-    const int w = Video::textWidth(t, s) + 12 * s, h = 9 * s + 10;
-    const int y = video_.height() - h - 8 * s;
-    video_.fillRect(8 * s, y, w, h, {0, 0, 0, 200});
-    video_.drawText(14 * s, y + 5, t, s, kText);
+// ============================================================================
+// Window layout and drawing
+
+float App::uiScale() const {
+    float s = video_.pixelRatio();
+#if defined(_WIN32)
+    float hdpi = 96.0f;
+    const int d = video_.window() ? SDL_GetWindowDisplayIndex(video_.window()) : 0;
+    if (SDL_GetDisplayDPI(d < 0 ? 0 : d, nullptr, &hdpi, nullptr) == 0 && hdpi > 0) s *= hdpi / 96.0f;
+#endif
+    return std::clamp(s, 1.0f, 4.0f);
+}
+
+bool App::menuVisible() const {
+    // Always shown in a window; in fullscreen it appears when the mouse goes to the top.
+    if (!video_.isFullscreen()) return true;
+    return menu_.isOpen() || (SDL_GetTicks() - lastMouseMove_ < 3000 && mouseY_ < menu_.height(text_) * 2);
+}
+
+SDL_Rect App::gameArea() const {
+    const int bar = video_.isFullscreen() ? 0 : menu_.height(text_);
+    return {0, bar, video_.width(), std::max(0, video_.height() - bar)};
+}
+
+void App::setWindowScale(int scale) {
+    if (!video_.window()) return;
+    if (video_.isFullscreen()) video_.toggleFullscreen();
+    int baseH = kDefaultBaseH;
+    double aspect = kDefaultAspect;
+    if (core_) {
+        const auto& g = core_->avInfo().geometry;
+        if (g.base_height > 0) baseH = int(g.base_height);
+        aspect = g.aspect_ratio > 0 ? g.aspect_ratio : double(g.base_width) / std::max(1u, g.base_height);
+    }
+    const float pr = video_.pixelRatio();
+    const int h = baseH * scale + menu_.height(text_);
+    const int w = int(std::lround(baseH * scale * aspect));
+    SDL_SetWindowSize(video_.window(), int(w / pr), int(h / pr));
+    video_.onResize();
+}
+
+void App::buildMenus() {
+    const bool game = core_ != nullptr;
+    std::vector<Menu> menus;
+
+    Menu file{"File", {}};
+    file.items.push_back({"Open...", "Ctrl+O", ActOpen});
+    file.items.push_back({"Close Game", "Ctrl+W", ActCloseGame, game});
+    const auto recent = recentGames();
+    if (!recent.empty()) {
+        file.items.push_back({});
+        for (size_t i = 0; i < recent.size(); ++i)
+            file.items.push_back({std::to_string(i + 1) + "  " + fs::u8path(recent[i]).filename().u8string(), "",
+                                  int(ActRecent + i)});
+    }
+    file.items.push_back({});
+    file.items.push_back({"Exit", "Alt+F4", ActExit});
+    menus.push_back(file);
+
+    Menu emu{"Emulation", {}};
+    emu.items.push_back({"Pause", "Ctrl+P", ActPause, game, paused_});
+    emu.items.push_back({"Reset", "Ctrl+R", ActReset, game});
+    emu.items.push_back({});
+    emu.items.push_back({"Fast Forward", "Hold Tab", ActFastForward, true, fastForwardToggled_});
+    menus.push_back(emu);
+
+    Menu state{"State", {}};
+    state.items.push_back({"Save State", "F5", ActSaveState, game});
+    state.items.push_back({"Load State", "F9", ActLoadState, game});
+    state.items.push_back({});
+    for (int i = 1; i <= kSlots; ++i) {
+        std::string label = "Slot " + std::to_string(i);
+        std::error_code ec;
+        if (game && menu_.isOpen() && !fs::exists(statePath(i), ec)) label += "  (empty)";
+        state.items.push_back({label, "", ActSlot + i, true, slot_ == i});
+    }
+    menus.push_back(state);
+
+    Menu options{"Options", {}};
+    options.items.push_back({"Button Config...", "", ActButtonConfig});
+    options.items.push_back({});
+    options.items.push_back({"Fullscreen", "F11", ActFullscreen, true, video_.isFullscreen()});
+    options.items.push_back({});
+    for (int k = 1; k <= 4; ++k)
+        options.items.push_back({"Window Size " + std::to_string(k) + "x", "", ActWindowSize + k});
+    menus.push_back(options);
+
+    Menu help{"Help", {}};
+    help.items.push_back({"Controls", "", ActControls});
+    help.items.push_back({"About Nintendall", "", ActAbout});
+    menus.push_back(help);
+
+    menu_.setMenus(std::move(menus));
+}
+
+void App::draw() {
+    const int W = video_.width(), H = video_.height();
+    const float s = text_.scale();
+    video_.clear(kBlack);
+    const SDL_Rect area = gameArea();
+
+    if (core_ && video_.hasFrame()) {
+        video_.drawGame(area);
+    } else if (!core_) {
+        // Empty window: just a hint to drop a game in.
+        const std::string title = "Drag and drop a game here";
+        const std::string sub = "or choose File > Open";
+        const int th = text_.lineHeight(Text::Large), sh = text_.lineHeight();
+        const int y = area.y + (area.h - th - sh - int(6 * s)) / 2;
+        text_.draw(area.x + (area.w - text_.width(title, Text::Large)) / 2, y, title, kHint, Text::Large);
+        text_.draw(area.x + (area.w - text_.width(sub)) / 2, y + th + int(6 * s), sub, kHintDim);
+    }
+
+    if (core_ && paused_) {
+        const std::string t = "Paused";
+        const int tw = text_.width(t, Text::Large), th = text_.lineHeight(Text::Large);
+        const int bx = area.x + (area.w - tw) / 2 - int(16 * s), by = area.y + (area.h - th) / 2 - int(8 * s);
+        video_.fillRect(bx, by, tw + int(32 * s), th + int(16 * s), {0, 0, 0, 170});
+        text_.draw(bx + int(16 * s), by + int(8 * s), t, kWhite, Text::Large);
+    }
+    if (fastForward_ && core_ && !paused_) text_.draw(area.x + int(10 * s), area.y + int(8 * s), "Fast Forward", kWhite);
+
+    // On-screen message (bottom left).
+    if (!osdText_.empty() && !SDL_TICKS_PASSED(SDL_GetTicks(), osdUntil_)) {
+        const int tw = text_.width(osdText_), th = text_.lineHeight();
+        const int x = area.x + int(10 * s), y = area.y + area.h - th - int(18 * s);
+        video_.fillRect(x, y, tw + int(16 * s), th + int(8 * s), {0, 0, 0, 180});
+        text_.draw(x + int(8 * s), y + int(4 * s), osdText_, kWhite);
+    }
+
+    if (menuVisible()) {
+        buildMenus();
+        menu_.draw(video_, text_, W);
+    }
+    buttonConfig_.draw(video_, text_, input_, W, H);
+    video_.present();
 }

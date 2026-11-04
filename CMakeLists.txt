@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nintendall VERSION 0.1.0 LANGUAGES CXX)
+project(Nintendall VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,6 +8,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(SDL2 REQUIRED)
+find_package(SDL2_ttf REQUIRED)
 if(MINGW)
   # Link zlib statically so there's no zlib1.dll to ship.
   find_library(ZLIB_LIBRARY NAMES libz.a REQUIRED)
@@ -23,14 +24,17 @@ add_executable(nintendall
   src/main.cpp
   src/app.cpp
   src/audio.cpp
+  src/buttonconfig.cpp
   src/config.cpp
   src/core.cpp
   src/detect.cpp
-  src/font.cpp
+  src/filedialog.cpp
   src/input.cpp
+  src/menubar.cpp
   src/paths.cpp
   src/png.cpp
   src/systems.cpp
+  src/text.cpp
   src/video.cpp
   src/zip.cpp
 )
@@ -47,7 +51,15 @@ else()
   target_include_directories(nintendall PRIVATE ${SDL2_INCLUDE_DIRS})
   target_link_libraries(nintendall PRIVATE ${SDL2_LIBRARIES})
 endif()
-target_link_libraries(nintendall PRIVATE ZLIB::ZLIB ${CMAKE_DL_LIBS})
+target_link_libraries(nintendall PRIVATE SDL2_ttf::SDL2_ttf ZLIB::ZLIB ${CMAKE_DL_LIBS})
+if(WIN32)
+  target_link_libraries(nintendall PRIVATE comdlg32)
+endif()
+
+# UI font, next to the program (Windows uses its own Segoe UI when available).
+add_custom_command(TARGET nintendall POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/fonts $<TARGET_FILE_DIR:nintendall>/fonts)
+install(DIRECTORY assets/fonts/ DESTINATION fonts)
 
 if(WIN32)
   # A normal windowed app (no console), with the compiler runtime built in so

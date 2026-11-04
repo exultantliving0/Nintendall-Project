@@ -9,7 +9,7 @@ Unicode true
 
 !define APPNAME "Nintendall"
 !ifndef VERSION
-  !define VERSION "0.1.0"
+  !define VERSION "0.2.0"
 !endif
 !ifndef SRCDIR
   !error "Pass -DSRCDIR=<folder with nintendall.exe, SDL2.dll and cores\>"
@@ -76,8 +76,11 @@ Section "${APPNAME} (required)" SecMain
   SetOutPath "$INSTDIR"
   File "${SRCDIR}\nintendall.exe"
   File "${SRCDIR}\SDL2.dll"
+  File "${SRCDIR}\SDL2_ttf.dll"
   File "${SRCDIR}\README.md"
   File "${SRCDIR}\THIRD_PARTY_LICENSES.md"
+  SetOutPath "$INSTDIR\fonts"
+  File "${SRCDIR}\fonts\*.*"
   SetOutPath "$INSTDIR\cores"
   File "${SRCDIR}\cores\*.dll"
   SetOutPath "$INSTDIR"
@@ -118,8 +121,10 @@ LangString DESC_Desktop ${LANG_ENGLISH} "Put a Nintendall shortcut on the deskto
 Section "Uninstall"
   SetShellVarContext all
   RMDir /r "$INSTDIR\cores"
+  RMDir /r "$INSTDIR\fonts"
   Delete "$INSTDIR\nintendall.exe"
   Delete "$INSTDIR\SDL2.dll"
+  Delete "$INSTDIR\SDL2_ttf.dll"
   Delete "$INSTDIR\README.md"
   Delete "$INSTDIR\THIRD_PARTY_LICENSES.md"
   Delete "$INSTDIR\Uninstall.exe"

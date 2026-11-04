@@ -7,18 +7,21 @@
 #include <vector>
 
 #include "audio.hpp"
+#include "buttonconfig.hpp"
 #include "config.hpp"
 #include "core.hpp"
 #include "detect.hpp"
 #include "input.hpp"
+#include "menubar.hpp"
 #include "paths.hpp"
+#include "text.hpp"
 #include "video.hpp"
 #include "zip.hpp"
 
 struct LaunchOptions {
-    bool headless = false;   // --frames N: run without a window (testing/benchmarks)
+    bool headless = false;     // --frames N: run without a window (testing/benchmarks)
     int frames = 0;
-    std::string screenshot;  // --screenshot FILE (with --frames)
+    std::string screenshot;    // --screenshot FILE (with --frames)
     uint16_t holdButtons = 0;  // --hold a,start (with --frames)
     bool fullscreen = false;
 };
@@ -37,53 +40,47 @@ public:
     bool isFastForwarding() const override { return fastForward_; }
 
 private:
-    enum class Screen { Library, Game, Pause, Error };
-    enum class Nav { None, Up, Down, Left, Right, PageUp, PageDown, Home, End, Accept, Back, Menu };
-
-    struct Entry {
-        std::filesystem::path path;
-        std::string name;
-        bool isDir = false;
-        bool isParent = false;
-        bool detected = false;
-        Detection det;
+    // Menu actions
+    enum Action {
+        ActOpen = 1, ActCloseGame, ActExit,
+        ActRecent = 10,  // + index
+        ActPause = 30, ActReset, ActFastForward,
+        ActSaveState = 40, ActLoadState,
+        ActSlot = 50,  // + slot number
+        ActButtonConfig = 70, ActFullscreen,
+        ActWindowSize = 80,  // + scale
+        ActControls = 90, ActAbout,
     };
+    static constexpr int kSlots = 5;
+    static constexpr int kRecent = 8;
 
     // Games
     bool startGame(const std::filesystem::path& path);
     void stopGame();
-    void gameFrame();
+    void runFrames();
     void saveSram(bool force);
     void loadSram();
     std::filesystem::path statePath(int slot) const;
     void saveState();
     void loadState();
     void takeScreenshot();
+    void addRecent(const std::filesystem::path& path);
+    std::vector<std::string> recentGames() const;
 
-    // Library
-    void openDir(const std::filesystem::path& dir, const std::filesystem::path& select = {});
-    void refreshCores();
-    bool systemReady(System s) const;
-    void detectEntry(Entry& e);
-    void libraryNav(Nav n);
-    void drawLibrary();
-
-    // Pause menu / errors / messages
-    void pauseNav(Nav n);
-    void drawPause();
-    void drawError();
-    void showError(const std::string& title, const std::string& text);
-    void osd(const std::string& msg, unsigned ms = 2500);
-    void drawOsd();
-
-    // Events
+    // Window & UI
     void handleEvent(const SDL_Event& e);
-    Nav navFromKey(const SDL_KeyboardEvent& k) const;
-    Nav navFromButton(Uint8 button) const;
-    void dispatchNav(Nav n);
-    void updateHeldNav();
+    void doAction(int action);
+    void buildMenus();
+    void draw();
+    bool menuVisible() const;
+    SDL_Rect gameArea() const;
+    float uiScale() const;
+    void setWindowScale(int scale);
+    void openFileDialog();
+    void showMessage(const std::string& title, const std::string& text, bool error);
+    void osd(const std::string& msg, unsigned ms = 2500);
+    void saveConfig();
     void pace(double frameSeconds);
-    int uiScale() const;
 
     // Subsystems
     Paths paths_;
@@ -91,42 +88,34 @@ private:
     Video video_;
     Audio audio_;
     Input input_;
+    Text text_;
+    MenuBar menu_;
+    ButtonConfig buttonConfig_;
     LaunchOptions opt_;
     std::unique_ptr<LibretroCore> core_;
 
     bool quit_ = false;
-    Screen screen_ = Screen::Library;
 
-    // Library state
-    std::filesystem::path cwd_;
-    std::vector<Entry> entries_;
-    int sel_ = 0, scroll_ = 0;
-    std::vector<bool> systemReady_;
-
-    // Running game state
+    // Running game
     System system_ = System::Unknown;
-    std::filesystem::path gamePath_;     // what the user picked (zip or file)
-    std::filesystem::path extracted_;    // temp file pulled out of a zip
+    std::filesystem::path gamePath_;   // what the user picked (zip or file)
+    std::filesystem::path extracted_;  // temp file pulled out of a zip
     std::string gameTitle_;
     std::vector<uint8_t> lastSram_;
     Uint32 lastSramCheck_ = 0;
     int slot_ = 1;
+    bool paused_ = false;
+    bool focusLost_ = false;
     bool fastForward_ = false;
     bool fastForwardToggled_ = false;
-    int pauseSel_ = 0;
+    bool wasRunning_ = false;
 
-    // Error / OSD
-    std::string errorTitle_, errorText_;
-    Screen errorReturn_ = Screen::Library;
+    // Mouse / messages
+    int mouseX_ = 0, mouseY_ = 0;
+    Uint32 lastMouseMove_ = 0;
     std::string osdText_;
     Uint32 osdUntil_ = 0;
-    Uint32 quitArmedUntil_ = 0;
 
-    // Controller menu navigation repeat
-    Nav heldNav_ = Nav::None;
-    Uint32 heldSince_ = 0, lastRepeat_ = 0;
-
-    // Frame pacing
     double nextFrame_ = 0;
 
     // Headless stats

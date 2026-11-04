@@ -1,13 +1,16 @@
 # Nintendall
 
-One app that plays games from many Nintendo systems. Pick (or drag in) any game
-file, and Nintendall works out which system it's for and starts the right
-emulator automatically. Everything comes in one package: there is nothing to
-install or choose.
+One app that plays games from many Nintendo systems. Drag a game file onto the
+window (or use File > Open) and Nintendall works out which system it's for and
+starts the right emulator automatically. Everything comes in one package: there
+is nothing to install or choose.
+
+The window is deliberately simple: a black screen with a menu bar
+(File, Emulation, State, Options, Help), in the style of classic emulators.
 
 Under the hood it's a **libretro frontend**. The emulation is done by one proven,
 open-source emulator "core" per system, bundled in `cores/` next to the program.
-Nintendall provides the app around them: game detection, the library screen,
+Nintendall provides the app around them: game detection, the window and menus,
 controller support (via SDL), saves and save states.
 
 ## Systems
@@ -48,19 +51,19 @@ Try it from the command line:
 
 ## Building
 
-Needs CMake, a C++17 compiler, Python 3, SDL2 and zlib.
+Needs CMake, a C++17 compiler, Python 3, SDL2, SDL2_ttf and zlib.
 
 ```
 # Debian/Ubuntu
-sudo apt install build-essential cmake python3 libsdl2-dev zlib1g-dev
+sudo apt install build-essential cmake python3 libsdl2-dev libsdl2-ttf-dev zlib1g-dev
 # macOS
-brew install cmake sdl2
+brew install cmake sdl2 sdl2_ttf
 ```
 
 ```
 cmake -S . -B build
 cmake --build build -j                          # also bundles all emulators into build/cores
-./build/nintendall                              # open the library
+./build/nintendall                              # open the window
 ./build/nintendall "My Game.nes"                # or play a game directly
 cmake --install build --prefix dist/Nintendall  # make the shippable folder
 ```
@@ -82,32 +85,36 @@ sudo apt install mingw-w64 libz-mingw-w64-dev nsis
 ./tools/build_windows.sh
 ```
 
-The program only needs `SDL2.dll` (shipped beside it); the compiler runtime and
+The program only needs `SDL2.dll` and `SDL2_ttf.dll` (shipped beside it); the compiler runtime and
 zlib are built in. The setup.exe isn't code-signed yet, so Windows SmartScreen
 will warn on first run. Sign it before selling.
 
 ## Controls
 
 Any controller SDL supports works (Xbox, PlayStation, Switch Pro, 8BitDo, most
-USB pads), and you can plug controllers in or out at any time. Buttons are mapped
-by **position**, so the bottom face button is always the bottom button.
-Player 1 is the keyboard plus the first controller, player 2 the second
-controller, and so on. Extra mappings can go in `gamecontrollerdb.txt` next to
-the program.
+USB pads), and you can plug controllers in or out at any time. Player 1 is the
+first controller, player 2 the second, and so on. All keys and controller
+buttons can be changed in **Options > Button Config** (per player). Extra
+controller mappings can go in `gamecontrollerdb.txt` next to the program.
 
-| | Keyboard | Controller |
-|---|---|---|
-| D-pad | Arrow keys | D-pad / left stick (retro systems) |
-| A / B / X / Y | X / Z / S / A | Right / bottom / top / left face buttons |
-| L / R, L2 / R2 | Q / W, 1 / 3 | Shoulders / triggers |
-| Start / Select | Enter / Right Shift | Start / Back |
-| Menu | Esc | Guide button, or Select + Start |
-| Save / load state | F5 / F9 (F6 / F7 change slot) | from the menu |
-| Fast forward | hold Tab (Ctrl+Space toggles) | |
-| Screenshot | F12 | |
-| Fullscreen | F11 or Alt+Enter | |
+Default keyboard (player 1): arrows = D-pad, X / Z = A / B, S / A = X / Y,
+Q / W = L / R, 1 / 3 = L2 / R2, Enter = Start, Right Shift = Select.
 
-You can also drag a game file onto the window from anywhere.
+| Shortcut | Does |
+|---|---|
+| Ctrl+O | Open a game |
+| Ctrl+W | Close the game |
+| Ctrl+P (or Pause key) | Pause / resume |
+| Ctrl+R | Reset |
+| F5 / F9 | Save / load state |
+| F6 / F7 | Previous / next state slot |
+| Hold Tab | Fast forward |
+| F11 or Alt+Enter | Fullscreen (Esc leaves fullscreen) |
+| F12 | Screenshot |
+| F10 | Open the menu bar with the keyboard |
+| Controller Home, or Select + Start | Pause / resume |
+
+The game pauses automatically when the window loses focus or a menu is open.
 
 ## Where files go
 
@@ -121,7 +128,7 @@ beside it instead.
 - `system/`: BIOS / firmware files that some cores need
 - `config/`: per-core settings (`<core>.opt`, editable)
 - `screenshots/`
-- `nintendall.cfg`: app settings
+- `nintendall.cfg`: settings, button mappings and recent games
 
 ## Code layout
 
@@ -130,9 +137,10 @@ beside it instead.
 | `src/detect.*` | works out the system from a file / zip / folder |
 | `src/systems.*` | the list of systems, extensions and the emulator for each |
 | `src/core.*` | loads a libretro core and implements the libretro API |
-| `src/app.*` | library screen, pause menu, game loop, saves |
+| `src/app.*` | main window, menu actions, game loop, saves |
+| `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |
 | `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |
-| `src/zip.*`, `src/png.*`, `src/font.*` | zip reading, screenshots, built-in UI font |
+| `src/zip.*`, `src/png.*` | zip reading, screenshots |
 | `tools/bundle_cores.py` | build step that bundles the emulator cores |
 | `tools/build_windows.sh`, `installer/nintendall.nsi`, `cmake/toolchain-mingw64.cmake` | Windows build and setup.exe |
 | `tools/make_icon.py`, `assets/` | app icon and Windows resources |

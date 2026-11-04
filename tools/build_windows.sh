@@ -8,15 +8,23 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDL_VERSION=2.32.10
 SDL_DIR="$ROOT/third_party/win/SDL2-$SDL_VERSION"
+TTF_VERSION=2.24.0
+TTF_DIR="$ROOT/third_party/win/SDL2_ttf-$TTF_VERSION"
 BUILD="$ROOT/build-windows"
 STAGE="$ROOT/dist/windows/Nintendall"
 VERSION="$(sed -n 's/^project(Nintendall VERSION \([0-9.]*\).*/\1/p' "$ROOT/CMakeLists.txt")"
 
-# 1. SDL2 for MinGW (official release from libsdl.org's GitHub)
+# 1. SDL2 and SDL2_ttf for MinGW (official releases from libsdl.org's GitHub)
 if [ ! -d "$SDL_DIR" ]; then
   echo "Downloading SDL2 $SDL_VERSION for Windows..."
   mkdir -p "$ROOT/third_party/win"
   curl -fsSL "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-devel-$SDL_VERSION-mingw.tar.gz" \
+    | tar xz -C "$ROOT/third_party/win"
+fi
+
+if [ ! -d "$TTF_DIR" ]; then
+  echo "Downloading SDL2_ttf $TTF_VERSION for Windows..."
+  curl -fsSL "https://github.com/libsdl-org/SDL_ttf/releases/download/release-$TTF_VERSION/SDL2_ttf-devel-$TTF_VERSION-mingw.tar.gz" \
     | tar xz -C "$ROOT/third_party/win"
 fi
 

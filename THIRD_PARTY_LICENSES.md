@@ -23,6 +23,10 @@ Also used:
 |---|---|---|
 | libretro API header (`libretro.h`) | MIT | https://github.com/libretro/libretro-common |
 | SDL2 | zlib | https://libsdl.org |
+| SDL2_ttf (font drawing) | zlib | https://github.com/libsdl-org/SDL_ttf |
+| FreeType (inside SDL2_ttf) | FreeType License (FTL) | https://freetype.org. Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved. |
+| HarfBuzz (inside SDL2_ttf) | MIT ("Old MIT") | https://github.com/harfbuzz/harfbuzz |
+| DejaVu Sans font (`fonts/DejaVuSans.ttf`) | Bitstream Vera / public domain, see `fonts/DejaVu-LICENSE.txt` | https://dejavu-fonts.github.io |
 | zlib | zlib | https://zlib.net |
 
 ## Source code offer

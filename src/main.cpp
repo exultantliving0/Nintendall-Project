@@ -1,9 +1,8 @@
 // Nintendall - a multi-system game player built on libretro cores.
 //
 // Usage:
-//   nintendall                      open the game library
+//   nintendall                      open the window (drag games in, or File > Open)
 //   nintendall <game file>          detect the system and play it
-//   nintendall <folder>             open the library in that folder
 //   nintendall --detect <files...>  print what system each file is for
 //
 // Options:
@@ -50,7 +49,7 @@ static int detectOnly(const std::vector<std::string>& files) {
 static void usage() {
     std::puts(
         "Nintendall " NINTENDALL_VERSION "\n"
-        "usage: nintendall [game-or-folder] [--fullscreen]\n"
+        "usage: nintendall [game] [--fullscreen]\n"
         "       nintendall --detect FILE...\n"
         "       nintendall GAME --frames N [--screenshot out.png] [--hold a,start]");
 }
@@ -95,6 +94,7 @@ int main(int argc, char** argv) {
     // RetroPad, whatever is printed on it (Xbox A, PlayStation Cross, Nintendo B).
     SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, "0");
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");  // sharp text on high-DPI screens
     const Uint32 subsystems = opt.headless ? 0 : (SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER);
     if (SDL_Init(subsystems) != 0) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
