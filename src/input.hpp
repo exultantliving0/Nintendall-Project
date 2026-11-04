@@ -54,6 +54,7 @@ public:
     void setKey(int player, int button, SDL_Scancode key);
     void setPad(int player, int button, PadBind bind);
     void resetDefaults(int player);
+    bool hasKeyboardKeys(int player) const;  // any keyboard key mapped for this player
     void load(const Config& cfg);
     void save(Config& cfg) const;
 

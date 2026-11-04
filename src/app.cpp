@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -11,6 +12,9 @@
 #include "filedialog.hpp"
 
 namespace fs = std::filesystem;
+
+// Set by Ctrl+C / kill in headless test runs (no window, so no SDL quit event).
+volatile std::sig_atomic_t g_stopRequested = 0;
 
 namespace {
 
@@ -84,6 +88,7 @@ std::string configSafe(std::string s) {
 
 int App::run(const fs::path& start, const LaunchOptions& opt) {
     opt_ = opt;
+    updateInputProfile();  // identity button mapping until a game says otherwise
     paths_.init();
     cfg_.load(paths_.data / "nintendall.cfg");
 
@@ -128,9 +133,11 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
 
     // Headless: load the game, run N frames as fast as possible, report, exit.
     if (opt.headless) {
+        std::signal(SIGINT, [](int) { g_stopRequested = 1; });
+        std::signal(SIGTERM, [](int) { g_stopRequested = 1; });
         if (!startGame(start)) return 1;
         const double t0 = nowSeconds();
-        for (int i = 0; i < opt.frames && core_; ++i) core_->run();
+        for (int i = 0; i < opt.frames && core_ && !g_stopRequested; ++i) core_->run();
         const double dt = nowSeconds() - t0;
         std::printf("Ran %d frames in %.2fs (%.0f fps, %.1fx real time)\n", opt.frames, dt, opt.frames / dt,
                     opt.frames / dt / core_->avInfo().timing.fps);
@@ -151,7 +158,10 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
     while (!quit_) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) handleEvent(e);
-        if (buttonConfig_.takeChanged()) saveConfig();
+        if (buttonConfig_.takeChanged()) {
+            saveConfig();
+            connectPorts();
+        }
         if (settings_.takeRestartRequest() && core_) {
             const fs::path game = gamePath_;  // reload the game so the new settings apply
             startGame(game);
@@ -292,7 +302,7 @@ bool App::startGame(const fs::path& path) {
     // 4. Start the emulator with the game.
     std::string err;
     for (int attempt = 0; attempt < 2; ++attempt) {
-        core_ = std::make_unique<LibretroCore>(*this, paths_.system, paths_.saves,
+        core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(sys.core), paths_.saves,
                                                paths_.config / (std::string(sys.core) + ".opt"));
         const bool coreLoaded = core_->load(corePath, err);
         if (coreLoaded && (det.system == System::NDS || det.system == System::N3DS)) {
@@ -304,6 +314,12 @@ bool App::startGame(const fs::path& path) {
             applyLayout();
         }
         if (coreLoaded) chooseRenderer(*core_, det.system, attempt > 0);
+        if (coreLoaded && (det.system == System::GameCube || det.system == System::Wii))
+            core_->forceOption("dolphin_osd_enabled", "disabled");  // no emulator info text over the game
+        if (coreLoaded && det.system == System::Wii) {
+            core_->preferDefault("dolphin_wiimote_default_device", "nunchuk");  // what most Wii games expect
+            core_->preferDefault("dolphin_ir_offset", "10");  // pointer lines up with the mouse / stick
+        }
         if (coreLoaded && core_->loadGame(gameFile, err)) break;
 
         // If this PC couldn't give the emulator OpenGL, try once more with software rendering.
@@ -334,6 +350,8 @@ bool App::startGame(const fs::path& path) {
     audio_.clear();
     audio_.setInputRate(av.timing.sample_rate);
     input_.setStickAsDpad(usesStickAsDpad(system_));
+    updateInputProfile();
+    connectPorts();
     video_.clearFrame();
     loadSram();
     paused_ = fastForward_ = fastForwardToggled_ = false;
@@ -365,6 +383,7 @@ void App::stopGame() {
     extracted_.clear();
     video_.clearFrame();
     system_ = System::Unknown;
+    updateInputProfile();
     paused_ = false;
     if (video_.window()) SDL_SetWindowTitle(video_.window(), "Nintendall");
 }
@@ -476,7 +495,51 @@ void App::onAudio(const int16_t* stereo, size_t frames) {
 
 int16_t App::onInputState(unsigned port, unsigned device, unsigned index, unsigned id) {
     if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_POINTER) return port == 0 && index == 0 ? pointerState(id) : 0;
+    if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_JOYPAD) {
+        // Some systems get their face buttons rearranged (e.g. GameCube A on the bottom button).
+        if (id == RETRO_DEVICE_ID_JOYPAD_MASK) {
+            const int ours = input_.state(port, device, index, id);
+            int mask = 0;
+            for (int b = 0; b < 16; ++b)
+                if ((ours >> inputRemap_[size_t(b)]) & 1) mask |= 1 << b;
+            return int16_t(mask);
+        }
+        if (id < 16) return input_.state(port, device, index, unsigned(inputRemap_[id]));
+    }
     return input_.state(port, device, index, id);
+}
+
+// Plug in a controller for player 1 and for every other player who has a controller (or keys).
+// Leaving the rest unplugged matters for e.g. Wii games, which show a pointer per Wiimote.
+void App::connectPorts() {
+    if (!core_) return;
+    for (int p = 0; p < Input::kMaxPlayers; ++p) {
+        const bool present = p == 0 || p < input_.controllerCount() || input_.hasKeyboardKeys(p);
+        core_->setPortDevice(unsigned(p), present ? RETRO_DEVICE_JOYPAD : RETRO_DEVICE_NONE);
+    }
+}
+
+// Which buttons Button Config shows, and how our buttons feed the core's, for the running game.
+void App::updateInputProfile() {
+    for (int i = 0; i < 16; ++i) inputRemap_[size_t(i)] = i;
+    buttonRows_ = systemButtons(system_);
+    if (system_ == System::GameCube) {
+        // GameCube: A = bottom button, B = left, X = right, Y = top (Dolphin's default puts A on the right).
+        inputRemap_[RETRO_DEVICE_ID_JOYPAD_A] = RETRO_DEVICE_ID_JOYPAD_B;
+        inputRemap_[RETRO_DEVICE_ID_JOYPAD_B] = RETRO_DEVICE_ID_JOYPAD_Y;
+        inputRemap_[RETRO_DEVICE_ID_JOYPAD_X] = RETRO_DEVICE_ID_JOYPAD_A;
+        inputRemap_[RETRO_DEVICE_ID_JOYPAD_Y] = RETRO_DEVICE_ID_JOYPAD_X;
+    } else if (system_ == System::Wii && core_) {
+        auto& opts = core_->options();
+        auto it = opts.find("dolphin_wiimote_default_device");
+        const std::string device = it != opts.end() ? it->second.value : "nunchuk";
+        buttonRows_ = wiiButtons(device);
+        if (device == "nunchuk" || device == "upright" || device == "motionplus" || device == "motionplus_nunchuk") {
+            // Wiimote A (the big button) on the bottom button, B (the trigger) on the right one.
+            inputRemap_[RETRO_DEVICE_ID_JOYPAD_A] = RETRO_DEVICE_ID_JOYPAD_B;
+            inputRemap_[RETRO_DEVICE_ID_JOYPAD_B] = RETRO_DEVICE_ID_JOYPAD_A;
+        }
+    }
 }
 
 // The mouse acts as the stylus / finger: libretro pointer coordinates run from
@@ -585,6 +648,7 @@ void App::handleEvent(const SDL_Event& e) {
     std::string msg;
     if (input_.handleDeviceEvent(e, &msg)) {
         if (!msg.empty()) osd(msg);
+        connectPorts();  // a controller came or went: plug / unplug that player
         return;
     }
 
@@ -737,7 +801,7 @@ void App::doAction(int a) {
     case ActFastForward: fastForwardToggled_ = !fastForwardToggled_; break;
     case ActSaveState: saveState(); break;
     case ActLoadState: loadState(); break;
-    case ActButtonConfig: buttonConfig_.open(system_); break;
+    case ActButtonConfig: buttonConfig_.open(system_, core_ ? buttonRows_ : systemButtons(System::Unknown)); break;
     case ActConsoleSettings:
         if (core_) settings_.open(system_, *core_);
         break;

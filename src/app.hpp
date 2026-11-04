@@ -1,6 +1,7 @@
 #pragma once
 #include <SDL.h>
 
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -39,6 +40,8 @@ public:
     void onMessage(const std::string& msg, unsigned durationMs) override;
     void onAvInfoChanged() override;
     bool isFastForwarding() const override { return fastForward_; }
+    unsigned audioOutputRate() const override { return audio_.ok() ? unsigned(audio_.outputRate()) : 48000u; }
+    float displayRefreshRate() const override { return float(video_.displayHz()); }
 
 private:
     // Menu actions
@@ -88,6 +91,8 @@ private:
     void applyLayout();
     void fitWindowToGame();
     int16_t pointerState(unsigned id) const;
+    void updateInputProfile();
+    void connectPorts();
 
     // Subsystems
     Paths paths_;
@@ -118,6 +123,8 @@ private:
     bool fastForward_ = false;
     bool fastForwardToggled_ = false;
     bool wasRunning_ = false;
+    std::array<int, 16> inputRemap_{};  // button the core asks for -> our button (GameCube/Wii face buttons)
+    std::vector<ButtonLabel> buttonRows_;  // what Button Config lists for this game
     int layout_ = 0;           // index into the DS layout list
     bool layoutSwap_ = false;  // swap top and bottom screens
     int pendingFitFrames_ = 0;  // after a layout change: frames left to wait for the new picture size

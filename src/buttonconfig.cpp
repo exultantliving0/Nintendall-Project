@@ -7,9 +7,9 @@
 
 using namespace ui;
 
-void ButtonConfig::open(System system) {
+void ButtonConfig::open(System system, const std::vector<ButtonLabel>& rows) {
     system_ = system;
-    rows_ = systemButtons(system);
+    rows_ = rows;
     players_ = systemPlayers(system);
     if (player_ >= players_) player_ = 0;
     cells_.assign(rows_.size(), {});

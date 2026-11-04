@@ -19,6 +19,8 @@ public:
     virtual void onMessage(const std::string& msg, unsigned durationMs) = 0;
     virtual void onAvInfoChanged() = 0;
     virtual bool isFastForwarding() const = 0;
+    virtual unsigned audioOutputRate() const { return 48000; }  // what the speakers play at
+    virtual float displayRefreshRate() const { return 60.0f; }
 };
 
 struct CoreOption {
@@ -26,6 +28,7 @@ struct CoreOption {
     std::string value;
     std::string defaultValue;
     std::vector<std::string> values;
+    std::vector<std::string> labels;  // the core's display name for each value (may equal the value)
 };
 
 // One loaded libretro core (a shared library implementing an emulator).
@@ -44,6 +47,8 @@ public:
 
     void run();
     void reset();
+    // Plug a controller type into a port (RETRO_DEVICE_JOYPAD), or unplug it (RETRO_DEVICE_NONE).
+    void setPortDevice(unsigned port, unsigned device);
     std::vector<uint8_t> saveState();
     bool loadState(const std::vector<uint8_t>& data);
 
@@ -66,6 +71,9 @@ public:
     // Set an option from the app (e.g. the DS screen layout). Applies now, or as soon as
     // the core defines the option, and wins over the user's options file.
     void forceOption(const std::string& key, const std::string& value);
+    // Our own default for an option: used unless the user has picked another value
+    // (applies now, or as soon as the core defines the option).
+    void preferDefault(const std::string& key, const std::string& value);
 
     // Called through the static libretro callbacks.
     bool environment(unsigned cmd, void* data);
@@ -100,7 +108,8 @@ private:
         size_t (*get_memory_size)(unsigned);
     };
 
-    void defineOption(const char* key, const char* desc, const char* def, std::vector<std::string> values);
+    void defineOption(const char* key, const char* desc, const char* def, std::vector<std::string> values,
+                      std::vector<std::string> labels = {});
     void loadOptionOverrides();
     void saveOptions() const;
 
@@ -114,6 +123,7 @@ private:
     std::filesystem::path optionsFile_;
     std::map<std::string, std::string> optionOverrides_;
     std::map<std::string, std::string> forced_;
+    std::map<std::string, std::string> preferred_;
     std::map<std::string, CoreOption> options_;
     bool optionsDirty_ = false;
 

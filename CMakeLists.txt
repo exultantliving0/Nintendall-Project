@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nintendall VERSION 0.6.0 LANGUAGES CXX)
+project(Nintendall VERSION 0.7.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -83,10 +83,11 @@ endif()
 # All-in-one package: the emulator cores are bundled in cores/ next to the program.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(NINTENDALL_CORES_DIR ${CMAKE_BINARY_DIR}/cores)
+set(NINTENDALL_SYSDATA_DIR ${CMAKE_BINARY_DIR}/system)
 add_custom_target(bundle_cores ALL
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/bundle_cores.py
           --dest ${NINTENDALL_CORES_DIR} --cache ${CMAKE_SOURCE_DIR}/cores/${NINTENDALL_CORE_PLATFORM}
-          --platform ${NINTENDALL_CORE_PLATFORM}
+          --platform ${NINTENDALL_CORE_PLATFORM} --system-dest ${NINTENDALL_SYSDATA_DIR}
   COMMENT "Bundling emulator cores"
   VERBATIM)
 add_dependencies(nintendall bundle_cores)
@@ -94,6 +95,7 @@ add_dependencies(nintendall bundle_cores)
 # "cmake --install build --prefix dist/Nintendall" makes the shippable folder.
 install(TARGETS nintendall RUNTIME DESTINATION .)
 install(DIRECTORY ${NINTENDALL_CORES_DIR}/ DESTINATION cores)
+install(DIRECTORY ${NINTENDALL_SYSDATA_DIR}/ DESTINATION system)
 install(FILES README.md THIRD_PARTY_LICENSES.md DESTINATION .)
 
 if(MSVC)

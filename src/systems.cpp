@@ -23,9 +23,9 @@ static const std::vector<SystemInfo>& table() {
         {System::NDS, "nds", "NDS", "Nintendo DS",
          {".nds", ".dsi", ".srl", ".ids"}, "melondsds", "melonDS DS", false, nullptr},
         {System::GameCube, "gamecube", "GC", "GameCube",
-         {".gcm", ".gcz", ".tgc", ".dol", ".rvz", ".wia", ".ciso", ".iso", ".elf"}, "dolphin", "Dolphin", true, nullptr},
+         {".gcm", ".gcz", ".tgc", ".dol", ".rvz", ".wia", ".ciso", ".iso", ".elf"}, "dolphin", "Dolphin", false, nullptr},
         {System::Wii, "wii", "Wii", "Wii",
-         {".wbfs", ".wad"}, "dolphin", "Dolphin", true, nullptr},
+         {".wbfs", ".wad"}, "dolphin", "Dolphin", false, nullptr},
         {System::WiiU, "wiiu", "WiiU", "Wii U",
          {".wud", ".wux", ".wua", ".rpx", ".wuhb"}, "cemu", "Cemu", true, "Needs your own console keys (keys.txt)"},
         {System::N3DS, "3ds", "3DS", "Nintendo 3DS",
@@ -82,6 +82,14 @@ const std::vector<ButtonLabel>& systemButtons(System s) {
         {kB, "A"}, {kY, "B"}, {kL2, "Z"}, {kL, "L"}, {kR, "R"}, {kStart, "Start"},
         {20, "C-Up"}, {21, "C-Down"}, {22, "C-Left"}, {23, "C-Right"},
     };
+    // Dolphin GameCube pad. Nintendall feeds GameCube A from the bottom button (see App::updateInputProfile),
+    // so these rows list *our* button ids: A = bottom (0), B = left (1), X = right (8), Y = top (9).
+    static const std::vector<ButtonLabel> gc = {
+        {kUp, "D-Pad Up"}, {kDown, "D-Pad Down"}, {kLeft, "D-Pad Left"}, {kRight, "D-Pad Right"},
+        {16, "Control Stick Up"}, {17, "Control Stick Down"}, {18, "Control Stick Left"}, {19, "Control Stick Right"},
+        {20, "C-Stick Up"}, {21, "C-Stick Down"}, {22, "C-Stick Left"}, {23, "C-Stick Right"},
+        {kB, "A"}, {kY, "B"}, {kA, "X"}, {kX, "Y"}, {kR, "Z"}, {kL2, "L"}, {kR2, "R"}, {kStart, "Start"},
+    };
     static const std::vector<ButtonLabel> all = {
         {kUp, "Up"}, {kDown, "Down"}, {kLeft, "Left"}, {kRight, "Right"},
         {kA, "A"},   {kB, "B"},       {kX, "X"},       {kY, "Y"},
@@ -98,8 +106,43 @@ const std::vector<ButtonLabel>& systemButtons(System s) {
     case System::NDS: return snes;
     case System::N3DS: return n3ds;
     case System::N64: return n64;
+    case System::GameCube: return gc;
+    case System::Wii: return wiiButtons("nunchuk");
     default: return all;  // no game yet, or systems that aren't playable yet
     }
+}
+
+const std::vector<ButtonLabel>& wiiButtons(const std::string& device) {
+    // Rows use *our* button ids; App::updateInputProfile swaps A/B for the Wiimote so A is the bottom button.
+    static const std::vector<ButtonLabel> nunchuk = {
+        {kUp, "D-Pad Up"}, {kDown, "D-Pad Down"}, {kLeft, "D-Pad Left"}, {kRight, "D-Pad Right"},
+        {16, "Nunchuk Stick Up"}, {17, "Nunchuk Stick Down"}, {18, "Nunchuk Stick Left"}, {19, "Nunchuk Stick Right"},
+        {20, "Pointer Up"}, {21, "Pointer Down"}, {22, "Pointer Left"}, {23, "Pointer Right"},
+        {kB, "A"}, {kA, "B"}, {kX, "C"}, {kY, "Z"}, {kR, "+"}, {kL, "-"}, {kStart, "1"}, {kSelect, "2"},
+        {kR3, "Home"}, {kR2, "Shake Wiimote"}, {kL2, "Shake Nunchuk"},
+    };
+    static const std::vector<ButtonLabel> upright = {
+        {kUp, "D-Pad Up"}, {kDown, "D-Pad Down"}, {kLeft, "D-Pad Left"}, {kRight, "D-Pad Right"},
+        {16, "Tilt Forward"}, {17, "Tilt Back"}, {18, "Tilt Left"}, {19, "Tilt Right"},
+        {20, "Pointer Up"}, {21, "Pointer Down"}, {22, "Pointer Left"}, {23, "Pointer Right"},
+        {kB, "A"}, {kA, "B"}, {kX, "1"}, {kY, "2"}, {kStart, "+"}, {kSelect, "-"}, {kR3, "Home"}, {kR2, "Shake"},
+    };
+    static const std::vector<ButtonLabel> sideways = {
+        {kUp, "D-Pad Up"}, {kDown, "D-Pad Down"}, {kLeft, "D-Pad Left"}, {kRight, "D-Pad Right"},
+        {16, "Tilt Forward"}, {17, "Tilt Back"}, {18, "Tilt Left"}, {19, "Tilt Right"},
+        {kB, "1"}, {kA, "2"}, {kX, "A"}, {kY, "B"}, {kStart, "+"}, {kSelect, "-"}, {kR3, "Home"}, {kR2, "Shake"},
+    };
+    static const std::vector<ButtonLabel> classic = {
+        {kUp, "D-Pad Up"}, {kDown, "D-Pad Down"}, {kLeft, "D-Pad Left"}, {kRight, "D-Pad Right"},
+        {16, "Left Stick Up"}, {17, "Left Stick Down"}, {18, "Left Stick Left"}, {19, "Left Stick Right"},
+        {20, "Right Stick Up"}, {21, "Right Stick Down"}, {22, "Right Stick Left"}, {23, "Right Stick Right"},
+        {kA, "A"}, {kB, "B"}, {kX, "X"}, {kY, "Y"}, {kL2, "L"}, {kR2, "R"}, {kL, "ZL"}, {kR, "ZR"},
+        {kStart, "+"}, {kSelect, "-"}, {kR3, "Home"},
+    };
+    if (device == "sideways" || device == "motionplus_sideways") return sideways;
+    if (device == "upright" || device == "motionplus") return upright;
+    if (device.find("classic") != std::string::npos) return classic;
+    return nunchuk;
 }
 
 int systemPlayers(System s) {

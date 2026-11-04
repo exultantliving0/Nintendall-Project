@@ -13,6 +13,7 @@ import io
 import os
 import platform
 import shutil
+import subprocess
 import sys
 import urllib.request
 import zipfile
@@ -73,12 +74,40 @@ def download(core, filename, plat, cache):
         os.replace(tmp, os.path.join(cache, filename))
 
 
+# Data files some cores need next to them (read-only), fetched from the core's source repo.
+# Dolphin (GameCube/Wii) needs its "Sys" folder: game fixes, fonts, DSP code.
+SYSTEM_DATA = [
+    {"name": "dolphin-emu/Sys", "repo": "https://github.com/libretro/dolphin.git", "path": "Data/Sys"},
+]
+
+
+def fetch_system_data(cache, dest, update):
+    for item in SYSTEM_DATA:
+        cached = os.path.join(cache, "system", item["name"])
+        if update or not os.path.isdir(cached):
+            print(f"  fetching {item['path']} from {item['repo']}")
+            work = os.path.join(cache, "system", "_checkout")
+            shutil.rmtree(work, ignore_errors=True)
+            run = lambda *a: subprocess.run(a, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            run("git", "clone", "--depth", "1", "--filter=blob:none", "--sparse", item["repo"], work)
+            run("git", "-C", work, "sparse-checkout", "set", item["path"])
+            shutil.rmtree(cached, ignore_errors=True)
+            os.makedirs(os.path.dirname(cached), exist_ok=True)
+            shutil.move(os.path.join(work, item["path"]), cached)
+            shutil.rmtree(work, ignore_errors=True)
+        target = os.path.join(dest, item["name"])
+        if not os.path.isdir(target) or update:
+            shutil.rmtree(target, ignore_errors=True)
+            shutil.copytree(cached, target)
+
+
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dest", required=True, help="cores folder next to the program")
     ap.add_argument("--cache", default=os.path.join(root, "cores"), help="download cache")
     ap.add_argument("--update", action="store_true", help="re-download the latest cores")
+    ap.add_argument("--system-dest", help="where to put the cores' bundled data files (e.g. build/system)")
     ap.add_argument("--platform", default="auto", choices=["auto", *PLATFORMS],
                     help="which OS to fetch cores for (default: this one)")
     args = ap.parse_args()
@@ -98,6 +127,11 @@ def main():
                 shutil.copy2(cached, dest)
         except Exception as e:  # noqa: BLE001 - report every failure at the end
             failed.append(f"{core}: {e}")
+    if args.system_dest:
+        try:
+            fetch_system_data(args.cache, args.system_dest, args.update)
+        except Exception as e:  # noqa: BLE001
+            failed.append(f"system data: {e}")
     if failed:
         print("Failed to bundle cores:\n  " + "\n  ".join(failed), file=sys.stderr)
         return 1

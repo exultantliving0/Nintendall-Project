@@ -14,10 +14,13 @@ struct Paths {
     std::filesystem::path screenshots;
     std::filesystem::path cache;        // temporary files (games extracted from zips)
     std::vector<std::filesystem::path> coreDirs;  // where the bundled emulator cores live
+    std::filesystem::path bundledSystem;          // read-only data shipped for some cores (Dolphin's Sys folder)
 
     void init();
     // Full path of an installed core, or empty if it isn't installed.
     std::filesystem::path findCore(const std::string& coreName) const;
+    // The "system" folder a core should use: the bundled one if it needs our shipped data, else the user's.
+    std::filesystem::path systemDirFor(const std::string& coreName) const;
 };
 
 // File name of a libretro core for this platform, e.g. "mesen_libretro.so".

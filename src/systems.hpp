@@ -40,6 +40,8 @@ struct ButtonLabel {
 const SystemInfo& systemInfo(System s);
 // The buttons this system's controller has, in display order. Unknown = every button.
 const std::vector<ButtonLabel>& systemButtons(System s);
+// Wii buttons for a Dolphin "Wiimote > Device" value (nunchuk, sideways, upright, classic).
+const std::vector<ButtonLabel>& wiiButtons(const std::string& device);
 // How many players the system supports (shown as tabs in Button Config).
 int systemPlayers(System s);
 const std::vector<System>& allSystems();

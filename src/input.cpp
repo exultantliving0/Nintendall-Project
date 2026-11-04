@@ -71,6 +71,12 @@ void Input::resetDefaults(int player) {
     m.pad[RETRO_DEVICE_ID_JOYPAD_R3] = btn(SDL_CONTROLLER_BUTTON_RIGHTSTICK);
 }
 
+bool Input::hasKeyboardKeys(int player) const {
+    for (auto k : maps_[player].keys)
+        if (k != SDL_SCANCODE_UNKNOWN) return true;
+    return false;
+}
+
 void Input::setKey(int player, int button, SDL_Scancode key) {
     PlayerMap& m = maps_[player];
     if (key != SDL_SCANCODE_UNKNOWN)

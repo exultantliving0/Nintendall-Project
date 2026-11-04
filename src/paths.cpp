@@ -46,6 +46,17 @@ void Paths::init() {
     fs::path exeDir = base;
     if (!exeDir.has_filename()) exeDir = exeDir.parent_path();
     coreDirs = {base / "cores", exeDir.parent_path() / "cores"};
+    for (const auto& d : {base / "system", exeDir.parent_path() / "system"})
+        if (fs::is_directory(d / "dolphin-emu", ec)) {
+            bundledSystem = d;
+            break;
+        }
+}
+
+fs::path Paths::systemDirFor(const std::string& coreName) const {
+    // Dolphin reads its Sys folder from <system>/dolphin-emu/Sys; we ship that folder.
+    if (coreName == "dolphin" && !bundledSystem.empty()) return bundledSystem;
+    return system;
 }
 
 fs::path Paths::findCore(const std::string& coreName) const {

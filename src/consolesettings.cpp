@@ -239,12 +239,56 @@ std::vector<SettingGroup> n64() {
     };
 }
 
+std::vector<SettingGroup> dolphin(bool wii) {
+    std::vector<SettingGroup> g = {
+        {"Picture",
+         {opt("Resolution", "dolphin_efb_scale",
+              {{"1", "Native (480p)"}, {"2", "2x (720p)"}, {"3", "3x (1080p)"}, {"4", "4x (1440p)"}, {"5", "5x"},
+               {"6", "6x (4K)"}, {"8", "8x"}},
+              true, "Renders 3D sharper than the real console"),
+          opt("Widescreen Hack", "dolphin_widescreen_hack", kOnOff, true, "Shows more of the 3D world in 16:9; some games glitch"),
+          opt("Aspect Ratio", "dolphin_aspect_ratio",
+              {{"0", "Auto"}, {"1", "Force 16:9"}, {"2", "Force 4:3"}, {"3", "Stretch"}}, true),
+          opt("Anti-Aliasing", "dolphin_anti_aliasing",
+              {{"0", "Off"}, {"1", "2x MSAA"}, {"2", "4x MSAA"}, {"3", "8x MSAA"}, {"4", "2x SSAA"}, {"5", "4x SSAA"},
+               {"6", "8x SSAA"}},
+              true, "Smooths jagged edges (SSAA looks best but is slowest)"),
+          opt("Anisotropic Filtering", "dolphin_max_anisotropy", {{"0", "Off"}, {"1", "2x"}, {"2", "4x"}, {"3", "8x"}, {"4", "16x"}},
+              true, "Sharper textures at an angle (floors, roads)"),
+          opt("Texture Filtering", "dolphin_force_texture_filtering_mode", {{"0", "Game decides"}, {"1", "Sharp"}, {"2", "Smooth"}},
+              true),
+          opt("Disable Fog", "dolphin_disable_fog", kOnOff, true),
+          opt("Shader Compilation", "dolphin_shader_compilation_mode",
+              {{"0", "Wait (may stutter)"}, {"2", "Smooth (ubershaders)"}, {"3", "Fastest (may flicker)"}}, true,
+              "\"Smooth\" avoids hitches the first time effects appear")}},
+        {"Console",
+         {opt("CPU Speed", "dolphin_cpu_clock_rate",
+              {{"0.50", "50%"}, {"0.80", "80%"}, {"1.00", "100% (normal)"}, {"1.50", "150%"}, {"2.00", "200%"}, {"3.00", "300%"}},
+              true, "Higher can fix slowdown; too high can break games"),
+          opt("Faster Disc Loading", "dolphin_fast_disc_speed", kOnOff, true),
+          opt("Speed Boost (Dual Core)", "dolphin_main_cpu_thread", kOnOff, true),
+          raw("System Language", "dolphin_language", true),
+          opt("Rumble", "dolphin_enable_rumble", kOnOff, true)}},
+    };
+    if (wii)
+        g.push_back({"Wii",
+                     {opt("Wii Controller", "dolphin_wiimote_default_device",
+                          {{"nunchuk", "Wiimote + Nunchuk"}, {"sideways", "Wiimote (sideways)"}, {"upright", "Wiimote"},
+                           {"classic", "Classic Controller"}},
+                          true, "Button Config follows this after the game restarts"),
+                      opt("Wiimote Pointer", "dolphin_ir_mode", {{"1", "Right stick"}, {"0", "Right stick (relative)"}, {"2", "Mouse"}},
+                          true),
+                      opt("Widescreen (Wii setting)", "dolphin_widescreen", kOnOff, true),
+                      opt("Sensor Bar", "dolphin_sensor_bar_position", {{"0", "Below the TV"}, {"1", "Above the TV"}}, true)}});
+    return g;
+}
+
 }  // namespace
 
 const std::vector<SettingGroup>& consoleSettings(System s) {
     static const std::vector<SettingGroup> none;
     static const auto nesS = nes(false), fdsS = nes(true), snesS = snes(), gbS = gameBoy(), gbaS = gba(), dsS = ds(),
-                      ctrS = n3ds(), n64S = n64();
+                      ctrS = n3ds(), n64S = n64(), gcS = dolphin(false), wiiS = dolphin(true);
     switch (s) {
     case System::NES: return nesS;
     case System::FDS: return fdsS;
@@ -255,6 +299,8 @@ const std::vector<SettingGroup>& consoleSettings(System s) {
     case System::NDS: return dsS;
     case System::N3DS: return ctrS;
     case System::N64: return n64S;
+    case System::GameCube: return gcS;
+    case System::Wii: return wiiS;
     default: return none;
     }
 }

@@ -9,7 +9,7 @@ Unicode true
 
 !define APPNAME "Nintendall"
 !ifndef VERSION
-  !define VERSION "0.6.0"
+  !define VERSION "0.7.0"
 !endif
 !ifndef SRCDIR
   !error "Pass -DSRCDIR=<folder with nintendall.exe, SDL2.dll and cores\>"
@@ -83,6 +83,10 @@ Section "${APPNAME} (required)" SecMain
   File "${SRCDIR}\fonts\*.*"
   SetOutPath "$INSTDIR\cores"
   File "${SRCDIR}\cores\*.dll"
+  ; Data some emulators need (Dolphin's Sys folder)
+  RMDir /r "$INSTDIR\system"
+  SetOutPath "$INSTDIR\system"
+  File /r "${SRCDIR}\system\*.*"
   SetOutPath "$INSTDIR"
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -122,6 +126,7 @@ Section "Uninstall"
   SetShellVarContext all
   RMDir /r "$INSTDIR\cores"
   RMDir /r "$INSTDIR\fonts"
+  RMDir /r "$INSTDIR\system"
   Delete "$INSTDIR\nintendall.exe"
   Delete "$INSTDIR\SDL2.dll"
   Delete "$INSTDIR\SDL2_ttf.dll"

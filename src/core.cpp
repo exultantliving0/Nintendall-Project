@@ -18,7 +18,8 @@ static LibretroCore* g_core = nullptr;
 static bool g_verboseCoreLog = SDL_getenv("NINTENDALL_VERBOSE") != nullptr;
 
 static void RETRO_CALLCONV cbLog(enum retro_log_level level, const char* fmt, ...) {
-    if (level == RETRO_LOG_DEBUG && !g_verboseCoreLog) return;
+    // Only warnings and errors by default: some cores (Dolphin) log thousands of info lines per second.
+    if (level < RETRO_LOG_WARN && !g_verboseCoreLog) return;
     static const char* names[] = {"debug", "info", "warn", "error"};
     std::fprintf(stderr, "[core %s] ", names[level <= RETRO_LOG_ERROR ? level : RETRO_LOG_ERROR]);
     va_list ap;
@@ -183,6 +184,10 @@ void LibretroCore::run() {
     if (!audioBuf_.empty()) host_.onAudio(audioBuf_.data(), audioBuf_.size() / 2);
 }
 
+void LibretroCore::setPortDevice(unsigned port, unsigned device) {
+    if (gameLoaded_) api_.set_controller_port_device(port, device);
+}
+
 void LibretroCore::reset() {
     if (hwActive_) hw_.makeCurrent();
     api_.reset();
@@ -208,11 +213,13 @@ size_t LibretroCore::saveRamSize() { return gameLoaded_ ? api_.get_memory_size(R
 // ---------------------------------------------------------------------------
 // Core options
 
-void LibretroCore::defineOption(const char* key, const char* desc, const char* def, std::vector<std::string> values) {
+void LibretroCore::defineOption(const char* key, const char* desc, const char* def, std::vector<std::string> values,
+                                std::vector<std::string> labels) {
     if (!key) return;
     CoreOption o;
     o.description = desc ? desc : key;
     o.values = std::move(values);
+    o.labels = labels.size() == o.values.size() ? std::move(labels) : o.values;
     o.defaultValue = def ? def : (o.values.empty() ? "" : o.values[0]);
     o.value = o.defaultValue;
     auto ov = optionOverrides_.find(key);
@@ -221,6 +228,9 @@ void LibretroCore::defineOption(const char* key, const char* desc, const char* d
         for (const auto& v : o.values) valid = valid || v == ov->second;
         if (valid) o.value = ov->second;
     }
+    auto pref = preferred_.find(key);
+    // A saved value equal to the core's own default doesn't count as the user's choice.
+    if (pref != preferred_.end() && (ov == optionOverrides_.end() || ov->second == o.defaultValue)) o.value = pref->second;
     auto forced = forced_.find(key);
     if (forced != forced_.end()) o.value = forced->second;
     options_[key] = std::move(o);
@@ -242,6 +252,17 @@ void LibretroCore::forceOption(const std::string& key, const std::string& value)
     }
 }
 
+void LibretroCore::preferDefault(const std::string& key, const std::string& value) {
+    preferred_[key] = value;
+    auto it = options_.find(key);
+    auto ov = optionOverrides_.find(key);
+    const bool userChose = ov != optionOverrides_.end() && it != options_.end() && ov->second != it->second.defaultValue;
+    if (it != options_.end() && !userChose && it->second.value != value) {
+        it->second.value = value;
+        optionsDirty_ = true;
+    }
+}
+
 void LibretroCore::loadOptionOverrides() {
     Config c;
     if (c.load(optionsFile_)) optionOverrides_ = c.all();
@@ -255,7 +276,10 @@ void LibretroCore::saveOptions() const {
         f << "\n# " << o.description;
         if (!o.values.empty()) {
             f << "  [";
-            for (size_t i = 0; i < o.values.size(); ++i) f << (i ? "|" : "") << o.values[i];
+            for (size_t i = 0; i < o.values.size(); ++i) {
+                f << (i ? "|" : "") << o.values[i];
+                if (i < o.labels.size() && o.labels[i] != o.values[i]) f << " (" << o.labels[i] << ")";
+            }
             f << "]";
         }
         f << "\n" << key << " = \"" << o.value << "\"\n";
@@ -323,9 +347,12 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
             cmd == RETRO_ENVIRONMENT_SET_CORE_OPTIONS ? static_cast<const retro_core_option_definition*>(data)
                                                       : static_cast<const retro_core_options_intl*>(data)->us;
         for (auto* d = defs; d && d->key; ++d) {
-            std::vector<std::string> values;
-            for (int i = 0; i < RETRO_NUM_CORE_OPTION_VALUES_MAX && d->values[i].value; ++i) values.push_back(d->values[i].value);
-            defineOption(d->key, d->desc, d->default_value, values);
+            std::vector<std::string> values, labels;
+            for (int i = 0; i < RETRO_NUM_CORE_OPTION_VALUES_MAX && d->values[i].value; ++i) {
+                values.push_back(d->values[i].value);
+                labels.push_back(d->values[i].label ? d->values[i].label : d->values[i].value);
+            }
+            defineOption(d->key, d->desc, d->default_value, values, labels);
         }
         return true;
     }
@@ -336,9 +363,12 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
                                                          : static_cast<const retro_core_options_v2_intl*>(data)->us;
         if (!opts) return false;
         for (auto* d = opts->definitions; d && d->key; ++d) {
-            std::vector<std::string> values;
-            for (int i = 0; i < RETRO_NUM_CORE_OPTION_VALUES_MAX && d->values[i].value; ++i) values.push_back(d->values[i].value);
-            defineOption(d->key, d->desc, d->default_value, values);
+            std::vector<std::string> values, labels;
+            for (int i = 0; i < RETRO_NUM_CORE_OPTION_VALUES_MAX && d->values[i].value; ++i) {
+                values.push_back(d->values[i].value);
+                labels.push_back(d->values[i].label ? d->values[i].label : d->values[i].value);
+            }
+            defineOption(d->key, d->desc, d->default_value, values, labels);
         }
         return true;
     }
@@ -407,6 +437,12 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
         return true;
     case RETRO_ENVIRONMENT_GET_FASTFORWARDING:
         *static_cast<bool*>(data) = host_.isFastForwarding();
+        return true;
+    case RETRO_ENVIRONMENT_GET_TARGET_SAMPLE_RATE:  // lets cores output at our rate (less resampling)
+        *static_cast<unsigned*>(data) = host_.audioOutputRate();
+        return true;
+    case RETRO_ENVIRONMENT_GET_TARGET_REFRESH_RATE:
+        *static_cast<float*>(data) = host_.displayRefreshRate();
         return true;
     case RETRO_ENVIRONMENT_GET_OVERSCAN:
         *static_cast<bool*>(data) = false;

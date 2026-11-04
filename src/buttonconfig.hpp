@@ -14,7 +14,8 @@
 // It only lists the buttons (and players) of the system that's running.
 class ButtonConfig {
 public:
-    void open(System system);
+    // `rows` = the buttons to list (they depend on the system, and for Wii on the controller type).
+    void open(System system, const std::vector<ButtonLabel>& rows);
     void close() { open_ = false; listenRow_ = -1; }
     bool isOpen() const { return open_; }
     // True once after the mapping was changed (so the app can save it).

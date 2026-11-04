@@ -23,7 +23,11 @@ void SettingsDialog::open(System system, LibretroCore& core) {
             Row r;
             r.setting = s;
             if (s.choices.empty()) {
-                for (const auto& v : options[s.keys[0]].values) r.choices.push_back({prettyValue(v), {{s.keys[0], v}}});
+                const auto& o = options[s.keys[0]];
+                for (size_t i = 0; i < o.values.size(); ++i) {
+                    const std::string& label = i < o.labels.size() && o.labels[i] != o.values[i] ? o.labels[i] : prettyValue(o.values[i]);
+                    r.choices.push_back({label, {{s.keys[0], o.values[i]}}});
+                }
             } else {
                 for (const auto& c : s.choices) {  // drop choices the emulator doesn't offer
                     bool valid = true;
@@ -188,8 +192,10 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
         const bool hover = inside(r.valueBox, mouseX_, mouseY_) && inside(list_, mouseX_, mouseY_);
         box(v, r.valueBox, kField, hover ? kAccent : kFieldBorder);
         const int cur = currentChoice(r, core);
-        std::string label = cur >= 0 ? r.choices[size_t(cur)].label
-                                     : prettyValue(core.options()[r.setting.keys[0]].value) + " (custom)";
+        const auto& o = core.options()[r.setting.keys[0]];
+        std::string label = cur >= 0                   ? r.choices[size_t(cur)].label
+                            : o.value == o.defaultValue ? std::string("Default")
+                                                        : prettyValue(o.value) + " (custom)";
         const int ty = r.valueBox.y + (r.valueBox.h - lh) / 2;
         t.draw(r.prevBox.x + (arrowW - t.width("<")) / 2, ty, "<", kDim);
         t.draw(r.nextBox.x + (arrowW - t.width(">")) / 2, ty, ">", kDim);

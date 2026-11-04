@@ -17,6 +17,9 @@ available from the projects below.
 | Nintendo 3DS | Azahar (`azahar_libretro`) | GPL-3.0-or-later | https://github.com/azahar-emu/azahar |
 | Wii U | Cemu (`cemu_libretro`) | MPL-2.0 | https://github.com/WizzardSK/cemu-libretro |
 
+Dolphin also needs its data folder, shipped as `system/dolphin-emu/Sys`
+(GPL-2.0-or-later, from https://github.com/libretro/dolphin, `Data/Sys`).
+
 Also used:
 
 | Component | License | Source |

@@ -24,7 +24,7 @@ controller support (via SDL), saves and save states.
 | Game Boy Advance | mGBA | runs (tested with test files only) |
 | Nintendo DS | melonDS DS | runs (tested with homebrew) |
 | Nintendo 64 | Mupen64Plus-Next | runs, drawn on the GPU (tested with homebrew test ROMs) |
-| GameCube / Wii | Dolphin | coming soon: needs GPU rendering |
+| GameCube / Wii | Dolphin | runs, drawn on the GPU (tested with homebrew) |
 | 3DS | Azahar | runs, drawn on the GPU (tested with homebrew; needs decrypted games) |
 | Wii U | Cemu | coming soon: needs GPU rendering |
 
@@ -163,9 +163,20 @@ Controls: N64 A / B are the bottom / left face buttons (keyboard Z / A), Z is th
 left trigger (keyboard 1), the Control Stick is the left stick or I / J / K / L,
 and the C buttons are the right stick or T / F / G / H. Up to 4 players.
 
+### GameCube and Wii
+
+Both run on Dolphin (OpenGL 3.3+). Nintendall ships Dolphin's `Sys` data folder
+in `system/dolphin-emu/Sys` (fetched from Dolphin's source by the build).
+GameCube A is the bottom face button (B left, X right, Y top), Z the right bumper,
+L / R the triggers, plus Control Stick and C-Stick. Wii defaults to
+Wiimote + Nunchuk; Console Settings switches to sideways Wiimote, Wiimote alone or
+Classic Controller, and Button Config follows. The Wiimote pointer is the right
+stick, or the mouse (Console Settings > Wiimote Pointer). Only players who have a
+controller (or keys) are plugged in, so Wii games don't show extra pointers.
+
 ### GPU rendering
 
-Cores that draw with OpenGL (3DS and N64 now; GameCube/Wii and Wii U later) get
+Cores that draw with OpenGL (3DS, N64, GameCube/Wii, and DS with its OpenGL renderer) get
 their own OpenGL context on a hidden window and render into an offscreen
 framebuffer. Nintendall copies each finished frame into the normal window, so
 the window itself can use any renderer (Direct3D on Windows). See `src/hwrender.*`.

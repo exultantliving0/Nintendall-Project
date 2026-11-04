@@ -31,6 +31,7 @@ public:
     void setPaused(bool paused);
     double queuedSeconds() const;
     bool ok() const { return dev_ != 0; }
+    int outputRate() const { return outRate_; }
 
 private:
     SDL_AudioDeviceID dev_ = 0;

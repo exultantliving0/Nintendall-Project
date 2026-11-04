@@ -193,6 +193,24 @@ Detection detectBytes(const Bytes& b, const std::string& ext) {
     // SNES has no magic, so it goes last.
     if (looksLikeSnes(b)) return hit(System::SNES, "SNES internal header");
 
+    // GameCube vs Wii homebrew (.dol): Wii programs set up the HID4 register, which the
+    // GameCube CPU doesn't have (same check Dolphin uses).
+    if (ext == ".dol" && b.has(0, 0x100)) {
+        bool wii = false;
+        for (int i = 0; i < 7 && !wii; ++i) {
+            const uint32_t off = be32(b.at(size_t(i) * 4)), size = be32(b.at(0x90 + size_t(i) * 4));
+            std::vector<uint8_t> text;
+            if (off + size <= b.head.size()) text.assign(b.head.begin() + off, b.head.begin() + off + size);
+            else if (b.readAt && size < (32u << 20)) text = b.readAt(off, size);
+            for (size_t p = 0; p + 4 <= text.size(); p += 4)
+                if ((be32(&text[p]) & 0xFC1FFFFF) == 0x7C13FBA6) {  // mtspr HID4, rX
+                    wii = true;
+                    break;
+                }
+        }
+        return hit(wii ? System::Wii : System::GameCube, wii ? "Wii program (DOL)" : "GameCube program (DOL)");
+    }
+
     // Nothing conclusive in the contents: fall back to the extension.
     Detection d;
     d.system = systemFromExtension(ext);
