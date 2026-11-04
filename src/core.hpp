@@ -54,10 +54,15 @@ public:
     const std::string& version() const { return libraryVersion_; }
     bool wantsHardwareRendering() const { return hwRequested_; }
     bool shutdownRequested() const { return shutdownRequested_; }
+    // Screen rotation the core asked for, in 90 degree counter-clockwise steps (0-3).
+    unsigned rotation() const { return rotation_; }
 
     // Core options (persisted to the options file on unload).
     std::map<std::string, CoreOption>& options() { return options_; }
     void setOption(const std::string& key, const std::string& value);
+    // Set an option from the app (e.g. the DS screen layout). Applies now, or as soon as
+    // the core defines the option, and wins over the user's options file.
+    void forceOption(const std::string& key, const std::string& value);
 
     // Called through the static libretro callbacks.
     bool environment(unsigned cmd, void* data);
@@ -105,6 +110,7 @@ private:
     std::string systemDir_, saveDir_, corePath_;
     std::filesystem::path optionsFile_;
     std::map<std::string, std::string> optionOverrides_;
+    std::map<std::string, std::string> forced_;
     std::map<std::string, CoreOption> options_;
     bool optionsDirty_ = false;
 
@@ -118,5 +124,6 @@ private:
     retro_frame_time_callback frameTimeCb_{};
     bool hwRequested_ = false;
     bool shutdownRequested_ = false;
+    unsigned rotation_ = 0;
     std::vector<int16_t> audioBuf_;
 };

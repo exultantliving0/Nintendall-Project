@@ -50,6 +50,8 @@ private:
         ActButtonConfig = 70, ActFullscreen,
         ActWindowSize = 80,  // + scale
         ActControls = 90, ActAbout,
+        ActLayout = 100,  // + layout index
+        ActLayoutSwap = 120,
     };
     static constexpr int kSlots = 5;
     static constexpr int kRecent = 8;
@@ -82,6 +84,12 @@ private:
     void saveConfig();
     void pace(double frameSeconds);
 
+    // DS screen layout
+    void loadLayout();
+    void applyLayout();
+    void fitWindowToGame();
+    int16_t pointerState(unsigned id) const;
+
     // Subsystems
     Paths paths_;
     Config cfg_;
@@ -109,6 +117,10 @@ private:
     bool fastForward_ = false;
     bool fastForwardToggled_ = false;
     bool wasRunning_ = false;
+    int layout_ = 0;           // index into the DS layout list
+    bool layoutSwap_ = false;  // swap top and bottom screens
+    int pendingFitFrames_ = 0;  // after a layout change: frames left to wait for the new picture size
+    bool avChanged_ = false;    // the core changed its picture size/rotation during this frame
 
     // Mouse / messages
     int mouseX_ = 0, mouseY_ = 0;

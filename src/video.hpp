@@ -21,10 +21,13 @@ public:
 
     // Game picture
     void uploadFrame(const void* data, unsigned w, unsigned h, size_t pitch, retro_pixel_format fmt);
-    void setAspect(double aspect) { aspect_ = aspect; }
+    void setAspect(double aspect) { aspect_ = aspect; }  // of the picture as shown (after rotation)
+    void setRotation(unsigned quarterTurnsCcw) { rotation_ = quarterTurnsCcw % 4; }
+    unsigned rotation() const { return rotation_; }
     void clearFrame();
     bool hasFrame() const { return frameW_ > 0; }
     void drawGame(const SDL_Rect& area);  // letterboxed into `area`
+    const SDL_Rect& gameRect() const { return gameRect_; }  // where the game was last drawn
     bool saveScreenshot(const std::filesystem::path& path) const;
 
     // 2D drawing (UI)
@@ -64,4 +67,6 @@ private:
     size_t framePitch_ = 0;
     retro_pixel_format frameFmt_ = RETRO_PIXEL_FORMAT_XRGB8888;
     double aspect_ = 4.0 / 3.0;
+    SDL_Rect gameRect_{0, 0, 0, 0};
+    unsigned rotation_ = 0;
 };

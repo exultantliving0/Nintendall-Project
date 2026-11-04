@@ -122,15 +122,25 @@ void Video::clearFrame() {
 
 void Video::drawGame(const SDL_Rect& area) {
     if (!renderer_ || !frameTex_ || frameW_ == 0 || area.w <= 0 || area.h <= 0) return;
-    const double aspect = aspect_ > 0 ? aspect_ : double(frameW_) / frameH_;
+    const bool sideways = rotation_ % 2 == 1;
+    const double shownW = sideways ? frameH_ : frameW_, shownH = sideways ? frameW_ : frameH_;
+    const double aspect = aspect_ > 0 ? aspect_ : shownW / shownH;
     int w = area.w, h = int(area.w / aspect);
     if (h > area.h) {
         h = area.h;
         w = int(area.h * aspect);
     }
     SDL_Rect src{0, 0, int(frameW_), int(frameH_)};
-    SDL_Rect dst{area.x + (area.w - w) / 2, area.y + (area.h - h) / 2, w, h};
-    SDL_RenderCopy(renderer_, frameTex_, &src, &dst);
+    SDL_Rect box{area.x + (area.w - w) / 2, area.y + (area.h - h) / 2, w, h};
+    gameRect_ = box;
+    if (rotation_ == 0) {
+        SDL_RenderCopy(renderer_, frameTex_, &src, &box);
+        return;
+    }
+    // Rotate around the box centre. A sideways picture is drawn w/h-swapped, then turned.
+    SDL_Rect dst = box;
+    if (sideways) dst = {box.x + (w - h) / 2, box.y + (h - w) / 2, h, w};
+    SDL_RenderCopyEx(renderer_, frameTex_, &src, &dst, -90.0 * rotation_, nullptr, SDL_FLIP_NONE);
 }
 
 bool Video::saveScreenshot(const std::filesystem::path& path) const {

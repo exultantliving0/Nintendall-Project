@@ -116,6 +116,16 @@ Q / W = L / R, 1 / 3 = L2 / R2, Enter = Start, Right Shift = Select.
 
 The game pauses automatically when the window loses focus or a menu is open.
 
+### Nintendo DS screens
+
+The **Layout** menu arranges the two DS screens: Vertical (like a real DS),
+Side by Side, Large + Small Screen, Single Screen, and two **Sideways**
+layouts for games played with the DS held like a book (e.g. Ninja Gaiden:
+Dragon Sword). **Swap Screens** switches which screen comes first. The window
+resizes to fit, and the layout is remembered for each game.
+
+The mouse is the stylus: click and drag on the touch screen, in any layout.
+
 ## Where files go
 
 User data lives in `~/.local/share/Nintendall/` (Linux),

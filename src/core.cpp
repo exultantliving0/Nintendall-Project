@@ -193,6 +193,8 @@ void LibretroCore::defineOption(const char* key, const char* desc, const char* d
         for (const auto& v : o.values) valid = valid || v == ov->second;
         if (valid) o.value = ov->second;
     }
+    auto forced = forced_.find(key);
+    if (forced != forced_.end()) o.value = forced->second;
     options_[key] = std::move(o);
 }
 
@@ -201,6 +203,15 @@ void LibretroCore::setOption(const std::string& key, const std::string& value) {
     if (it == options_.end() || it->second.value == value) return;
     it->second.value = value;
     optionsDirty_ = true;
+}
+
+void LibretroCore::forceOption(const std::string& key, const std::string& value) {
+    forced_[key] = value;
+    auto it = options_.find(key);
+    if (it != options_.end() && it->second.value != value) {
+        it->second.value = value;
+        optionsDirty_ = true;
+    }
 }
 
 void LibretroCore::loadOptionOverrides() {
@@ -340,6 +351,11 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
         return false;
     case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER:
         return false;
+    case RETRO_ENVIRONMENT_SET_ROTATION:
+        // e.g. the DS "sideways" layouts: the core sends the picture upright and we turn it.
+        rotation_ = *static_cast<const unsigned*>(data) % 4;
+        host_.onAvInfoChanged();
+        return true;
     case RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK:
         frameTimeCb_ = *static_cast<const retro_frame_time_callback*>(data);
         return true;

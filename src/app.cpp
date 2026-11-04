@@ -38,6 +38,30 @@ bool usesStickAsDpad(System s) {
 
 bool ctrlHeld(const SDL_Keysym& k) { return (k.mod & (KMOD_CTRL | KMOD_GUI)) != 0; }
 
+// Nintendo DS screen layouts (values of melonDS DS's "Screen Layout" option).
+struct DsLayout {
+    const char* label;
+    const char* value;    // normal
+    const char* swapped;  // with Swap Screens on
+};
+const DsLayout kDsLayouts[] = {
+    {"Vertical", "top-bottom", "bottom-top"},
+    {"Side by Side", "left-right", "right-left"},
+    {"Large + Small Screen", "largescreen-top", "largescreen-bottom"},
+    {"Single Screen", "top", "bottom"},
+    {"Sideways (Rotate Left)", "rotate-left", "rotate-left"},
+    {"Sideways (Rotate Right)", "rotate-right", "rotate-right"},
+};
+constexpr int kDsLayoutCount = int(sizeof kDsLayouts / sizeof kDsLayouts[0]);
+constexpr int kFirstSideways = 4;
+
+// Config keys can't contain '=' or '#'.
+std::string configSafe(std::string s) {
+    for (char& c : s)
+        if (c == '=' || c == '#') c = '_';
+    return s;
+}
+
 }  // namespace
 
 // ============================================================================
@@ -162,6 +186,15 @@ void App::runFrames() {
         stopGame();
         return;
     }
+    // After a layout change, resize the window once the core reports the new picture size.
+    if (pendingFitFrames_ > 0) {
+        --pendingFitFrames_;
+        if (avChanged_) {
+            fitWindowToGame();
+            pendingFitFrames_ = 0;
+        }
+    }
+    avChanged_ = false;
     saveSram(false);
 }
 
@@ -237,7 +270,16 @@ bool App::startGame(const fs::path& path) {
     core_ = std::make_unique<LibretroCore>(*this, paths_.system, paths_.saves,
                                            paths_.config / (std::string(sys.core) + ".opt"));
     std::string err;
-    if (!core_->load(corePath, err) || !core_->loadGame(gameFile, err)) {
+    const bool coreLoaded = core_->load(corePath, err);
+    if (coreLoaded && det.system == System::NDS) {
+        system_ = det.system;
+        gameTitle_ = path.stem().u8string();
+        loadLayout();
+        core_->forceOption("melonds_show_current_layout", "disabled");  // we have our own menu
+        applyLayout();
+    }
+    if (!coreLoaded || !core_->loadGame(gameFile, err)) {
+        system_ = System::Unknown;
         std::fprintf(stderr, "Core failed: %s\n", err.c_str());
         core_.reset();
         if (!extracted_.empty()) fs::remove(extracted_, ec);
@@ -264,6 +306,14 @@ bool App::startGame(const fs::path& path) {
     nextFrame_ = nowSeconds();
     addRecent(path);
     if (video_.window()) SDL_SetWindowTitle(video_.window(), ("Nintendall - " + gameTitle_).c_str());
+    // If the game's shape is very different from the window (e.g. NES -> tall DS), refit the window.
+    {
+        const SDL_Rect a = gameArea();
+        const auto& g = av.geometry;
+        const double gameAspect = g.aspect_ratio > 0 ? g.aspect_ratio : double(g.base_width) / std::max(1u, g.base_height);
+        const double winAspect = a.h > 0 ? double(a.w) / a.h : gameAspect;
+        if (std::max(gameAspect, winAspect) / std::min(gameAspect, winAspect) > 1.25) fitWindowToGame();
+    }
     std::fprintf(stderr, "Running %s with core %s %s (%ux%u @ %.3f fps, %.0f Hz audio)\n", gameTitle_.c_str(),
                  core_->name().c_str(), core_->version().c_str(), av.geometry.base_width, av.geometry.base_height,
                  av.timing.fps, av.timing.sample_rate);
@@ -391,7 +441,80 @@ void App::onAudio(const int16_t* stereo, size_t frames) {
 }
 
 int16_t App::onInputState(unsigned port, unsigned device, unsigned index, unsigned id) {
+    if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_POINTER) return port == 0 && index == 0 ? pointerState(id) : 0;
     return input_.state(port, device, index, id);
+}
+
+// The mouse acts as the stylus / finger: libretro pointer coordinates run from
+// -0x7fff to 0x7fff across the picture the core sent, wherever we drew it.
+int16_t App::pointerState(unsigned id) const {
+    const SDL_Rect& r = video_.gameRect();
+    int wx = 0, wy = 0;
+    const Uint32 buttons = SDL_GetMouseState(&wx, &wy);
+    const float pr = video_.pixelRatio();
+    const int mx = int(wx * pr), my = int(wy * pr);
+    const bool inside = r.w > 0 && r.h > 0 && mx >= r.x && my >= r.y && mx < r.x + r.w && my < r.y + r.h &&
+                        !(menuVisible() && my < menu_.height(text_));
+    switch (id) {
+    case RETRO_DEVICE_ID_POINTER_X:
+        return inside ? int16_t(std::lround((double(mx - r.x) / r.w * 2.0 - 1.0) * 0x7fff)) : int16_t(-0x8000);
+    case RETRO_DEVICE_ID_POINTER_Y:
+        return inside ? int16_t(std::lround((double(my - r.y) / r.h * 2.0 - 1.0) * 0x7fff)) : int16_t(-0x8000);
+    case RETRO_DEVICE_ID_POINTER_PRESSED:
+        return inside && (buttons & SDL_BUTTON_LMASK) ? 1 : 0;
+    case RETRO_DEVICE_ID_POINTER_COUNT:
+        return inside && (buttons & SDL_BUTTON_LMASK) ? 1 : 0;
+    case RETRO_DEVICE_ID_POINTER_IS_OFFSCREEN:
+        return inside ? 0 : 1;
+    default:
+        return 0;
+    }
+}
+
+// ============================================================================
+// DS screen layout
+
+void App::loadLayout() {
+    layout_ = 0;
+    layoutSwap_ = false;
+    const std::string v = cfg_.get("layout." + configSafe(gameTitle_));  // remembered per game, e.g. "4" or "0,swap"
+    if (!v.empty()) {
+        layout_ = std::clamp(std::atoi(v.c_str()), 0, kDsLayoutCount - 1);
+        layoutSwap_ = v.find("swap") != std::string::npos;
+    }
+}
+
+void App::applyLayout() {
+    if (!core_ || system_ != System::NDS) return;
+    const DsLayout& l = kDsLayouts[layout_];
+    core_->forceOption("melonds_number_of_screen_layouts", "1");
+    core_->forceOption("melonds_screen_layout1", layoutSwap_ ? l.swapped : l.value);
+}
+
+void App::fitWindowToGame() {
+    SDL_Window* win = video_.window();
+    if (!win || !core_ || video_.isFullscreen() || (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED)) return;
+    const auto& g = core_->avInfo().geometry;
+    const bool sideways = core_->rotation() % 2 == 1;
+    const double baseH = std::max(1u, sideways ? g.base_width : g.base_height);  // height as shown
+    const double aspect = g.aspect_ratio > 0 ? g.aspect_ratio : (sideways ? double(g.base_height) : double(g.base_width)) / baseH;
+    const float pr = video_.pixelRatio();
+    const int bar = menu_.height(text_);
+
+    // Largest size (up to 3x) that fits on the screen, in half steps below 2x.
+    SDL_Rect usable{0, 0, 1280, 720};
+    const int display = SDL_GetWindowDisplayIndex(win);
+    SDL_GetDisplayUsableBounds(display < 0 ? 0 : display, &usable);
+    const double maxH = usable.h * pr - 80 * text_.scale() - bar;
+    const double maxW = usable.w * pr - 40 * text_.scale();
+    double scale = std::min({3.0, maxH / baseH, maxW / (baseH * aspect)});
+    scale = scale >= 2.0 ? std::floor(scale) : std::max(1.0, std::floor(scale * 2) / 2);
+    const int h = int(std::lround(baseH * scale)) + bar;
+    const int w = int(std::lround(baseH * scale * aspect));
+    SDL_SetWindowSize(win, int(w / pr), int(h / pr));
+    SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED_DISPLAY(display < 0 ? 0 : display),
+                          SDL_WINDOWPOS_CENTERED_DISPLAY(display < 0 ? 0 : display));
+    video_.onResize();
 }
 
 bool App::onRumble(unsigned port, retro_rumble_effect effect, uint16_t strength) {
@@ -404,9 +527,14 @@ void App::onAvInfoChanged() {
     if (!core_) return;
     const auto& av = core_->avInfo();
     double aspect = av.geometry.aspect_ratio;
-    if (aspect <= 0 && av.geometry.base_height > 0) aspect = double(av.geometry.base_width) / av.geometry.base_height;
+    if (aspect <= 0 && av.geometry.base_height > 0) {
+        aspect = double(av.geometry.base_width) / av.geometry.base_height;
+        if (core_->rotation() % 2) aspect = 1.0 / aspect;
+    }
     video_.setAspect(aspect);
+    video_.setRotation(core_->rotation());
     audio_.setInputRate(av.timing.sample_rate);
+    avChanged_ = true;  // the window is refit after the frame, once the core has finished changing things
 }
 
 // ============================================================================
@@ -525,6 +653,25 @@ void App::doAction(int a) {
         osd("State slot " + std::to_string(slot_));
         return;
     }
+    if ((a >= ActLayout && a < ActLayout + kDsLayoutCount) || a == ActLayoutSwap) {
+        if (!core_ || system_ != System::NDS) return;
+        if (a == ActLayoutSwap) layoutSwap_ = !layoutSwap_;
+        else layout_ = a - ActLayout;
+        cfg_.set("layout." + configSafe(gameTitle_), std::to_string(layout_) + (layoutSwap_ ? ",swap" : ""));
+        cfg_.save();
+        applyLayout();
+        pendingFitFrames_ = 30;
+        avChanged_ = false;
+        if (paused_) {  // show the new layout right away
+            core_->run();
+            audio_.clear();
+            if (avChanged_) {
+                fitWindowToGame();
+                pendingFitFrames_ = 0;
+            }
+        }
+        return;
+    }
     if (a > ActWindowSize && a <= ActWindowSize + 4) {
         setWindowScale(a - ActWindowSize);
         return;
@@ -629,8 +776,10 @@ void App::setWindowScale(int scale) {
     double aspect = kDefaultAspect;
     if (core_) {
         const auto& g = core_->avInfo().geometry;
-        if (g.base_height > 0) baseH = int(g.base_height);
-        aspect = g.aspect_ratio > 0 ? g.aspect_ratio : double(g.base_width) / std::max(1u, g.base_height);
+        const bool sideways = core_->rotation() % 2 == 1;
+        const unsigned shownW = sideways ? g.base_height : g.base_width, shownH = sideways ? g.base_width : g.base_height;
+        if (shownH > 0) baseH = int(shownH);
+        aspect = g.aspect_ratio > 0 ? g.aspect_ratio : double(shownW) / std::max(1u, shownH);
     }
     const float pr = video_.pixelRatio();
     const int h = baseH * scale + menu_.height(text_);
@@ -675,6 +824,17 @@ void App::buildMenus() {
         state.items.push_back({label, "", ActSlot + i, true, slot_ == i});
     }
     menus.push_back(state);
+
+    // Layout: how the two DS screens are arranged (other systems have one screen).
+    const bool ds = game && system_ == System::NDS;
+    Menu layout{"Layout", {}};
+    for (int i = 0; i < kDsLayoutCount; ++i) {
+        if (i == kFirstSideways) layout.items.push_back({});
+        layout.items.push_back({kDsLayouts[i].label, "", ActLayout + i, ds, ds && layout_ == i});
+    }
+    layout.items.push_back({});
+    layout.items.push_back({"Swap Screens", "", ActLayoutSwap, ds && layout_ < kFirstSideways, ds && layoutSwap_});
+    menus.push_back(layout);
 
     Menu options{"Options", {}};
     options.items.push_back({"Button Config...", "", ActButtonConfig});
