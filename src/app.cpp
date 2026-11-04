@@ -152,8 +152,16 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) handleEvent(e);
         if (buttonConfig_.takeChanged()) saveConfig();
+        if (settings_.takeRestartRequest() && core_) {
+            const fs::path game = gamePath_;  // reload the game so the new settings apply
+            startGame(game);
+            osd("Game restarted with the new settings");
+        } else if (settingsWasOpen_ && !settings_.isOpen() && settings_.restartPending()) {
+            osd("Some settings apply the next time the game starts", 4000);
+        }
+        settingsWasOpen_ = settings_.isOpen();
 
-        const bool modal = menu_.isOpen() || buttonConfig_.isOpen();
+        const bool modal = menu_.isOpen() || buttonConfig_.isOpen() || settings_.isOpen();
         const bool running = core_ && !paused_ && !focusLost_ && !modal;
         input_.setKeyboardEnabled(!modal);
         if (wasRunning_ && !running) audio_.clear();  // silence while paused / in menus
@@ -607,6 +615,7 @@ void App::handleEvent(const SDL_Event& e) {
         SDL_free(e.drop.file);
         menu_.close();
         buttonConfig_.close();
+        settings_.close();
         startGame(p);
         return;
     }
@@ -614,7 +623,12 @@ void App::handleEvent(const SDL_Event& e) {
         break;
     }
 
-    // Button Config window is modal: it gets everything.
+    // Dialog windows are modal: they get everything.
+    if (settings_.isOpen()) {
+        if (core_) settings_.handleEvent(e, mouseX_, mouseY_, *core_);
+        else settings_.close();
+        return;
+    }
     if (buttonConfig_.isOpen()) {
         buttonConfig_.handleEvent(e, mouseX_, mouseY_, input_);
         return;
@@ -706,10 +720,6 @@ void App::doAction(int a) {
         }
         return;
     }
-    if (a > ActWindowSize && a <= ActWindowSize + 4) {
-        setWindowScale(a - ActWindowSize);
-        return;
-    }
     switch (a) {
     case ActOpen: openFileDialog(); break;
     case ActCloseGame: stopGame(); break;
@@ -728,6 +738,9 @@ void App::doAction(int a) {
     case ActSaveState: saveState(); break;
     case ActLoadState: loadState(); break;
     case ActButtonConfig: buttonConfig_.open(system_); break;
+    case ActConsoleSettings:
+        if (core_) settings_.open(system_, *core_);
+        break;
     case ActFullscreen: video_.toggleFullscreen(); break;
     case ActControls:
         showMessage("Controls",
@@ -803,25 +816,6 @@ SDL_Rect App::gameArea() const {
     return {0, bar, video_.width(), std::max(0, video_.height() - bar)};
 }
 
-void App::setWindowScale(int scale) {
-    if (!video_.window()) return;
-    if (video_.isFullscreen()) video_.toggleFullscreen();
-    int baseH = kDefaultBaseH;
-    double aspect = kDefaultAspect;
-    if (core_) {
-        const auto& g = core_->avInfo().geometry;
-        const bool sideways = core_->rotation() % 2 == 1;
-        const unsigned shownW = sideways ? g.base_height : g.base_width, shownH = sideways ? g.base_width : g.base_height;
-        if (shownH > 0) baseH = int(shownH);
-        aspect = g.aspect_ratio > 0 ? g.aspect_ratio : double(shownW) / std::max(1u, shownH);
-    }
-    const float pr = video_.pixelRatio();
-    const int h = baseH * scale + menu_.height(text_);
-    const int w = int(std::lround(baseH * scale * aspect));
-    SDL_SetWindowSize(video_.window(), int(w / pr), int(h / pr));
-    video_.onResize();
-}
-
 void App::buildMenus() {
     const bool game = core_ != nullptr;
     std::vector<Menu> menus;
@@ -874,11 +868,9 @@ void App::buildMenus() {
 
     Menu options{"Options", {}};
     options.items.push_back({"Button Config...", "", ActButtonConfig});
+    options.items.push_back({"Console Settings...", "", ActConsoleSettings, game});
     options.items.push_back({});
     options.items.push_back({"Fullscreen", "F11", ActFullscreen, true, video_.isFullscreen()});
-    options.items.push_back({});
-    for (int k = 1; k <= 4; ++k)
-        options.items.push_back({"Window Size " + std::to_string(k) + "x", "", ActWindowSize + k});
     menus.push_back(options);
 
     Menu help{"Help", {}};
@@ -921,5 +913,6 @@ void App::draw() {
         menu_.draw(video_, text_, W);
     }
     buttonConfig_.draw(video_, text_, input_, W, H);
+    if (core_) settings_.draw(video_, text_, *core_, W, H);
     video_.present();
 }

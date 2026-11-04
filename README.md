@@ -116,6 +116,25 @@ Q / W = L / R, 1 / 3 = L2 / R2, Enter = Start, Right Shift = Select.
 
 The game pauses automatically when the window loses focus or a menu is open.
 
+### Console Settings
+
+**Options > Console Settings** shows hand-picked settings from the emulator of
+the game that's running, with friendly names. Settings marked * apply after
+**Restart Game** (in the same window); the rest change right away. Highlights:
+
+| System | Settings |
+|---|---|
+| N64 | Resolution upscaling (to 4K), widescreen hack, MSAA / FXAA, texture filters and HD texture enhancement (xBRZ, HQ4x), Expansion Pak, Rumble / Controller Pak, stick sensitivity |
+| 3DS | Resolution upscaling (to 10x), texture filters (Anime4K, ScaleForce, xBRZ), stereoscopic 3D, New / Old 3DS, region, language, CPU speed |
+| DS | OpenGL renderer with 3D upscaling (to 8x), gap between screens, stylus cursor, sound smoothing |
+| SNES | HD Mode 7, run-ahead (less input lag), CPU and Super FX overclock, TV filters, no sprite limit |
+| NES / FDS | Palettes, TV filters, no sprite limit, hide screen edges, overclock, region, fast disk loading |
+| Game Boy / Color | Palettes, Super Game Boy mode with borders, color correction, rumble |
+| GBA | LCD ghosting, color correction, solar sensor, skip BIOS intro |
+
+The list lives in `src/consolesettings.cpp`; values are saved per emulator in
+the `config/` folder.
+
 ### Nintendo DS screens
 
 The **Layout** menu arranges the two DS screens: Vertical (like a real DS),
@@ -175,6 +194,7 @@ beside it instead.
 | `src/hwrender.*` | OpenGL context + framebuffer for GPU-drawn cores (3DS, N64) |
 | `src/app.*` | main window, menu actions, game loop, saves |
 | `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |
+| `src/consolesettings.*`, `src/settingsdialog.*` | the Console Settings list and window |
 | `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |
 | `src/zip.*`, `src/png.*` | zip reading, screenshots |
 | `tools/bundle_cores.py` | build step that bundles the emulator cores |

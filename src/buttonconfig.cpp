@@ -1,28 +1,11 @@
 #include "buttonconfig.hpp"
 
+#include "uistyle.hpp"
+
 #include <algorithm>
 #include <cstdlib>
 
-namespace {
-const Color kDialogBg{240, 240, 240};
-const Color kBorder{120, 120, 120};
-const Color kTitleBg{255, 255, 255};
-const Color kTextC{0, 0, 0};
-const Color kDim{96, 96, 96};
-const Color kField{255, 255, 255};
-const Color kFieldBorder{173, 173, 173};
-const Color kAccent{0, 120, 215};
-const Color kListenBg{204, 232, 255};
-const Color kButtonBg{225, 225, 225};
-const Color kButtonHover{229, 241, 251};
-
-bool inside(const SDL_Rect& r, int x, int y) { return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h; }
-
-void box(Video& v, const SDL_Rect& r, Color fill, Color border) {
-    v.fillRect(r.x, r.y, r.w, r.h, border);
-    v.fillRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2, fill);
-}
-}  // namespace
+using namespace ui;
 
 void ButtonConfig::open(System system) {
     system_ = system;

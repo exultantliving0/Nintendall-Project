@@ -14,6 +14,7 @@
 #include "input.hpp"
 #include "menubar.hpp"
 #include "paths.hpp"
+#include "settingsdialog.hpp"
 #include "text.hpp"
 #include "video.hpp"
 #include "zip.hpp"
@@ -47,8 +48,7 @@ private:
         ActPause = 30, ActReset, ActFastForward,
         ActSaveState = 40, ActLoadState,
         ActSlot = 50,  // + slot number
-        ActButtonConfig = 70, ActFullscreen,
-        ActWindowSize = 80,  // + scale
+        ActButtonConfig = 70, ActFullscreen, ActConsoleSettings,
         ActControls = 90, ActAbout,
         ActLayout = 100,  // + layout index
         ActLayoutSwap = 120,
@@ -77,7 +77,6 @@ private:
     bool menuVisible() const;
     SDL_Rect gameArea() const;
     float uiScale() const;
-    void setWindowScale(int scale);
     void openFileDialog();
     void showMessage(const std::string& title, const std::string& text, bool error);
     void osd(const std::string& msg, unsigned ms = 2500);
@@ -99,6 +98,8 @@ private:
     Text text_;
     MenuBar menu_;
     ButtonConfig buttonConfig_;
+    SettingsDialog settings_;
+    bool settingsWasOpen_ = false;
     LaunchOptions opt_;
     std::unique_ptr<LibretroCore> core_;
 
