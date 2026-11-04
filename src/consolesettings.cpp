@@ -266,7 +266,6 @@ std::vector<SettingGroup> dolphin(bool wii) {
               {{"0.50", "50%"}, {"0.80", "80%"}, {"1.00", "100% (normal)"}, {"1.50", "150%"}, {"2.00", "200%"}, {"3.00", "300%"}},
               true, "Higher can fix slowdown; too high can break games"),
           opt("Faster Disc Loading", "dolphin_fast_disc_speed", kOnOff, true),
-          opt("Speed Boost (Dual Core)", "dolphin_main_cpu_thread", kOnOff, true),
           raw("System Language", "dolphin_language", true),
           opt("Rumble", "dolphin_enable_rumble", kOnOff, true)}},
     };

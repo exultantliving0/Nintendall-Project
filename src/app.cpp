@@ -314,8 +314,13 @@ bool App::startGame(const fs::path& path) {
             applyLayout();
         }
         if (coreLoaded) chooseRenderer(*core_, det.system, attempt > 0);
-        if (coreLoaded && (det.system == System::GameCube || det.system == System::Wii))
+        if (coreLoaded && (det.system == System::GameCube || det.system == System::Wii)) {
             core_->forceOption("dolphin_osd_enabled", "disabled");  // no emulator info text over the game
+            // Dolphin's dual-core mode keeps the game running between our frames, so games ran too fast
+            // (or at half speed). Single-core runs exactly one video field per frame, at the right speed.
+            core_->forceOption("dolphin_main_cpu_thread", "disabled");
+            core_->setRefreshTimingOnGeometry(true);
+        }
         if (coreLoaded && det.system == System::Wii) {
             core_->preferDefault("dolphin_wiimote_default_device", "nunchuk");  // what most Wii games expect
             core_->preferDefault("dolphin_ir_offset", "10");  // pointer lines up with the mouse / stick

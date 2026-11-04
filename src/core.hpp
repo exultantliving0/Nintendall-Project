@@ -71,6 +71,8 @@ public:
     // Set an option from the app (e.g. the DS screen layout). Applies now, or as soon as
     // the core defines the option, and wins over the user's options file.
     void forceOption(const std::string& key, const std::string& value);
+    // Dolphin announces 50 <-> 60 Hz changes only as a geometry change: re-read the frame rate then.
+    void setRefreshTimingOnGeometry(bool on) { refreshTimingOnGeometry_ = on; }
     // Our own default for an option: used unless the user has picked another value
     // (applies now, or as soon as the core defines the option).
     void preferDefault(const std::string& key, const std::string& value);
@@ -143,5 +145,6 @@ private:
     void resizeHwFramebuffer();
     bool shutdownRequested_ = false;
     unsigned rotation_ = 0;
+    bool refreshTimingOnGeometry_ = false;
     std::vector<int16_t> audioBuf_;
 };

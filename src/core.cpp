@@ -395,6 +395,12 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
         av_.geometry.base_width = g->base_width;
         av_.geometry.base_height = g->base_height;
         av_.geometry.aspect_ratio = g->aspect_ratio;
+        if (refreshTimingOnGeometry_ && api_.get_system_av_info) {
+            retro_system_av_info now{};
+            api_.get_system_av_info(&now);
+            if (now.timing.fps > 1.0) av_.timing.fps = now.timing.fps;
+            if (now.timing.sample_rate > 1.0) av_.timing.sample_rate = now.timing.sample_rate;
+        }
         if (hwActive_) resizeHwFramebuffer();
         host_.onAvInfoChanged();
         return true;
