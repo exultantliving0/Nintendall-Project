@@ -174,7 +174,7 @@ void ButtonConfig::draw(Video& v, Text& t, const Input& input, int W, int H) {
             box(v, cell, listening ? kListenBg : (fixedStick ? kDialogBg : kField),
                 listening || hover ? kAccent : kFieldBorder);
             std::string label = listening ? (c == 0 ? "Press a key..." : "Press a controller button...")
-                              : fixedStick ? "Left stick"
+                              : fixedStick ? Input::stickName(b)
                               : (c == 0 ? Input::keyName(input.key(player_, b)) : Input::padName(input.pad(player_, b)));
             t.draw(cell.x + int(6 * s), cell.y + (cell.h - lh) / 2, label,
                    listening ? kAccent : (fixedStick ? kDim : kTextC));

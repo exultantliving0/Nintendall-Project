@@ -55,6 +55,16 @@ const DsLayout kDsLayouts[] = {
     {"Sideways (Rotate Right)", "rotate-right", "rotate-right", nullptr},
 };
 
+// Systems drawn on the GPU: pick OpenGL, or the core's (slow) software renderer as a fallback.
+bool hasSoftwareFallback(System s) { return s == System::N3DS || s == System::N64; }
+void chooseRenderer(LibretroCore& core, System s, bool software) {
+    if (s == System::N3DS) core.forceOption("citra_graphics_api", software ? "Software" : "OpenGL");
+    if (s == System::N64) {
+        core.forceOption("mupen64plus-rdp-plugin", software ? "angrylion" : "gliden64");
+        core.forceOption("mupen64plus-rsp-plugin", software ? "cxd4" : "hle");
+    }
+}
+
 bool hasTwoScreens(System s) { return s == System::NDS || s == System::N3DS; }
 bool layoutAvailable(System s, int i) { return s == System::NDS || (s == System::N3DS && kDsLayouts[i].ctr); }
 constexpr int kDsLayoutCount = int(sizeof kDsLayouts / sizeof kDsLayouts[0]);
@@ -283,14 +293,13 @@ bool App::startGame(const fs::path& path) {
             loadLayout();
             if (det.system == System::NDS)
                 core_->forceOption("melonds_show_current_layout", "disabled");  // we have our own menu
-            else  // 3DS: draw with the GPU; software rendering is the slow fallback
-                core_->forceOption("citra_graphics_api", attempt == 0 ? "OpenGL" : "Software");
             applyLayout();
         }
+        if (coreLoaded) chooseRenderer(*core_, det.system, attempt > 0);
         if (coreLoaded && core_->loadGame(gameFile, err)) break;
 
-        // If this PC couldn't give the 3DS emulator OpenGL, try once more with software rendering.
-        const bool retry = attempt == 0 && det.system == System::N3DS && core_->wantsHardwareRendering() &&
+        // If this PC couldn't give the emulator OpenGL, try once more with software rendering.
+        const bool retry = attempt == 0 && hasSoftwareFallback(det.system) && core_->wantsHardwareRendering() &&
                            !core_->usingHardwareRendering();
         std::fprintf(stderr, "Core failed: %s\n", err.c_str());
         core_.reset();

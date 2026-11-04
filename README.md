@@ -23,7 +23,7 @@ controller support (via SDL), saves and save states.
 | Game Boy / Game Boy Color | SameBoy | runs (tested with test files only) |
 | Game Boy Advance | mGBA | runs (tested with test files only) |
 | Nintendo DS | melonDS DS | runs (tested with homebrew) |
-| Nintendo 64 | Mupen64Plus-Next | coming soon: needs GPU rendering |
+| Nintendo 64 | Mupen64Plus-Next | runs, drawn on the GPU (tested with homebrew test ROMs) |
 | GameCube / Wii | Dolphin | coming soon: needs GPU rendering |
 | 3DS | Azahar | runs, drawn on the GPU (tested with homebrew; needs decrypted games) |
 | Wii U | Cemu | coming soon: needs GPU rendering |
@@ -136,9 +136,17 @@ layouts). Controls: the Circle Pad is a controller's left stick or I / J / K / L
 on the keyboard, the C-Stick is the right stick, ZL / ZR are the triggers (1 / 3),
 and the mouse is the stylus. Games must be decrypted dumps (.3ds / .cci / .cxi / .3dsx).
 
+### Nintendo 64
+
+N64 games are drawn on the graphics card (GLideN64, OpenGL 3.3 or newer). On
+PCs without it, Nintendall falls back to the software renderer (Angrylion).
+Controls: N64 A / B are the bottom / left face buttons (keyboard Z / A), Z is the
+left trigger (keyboard 1), the Control Stick is the left stick or I / J / K / L,
+and the C buttons are the right stick or T / F / G / H. Up to 4 players.
+
 ### GPU rendering
 
-Cores that draw with OpenGL (3DS now; N64, GameCube/Wii and Wii U later) get
+Cores that draw with OpenGL (3DS and N64 now; GameCube/Wii and Wii U later) get
 their own OpenGL context on a hidden window and render into an offscreen
 framebuffer. Nintendall copies each finished frame into the normal window, so
 the window itself can use any renderer (Direct3D on Windows). See `src/hwrender.*`.
@@ -164,7 +172,7 @@ beside it instead.
 | `src/detect.*` | works out the system from a file / zip / folder |
 | `src/systems.*` | the list of systems, extensions and the emulator for each |
 | `src/core.*` | loads a libretro core and implements the libretro API |
-| `src/hwrender.*` | OpenGL context + framebuffer for GPU-drawn cores (3DS) |
+| `src/hwrender.*` | OpenGL context + framebuffer for GPU-drawn cores (3DS, N64) |
 | `src/app.*` | main window, menu actions, game loop, saves |
 | `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |
 | `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |

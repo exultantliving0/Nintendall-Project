@@ -24,9 +24,11 @@ class Input {
 public:
     static constexpr int kMaxPlayers = 4;
     static constexpr int kButtons = 16;  // RetroPad button ids 0..15
-    // Extra keyboard-only bindings that push the left analog stick (3DS Circle Pad).
+    // Extra keyboard-only bindings that push the analog sticks:
+    // left stick = 3DS Circle Pad / N64 Control Stick, right stick = N64 C buttons / 3DS C-Stick.
     static constexpr int kStickUp = 16, kStickDown = 17, kStickLeft = 18, kStickRight = 19;
-    static constexpr int kBindable = 20;
+    static constexpr int kRStickUp = 20, kRStickDown = 21, kRStickLeft = 22, kRStickRight = 23;
+    static constexpr int kBindable = 24;
 
     void init(const std::string& mappingDbPath);
     void shutdown();
@@ -56,7 +58,9 @@ public:
     void save(Config& cfg) const;
 
     static const char* buttonLabel(int button);  // "Up", "A", "Start"...
-    static bool isStickDirection(int button) { return button >= kStickUp && button <= kStickRight; }
+    static bool isStickDirection(int button) { return button >= kStickUp && button <= kRStickRight; }
+    // For stick directions: which real stick a controller uses ("Left stick" / "Right stick").
+    static const char* stickName(int button) { return button >= kRStickUp ? "Right stick" : "Left stick"; }
     static std::string keyName(SDL_Scancode key);
     static std::string padName(PadBind bind);
     static uint16_t parseButtons(const std::string& list);
@@ -69,10 +73,10 @@ private:
     };
     struct PlayerMap {
         SDL_Scancode keys[kBindable]{};
-        PadBind pad[kBindable]{};  // stick directions (16-19) always use the real left stick
+        PadBind pad[kBindable]{};  // stick directions (16-23) always use the real sticks
     };
     uint16_t buttonMask(unsigned port) const;
-    int keyStick(unsigned port, unsigned axis) const;
+    int keyStick(unsigned port, unsigned stick, unsigned axis) const;
     static bool padActive(SDL_GameController* gc, PadBind b);
 
     std::vector<Pad> pads_;

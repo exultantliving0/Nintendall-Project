@@ -8,10 +8,12 @@ namespace {
 // Names used in the config file, indexed by RetroPad button id.
 const char* const kIds[Input::kBindable] = {"b",  "y",  "select", "start", "up", "down", "left", "right",
                                             "a",  "x",  "l",      "r",     "l2", "r2",   "l3",   "r3",
-                                            "stick_up", "stick_down", "stick_left", "stick_right"};
+                                            "stick_up", "stick_down", "stick_left", "stick_right",
+                                            "rstick_up", "rstick_down", "rstick_left", "rstick_right"};
 const char* const kLabels[Input::kBindable] = {"B",  "Y",  "Select", "Start", "Up", "Down", "Left", "Right",
                                                "A",  "X",  "L",      "R",     "L2", "R2",   "L3",   "R3",
-                                               "Stick Up", "Stick Down", "Stick Left", "Stick Right"};
+                                               "Stick Up", "Stick Down", "Stick Left", "Stick Right",
+                                               "Right Stick Up", "Right Stick Down", "Right Stick Left", "Right Stick Right"};
 
 constexpr int16_t kStickThreshold = 16000;
 constexpr int16_t kTriggerThreshold = 12000;
@@ -45,6 +47,10 @@ void Input::resetDefaults(int player) {
         m.keys[kStickDown] = SDL_SCANCODE_K;
         m.keys[kStickLeft] = SDL_SCANCODE_J;
         m.keys[kStickRight] = SDL_SCANCODE_L;
+        m.keys[kRStickUp] = SDL_SCANCODE_T;
+        m.keys[kRStickDown] = SDL_SCANCODE_G;
+        m.keys[kRStickLeft] = SDL_SCANCODE_F;
+        m.keys[kRStickRight] = SDL_SCANCODE_H;
     }
     // Controllers: by physical position (bottom face button = RetroPad B, right = A...).
     m.pad[RETRO_DEVICE_ID_JOYPAD_B] = btn(SDL_CONTROLLER_BUTTON_A);
@@ -291,17 +297,23 @@ int16_t Input::state(unsigned port, unsigned device, unsigned index, unsigned id
     }
     case RETRO_DEVICE_ANALOG: {
         SDL_GameController* gc = controllerForPort(int(port));
-        if (!gc) return index == RETRO_DEVICE_INDEX_ANALOG_LEFT ? int16_t(keyStick(port, id)) : int16_t(0);
+        if (!gc)
+            return index == RETRO_DEVICE_INDEX_ANALOG_LEFT || index == RETRO_DEVICE_INDEX_ANALOG_RIGHT
+                       ? int16_t(keyStick(port, index, id))
+                       : int16_t(0);
         auto clamp = [](int v) { return int16_t(std::max(-32767, std::min(32767, v))); };
         if (index == RETRO_DEVICE_INDEX_ANALOG_LEFT) {
-            const int v = keyStick(port, id);
+            const int v = keyStick(port, index, id);
             if (v != 0) return int16_t(v);
             return clamp(SDL_GameControllerGetAxis(gc, id == RETRO_DEVICE_ID_ANALOG_X ? SDL_CONTROLLER_AXIS_LEFTX
                                                                                       : SDL_CONTROLLER_AXIS_LEFTY));
         }
-        if (index == RETRO_DEVICE_INDEX_ANALOG_RIGHT)
+        if (index == RETRO_DEVICE_INDEX_ANALOG_RIGHT) {
+            const int v = keyStick(port, index, id);
+            if (v != 0) return int16_t(v);
             return clamp(SDL_GameControllerGetAxis(gc, id == RETRO_DEVICE_ID_ANALOG_X ? SDL_CONTROLLER_AXIS_RIGHTX
                                                                                       : SDL_CONTROLLER_AXIS_RIGHTY));
+        }
         if (index == RETRO_DEVICE_INDEX_ANALOG_BUTTON) {
             if (id == RETRO_DEVICE_ID_JOYPAD_L2) return clamp(SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERLEFT));
             if (id == RETRO_DEVICE_ID_JOYPAD_R2) return clamp(SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERRIGHT));
@@ -314,14 +326,15 @@ int16_t Input::state(unsigned port, unsigned device, unsigned index, unsigned id
     }
 }
 
-// Left stick pushed by keyboard keys (full tilt), or 0 if none are held.
-int Input::keyStick(unsigned port, unsigned axis) const {
+// A stick pushed by keyboard keys (full tilt), or 0 if none are held.
+int Input::keyStick(unsigned port, unsigned stick, unsigned axis) const {
     if (!keyboardEnabled_) return 0;
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
     const PlayerMap& m = maps_[port];
     auto held = [&](int b) { return m.keys[b] != SDL_SCANCODE_UNKNOWN && keys[m.keys[b]]; };
-    if (axis == RETRO_DEVICE_ID_ANALOG_X) return (held(kStickRight) ? 32767 : 0) - (held(kStickLeft) ? 32767 : 0);
-    return (held(kStickDown) ? 32767 : 0) - (held(kStickUp) ? 32767 : 0);
+    const int base = stick == RETRO_DEVICE_INDEX_ANALOG_RIGHT ? kRStickUp : kStickUp;  // up, down, left, right
+    if (axis == RETRO_DEVICE_ID_ANALOG_X) return (held(base + 3) ? 32767 : 0) - (held(base + 2) ? 32767 : 0);
+    return (held(base + 1) ? 32767 : 0) - (held(base) ? 32767 : 0);
 }
 
 bool Input::rumble(unsigned port, retro_rumble_effect effect, uint16_t strength) {

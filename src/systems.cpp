@@ -13,7 +13,7 @@ static const std::vector<SystemInfo>& table() {
         {System::SNES, "snes", "SNES", "Super Nintendo",
          {".sfc", ".smc", ".swc", ".fig", ".bs"}, "bsnes", "bsnes", false, nullptr},
         {System::N64, "n64", "N64", "Nintendo 64",
-         {".z64", ".n64", ".v64", ".ndd"}, "mupen64plus_next", "Mupen64Plus-Next", true, nullptr},
+         {".z64", ".n64", ".v64", ".ndd"}, "mupen64plus_next", "Mupen64Plus-Next", false, nullptr},
         {System::GB, "gb", "GB", "Game Boy",
          {".gb"}, "sameboy", "SameBoy", false, nullptr},
         {System::GBC, "gbc", "GBC", "Game Boy Color",
@@ -75,6 +75,13 @@ const std::vector<ButtonLabel>& systemButtons(System s) {
         {kL, "L"}, {kR, "R"}, {kL2, "ZL"}, {kR2, "ZR"},
         {kStart, "Start"}, {kSelect, "Select"}, {kL3, "Home"},
     };
+    // Mupen64Plus-Next: RetroPad B = N64 A, Y = N64 B, L2 = Z, right stick = C buttons.
+    static const std::vector<ButtonLabel> n64 = {
+        {kUp, "D-Pad Up"}, {kDown, "D-Pad Down"}, {kLeft, "D-Pad Left"}, {kRight, "D-Pad Right"},
+        {16, "Control Stick Up"}, {17, "Control Stick Down"}, {18, "Control Stick Left"}, {19, "Control Stick Right"},
+        {kB, "A"}, {kY, "B"}, {kL2, "Z"}, {kL, "L"}, {kR, "R"}, {kStart, "Start"},
+        {20, "C-Up"}, {21, "C-Down"}, {22, "C-Left"}, {23, "C-Right"},
+    };
     static const std::vector<ButtonLabel> all = {
         {kUp, "Up"}, {kDown, "Down"}, {kLeft, "Left"}, {kRight, "Right"},
         {kA, "A"},   {kB, "B"},       {kX, "X"},       {kY, "Y"},
@@ -90,6 +97,7 @@ const std::vector<ButtonLabel>& systemButtons(System s) {
     case System::SNES:
     case System::NDS: return snes;
     case System::N3DS: return n3ds;
+    case System::N64: return n64;
     default: return all;  // no game yet, or systems that aren't playable yet
     }
 }

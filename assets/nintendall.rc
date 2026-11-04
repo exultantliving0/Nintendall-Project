@@ -4,8 +4,8 @@
 IDI_APPICON ICON "nintendall.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 0,4,0,0
-PRODUCTVERSION 0,4,0,0
+FILEVERSION 0,5,0,0
+PRODUCTVERSION 0,5,0,0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -15,8 +15,8 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "Nintendall"
       VALUE "ProductName", "Nintendall"
-      VALUE "FileVersion", "0.4.0"
-      VALUE "ProductVersion", "0.4.0"
+      VALUE "FileVersion", "0.5.0"
+      VALUE "ProductVersion", "0.5.0"
       VALUE "OriginalFilename", "nintendall.exe"
     END
   END
