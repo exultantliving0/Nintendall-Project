@@ -33,7 +33,18 @@ CORES = [
 ]
 
 
-def platform_info():
+PLATFORMS = {
+    "windows": ("windows/x86_64", ".dll"),
+    "linux-x64": ("linux/x86_64", ".so"),
+    "linux-arm64": ("linux/aarch64", ".so"),
+    "macos-x64": ("apple/osx/x86_64", ".dylib"),
+    "macos-arm64": ("apple/osx/arm64", ".dylib"),
+}
+
+
+def platform_info(name="auto"):
+    if name != "auto":
+        return PLATFORMS[name]
     system = platform.system()
     machine = platform.machine().lower()
     if system == "Windows":
@@ -68,9 +79,11 @@ def main():
     ap.add_argument("--dest", required=True, help="cores folder next to the program")
     ap.add_argument("--cache", default=os.path.join(root, "cores"), help="download cache")
     ap.add_argument("--update", action="store_true", help="re-download the latest cores")
+    ap.add_argument("--platform", default="auto", choices=["auto", *PLATFORMS],
+                    help="which OS to fetch cores for (default: this one)")
     args = ap.parse_args()
 
-    plat, ext = platform_info()
+    plat, ext = platform_info(args.platform)
     failed = []
     for core in CORES:
         filename = f"{core}_libretro{ext}"

@@ -40,7 +40,7 @@ static int detectOnly(const std::vector<std::string>& files) {
         } else {
             ++unknown;
         }
-        std::printf("%-34s %-5s %-9s %-30s %s\n", fs::u8path(f).filename().string().c_str(),
+        std::printf("%-34s %-5s %-9s %-30s %s\n", fs::u8path(f).filename().u8string().c_str(),
                     d.system == System::Unknown ? "?" : si.name, d.fromHeader ? "[header]" : "[ext]", status.c_str(),
                     d.detail.c_str());
     }

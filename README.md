@@ -69,6 +69,23 @@ The build downloads each emulator once (from the official libretro buildbot)
 into `cores/` in the project, then copies them next to the program. To pull the
 newest versions: `python3 tools/bundle_cores.py --dest build/cores --update`.
 
+## Windows installer
+
+`tools/build_windows.sh` cross-compiles Nintendall for 64-bit Windows from
+Linux and builds `dist/Nintendall-<version>-setup.exe` (NSIS). The installer
+puts Nintendall in Program Files with all 9 emulators, adds Start Menu (and
+optionally desktop) shortcuts and an Apps & features entry. Uninstalling keeps
+the user's saves in `%APPDATA%\Nintendall`.
+
+```
+sudo apt install mingw-w64 libz-mingw-w64-dev nsis
+./tools/build_windows.sh
+```
+
+The program only needs `SDL2.dll` (shipped beside it); the compiler runtime and
+zlib are built in. The setup.exe isn't code-signed yet, so Windows SmartScreen
+will warn on first run. Sign it before selling.
+
 ## Controls
 
 Any controller SDL supports works (Xbox, PlayStation, Switch Pro, 8BitDo, most
@@ -117,6 +134,8 @@ beside it instead.
 | `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |
 | `src/zip.*`, `src/png.*`, `src/font.*` | zip reading, screenshots, built-in UI font |
 | `tools/bundle_cores.py` | build step that bundles the emulator cores |
+| `tools/build_windows.sh`, `installer/nintendall.nsi`, `cmake/toolchain-mingw64.cmake` | Windows build and setup.exe |
+| `tools/make_icon.py`, `assets/` | app icon and Windows resources |
 | `tests/resampler_test.cpp` | checks the audio resampler at every core's sample rate |
 | `tests/make_test_files.py` | builds a tiny NES test program plus fake headers for every system |
 

@@ -87,7 +87,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         audio_.init();
         fs::path db = paths_.base / "gamecontrollerdb.txt";
         if (!fs::exists(db)) db = paths_.data / "gamecontrollerdb.txt";
-        input_.init(fs::exists(db) ? db.string() : "");
+        input_.init(fs::exists(db) ? db.u8string() : "");
     }
     input_.setForcedButtons(opt.holdButtons);
     refreshCores();
@@ -110,11 +110,11 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
 
     // Normal start: a game path launches straight into the game; a folder opens the library there.
     std::error_code ec;
-    fs::path libDir = cfg_.get("last_dir");
+    fs::path libDir = fs::u8path(cfg_.get("last_dir"));
     if (libDir.empty() || !fs::is_directory(libDir, ec)) {
         const char* home = SDL_getenv("HOME");
         if (!home) home = SDL_getenv("USERPROFILE");
-        libDir = home ? fs::path(home) : fs::current_path();
+        libDir = home ? fs::u8path(home) : fs::current_path();
     }
     if (!start.empty() && fs::is_directory(start, ec) && detectGame(start).system == System::Unknown) {
         libDir = start;
@@ -147,7 +147,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
     }
 
     stopGame();
-    cfg_.set("last_dir", cwd_.string());
+    cfg_.set("last_dir", cwd_.u8string());
     cfg_.save();
     input_.shutdown();
     audio_.shutdown();
@@ -178,7 +178,7 @@ bool App::startGame(const fs::path& path) {
     stopGame();
     std::error_code ec;
     if (!fs::exists(path, ec)) {
-        showError("File not found", path.string());
+        showError("File not found", path.u8string());
         return false;
     }
 
@@ -186,7 +186,7 @@ bool App::startGame(const fs::path& path) {
     const Detection det = detectGame(path);
     if (det.system == System::Unknown) {
         showError("Couldn't recognize this game",
-                  path.filename().string() + "\n\n" + det.detail +
+                  path.filename().u8string() + "\n\n" + det.detail +
                       "\n\nNintendall supports NES, SNES, N64, Game Boy (Color/Advance), DS, 3DS, GameCube, Wii "
                       "and Wii U games.");
         return false;
@@ -220,14 +220,14 @@ bool App::startGame(const fs::path& path) {
             for (const auto& e : z.entries())
                 if (e.name == det.zipEntry) entry = &e;
         if (!entry || !z.read(*entry, data)) {
-            showError("Couldn't unzip game", path.string());
+            showError("Couldn't unzip game", path.u8string());
             return false;
         }
-        extracted_ = paths_.cache / fs::path(det.zipEntry).filename();
+        extracted_ = paths_.cache / fs::u8path(det.zipEntry).filename();
         std::ofstream out(extracted_, std::ios::binary);
         out.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));
         if (!out) {
-            showError("Couldn't unzip game", "Writing " + extracted_.string() + " failed");
+            showError("Couldn't unzip game", "Writing " + extracted_.u8string() + " failed");
             return false;
         }
         gameFile = extracted_;
@@ -250,7 +250,7 @@ bool App::startGame(const fs::path& path) {
     // 5. Game is running.
     system_ = det.system;
     gamePath_ = path;
-    gameTitle_ = path.stem().string();
+    gameTitle_ = path.stem().u8string();
     const auto& av = core_->avInfo();
     onAvInfoChanged();
     audio_.clear();
@@ -308,7 +308,7 @@ void App::gameFrame() {
 
 // ---- battery saves ----------------------------------------------------------
 
-static fs::path sramPath(const Paths& p, const fs::path& game) { return p.saves / (game.stem().string() + ".srm"); }
+static fs::path sramPath(const Paths& p, const fs::path& game) { return p.saves / fs::u8path(game.stem().u8string() + ".srm"); }
 
 void App::loadSram() {
     lastSram_.clear();
@@ -341,7 +341,7 @@ void App::saveSram(bool force) {
 // ---- save states ------------------------------------------------------------
 
 fs::path App::statePath(int slot) const {
-    return paths_.states / (gameTitle_ + "." + systemInfo(system_).key + ".state" + std::to_string(slot));
+    return paths_.states / fs::u8path(gameTitle_ + "." + systemInfo(system_).key + ".state" + std::to_string(slot));
 }
 
 void App::saveState() {
@@ -371,8 +371,8 @@ void App::takeScreenshot() {
     char stamp[32];
     const std::time_t t = std::time(nullptr);
     std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&t));
-    const fs::path p = paths_.screenshots / (gameTitle_ + "-" + stamp + ".png");
-    osd(video_.saveScreenshot(p) ? "Screenshot saved: " + p.filename().string() : std::string("Screenshot failed"));
+    const fs::path p = paths_.screenshots / fs::u8path(gameTitle_ + "-" + stamp + ".png");
+    osd(video_.saveScreenshot(p) ? "Screenshot saved: " + p.filename().u8string() : std::string("Screenshot failed"));
 }
 
 // ============================================================================
@@ -605,7 +605,7 @@ void App::openDir(const fs::path& dirIn, const fs::path& select) {
     for (fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end;
          it.increment(ec)) {
         const fs::path p = it->path();
-        const std::string name = p.filename().string();
+        const std::string name = p.filename().u8string();
         if (name.empty() || name[0] == '.') continue;
         Entry e;
         e.path = p;
@@ -692,7 +692,7 @@ void App::drawLibrary() {
 
     // Current folder
     const int maxChars = (W - margin * 2) / cw;
-    video_.drawText(margin, 38 * s, fit(cwd_.string(), maxChars, true), s, kText);
+    video_.drawText(margin, 38 * s, fit(cwd_.u8string(), maxChars, true), s, kText);
 
     // File list
     const int top = 38 * s + lh + 4;

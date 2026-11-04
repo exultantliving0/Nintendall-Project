@@ -44,7 +44,7 @@ static bool RETRO_CALLCONV cbRumble(unsigned port, enum retro_rumble_effect effe
 }
 
 LibretroCore::LibretroCore(CoreHost& host, fs::path systemDir, fs::path saveDir, fs::path optionsFile)
-    : host_(host), systemDir_(systemDir.string()), saveDir_(saveDir.string()), optionsFile_(std::move(optionsFile)) {}
+    : host_(host), systemDir_(systemDir.u8string()), saveDir_(saveDir.u8string()), optionsFile_(std::move(optionsFile)) {}
 
 LibretroCore::~LibretroCore() { unload(); }
 
@@ -59,7 +59,7 @@ bool LibretroCore::load(const fs::path& corePath, std::string& error) {
         error = "Another core is already running";
         return false;
     }
-    corePath_ = corePath.string();
+    corePath_ = corePath.u8string();
     lib_ = SDL_LoadObject(corePath_.c_str());
     if (!lib_) {
         error = std::string("Couldn't load core: ") + SDL_GetError();
@@ -115,7 +115,7 @@ bool LibretroCore::load(const fs::path& corePath, std::string& error) {
 }
 
 bool LibretroCore::loadGame(const fs::path& gamePath, std::string& error) {
-    gamePathStr_ = gamePath.string();
+    gamePathStr_ = gamePath.u8string();
     retro_game_info gi{};
     gi.path = gamePathStr_.c_str();
     if (!needFullpath_) {

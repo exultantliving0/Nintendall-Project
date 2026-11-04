@@ -1,0 +1,27 @@
+// Windows resources: app icon (shows in Explorer, the taskbar and the window) and version info.
+#include <winver.h>
+
+IDI_APPICON ICON "nintendall.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "FileDescription", "Nintendall"
+      VALUE "ProductName", "Nintendall"
+      VALUE "FileVersion", "0.1.0"
+      VALUE "ProductVersion", "0.1.0"
+      VALUE "OriginalFilename", "nintendall.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

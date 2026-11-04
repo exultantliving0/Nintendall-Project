@@ -18,7 +18,7 @@
 namespace fs = std::filesystem;
 
 std::string lowerExt(const fs::path& p) {
-    std::string e = p.extension().string();
+    std::string e = p.extension().u8string();
     std::transform(e.begin(), e.end(), e.begin(), [](unsigned char c) { return char(std::tolower(c)); });
     return e;
 }
@@ -226,7 +226,7 @@ Detection detectZip(const fs::path& path) {
         Bytes b;
         b.size = e.size;
         if (!z.read(e, b.head, kHeadSize) && b.head.empty()) continue;
-        const std::string ext = lowerExt(fs::path(e.name));
+        const std::string ext = lowerExt(fs::u8path(e.name));
         Detection d = detectBytes(b, ext);
         if (d.system == System::Unknown) continue;
         d.zipEntry = e.name;

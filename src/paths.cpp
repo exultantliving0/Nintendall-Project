@@ -16,7 +16,7 @@ std::string coreFileName(const std::string& coreName) {
 
 void Paths::init() {
     if (char* b = SDL_GetBasePath()) {
-        base = fs::path(b);
+        base = fs::u8path(b);
         SDL_free(b);
     } else {
         base = fs::current_path();
@@ -27,7 +27,7 @@ void Paths::init() {
     if (fs::exists(base / "portable.txt", ec)) {
         data = base;
     } else if (char* p = SDL_GetPrefPath("", "Nintendall")) {
-        data = fs::path(p);
+        data = fs::u8path(p);
         SDL_free(p);
     } else {
         data = base;
