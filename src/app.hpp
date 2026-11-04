@@ -42,6 +42,7 @@ public:
     bool isFastForwarding() const override { return fastForward_; }
     unsigned audioOutputRate() const override { return audio_.ok() ? unsigned(audio_.outputRate()) : 48000u; }
     float displayRefreshRate() const override { return float(video_.displayHz()); }
+    void hwOutputSize(unsigned& w, unsigned& h) const override;
 
 private:
     // Menu actions

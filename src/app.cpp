@@ -632,6 +632,15 @@ bool App::onRumble(unsigned port, retro_rumble_effect effect, uint16_t strength)
 
 void App::onMessage(const std::string& msg, unsigned durationMs) { osd(msg, std::max(1500u, durationMs)); }
 
+void App::hwOutputSize(unsigned& w, unsigned& h) const {
+    w = h = 0;
+    const SDL_Rect& r = video_.gameRect();  // where the last frame was drawn
+    if (opt_.headless || r.w <= 0 || r.h <= 0 || !core_) return;
+    const bool sideways = core_->rotation() % 2 == 1;  // the picture is turned after copying
+    w = unsigned(sideways ? r.h : r.w);
+    h = unsigned(sideways ? r.w : r.h);
+}
+
 void App::onAvInfoChanged() {
     if (!core_) return;
     const auto& av = core_->avInfo();

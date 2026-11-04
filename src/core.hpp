@@ -21,6 +21,8 @@ public:
     virtual bool isFastForwarding() const = 0;
     virtual unsigned audioOutputRate() const { return 48000; }  // what the speakers play at
     virtual float displayRefreshRate() const { return 60.0f; }
+    // Size (in pixels) the game picture is shown at, for shrinking GPU frames before copying them. 0 = unknown.
+    virtual void hwOutputSize(unsigned& w, unsigned& h) const { w = h = 0; }
 };
 
 struct CoreOption {

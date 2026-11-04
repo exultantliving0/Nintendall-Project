@@ -514,10 +514,17 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
 }
 
 void LibretroCore::videoRefresh(const void* data, unsigned w, unsigned h, size_t pitch) {
-    if (data == RETRO_HW_FRAME_BUFFER_VALID) {
-        // GPU-drawn frame: copy it out of the framebuffer.
-        if (const uint32_t* px = hwActive_ ? hw_.readFrame(w, h) : nullptr) {
-            host_.onVideo(px, w, h, size_t(w) * 4, RETRO_PIXEL_FORMAT_XRGB8888);
+    if (data == RETRO_HW_FRAME_BUFFER_VALID || (!data && hwActive_)) {
+        // GPU-drawn frame: copy it out of the framebuffer, shrunk to the size it's shown at.
+        // The copy finishes in the background, so what we get back is the previous frame.
+        // A duplicate frame just collects the copy still in flight.
+        unsigned maxW = 0, maxH = 0, outW = 0, outH = 0;
+        host_.hwOutputSize(maxW, maxH);
+        const uint32_t* px = !hwActive_ ? nullptr
+                             : data     ? hw_.readFrame(w, h, maxW, maxH, outW, outH)
+                                        : hw_.takePending(outW, outH);
+        if (px) {
+            host_.onVideo(px, outW, outH, size_t(outW) * 4, RETRO_PIXEL_FORMAT_XRGB8888);
             // Uploading may have switched to the window's own GL context (SDL's OpenGL renderer).
             // The core keeps drawing after this callback returns, so give it its context back.
             hw_.makeCurrent();
