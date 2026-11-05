@@ -250,7 +250,10 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         const bool modal = menu_.isOpen() || buttonConfig_.isOpen() || settings_.isOpen();
         const bool running = core_ && !paused_ && !focusLost_ && !modal;
         input_.setKeyboardEnabled(!modal);
-        if (wasRunning_ && !running) audio_.clear();  // silence while paused / in menus
+        if (wasRunning_ && !running) {
+            audio_.clear();  // silence while paused / in menus
+            rewinding_ = false;
+        }
         if (running && !wasRunning_) nextFrame_ = nowSeconds();
         wasRunning_ = running;
 
@@ -289,9 +292,28 @@ void App::pace(double frameSeconds) {
 
 void App::runFrames() {
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
+    // Rewind key: ` (the key left of 1; on other keyboard layouts, wherever ` is).
+    const SDL_Scancode rewindKey = SDL_GetScancodeFromKey(SDLK_BACKQUOTE);
+    const bool rewindHeld = keys[rewindKey != SDL_SCANCODE_UNKNOWN ? rewindKey : SDL_SCANCODE_GRAVE];
+    if (rewindHeld && !rewindKeyWas_ && !rewindOff_.empty()) osd(rewindOff_, 3500);
+    rewindKeyWas_ = rewindHeld;
+    if (rewindHeld && rewindOff_.empty()) {
+        rewindFrame();
+        return;
+    }
+    if (rewinding_) {
+        rewinding_ = false;
+        nextFrame_ = nowSeconds();
+    }
+
     fastForward_ = fastForwardToggled_ || keys[SDL_SCANCODE_TAB];
     const int runs = fastForward_ ? 4 : 1;
-    for (int i = 0; i < runs && core_; ++i) core_->run();
+    for (int i = 0; i < runs && core_; ++i) {
+        frameInputs_.clear();
+        core_->run();
+        if (rewindCount_ == 0) firstInputs_.swap(frameInputs_);  // first frame after a recorded state
+        recordRewind();
+    }
     if (core_ && core_->shutdownRequested()) {
         stopGame();
         return;
@@ -458,6 +480,7 @@ bool App::startGame(const fs::path& path) {
     video_.clearFrame();
     loadSram();
     paused_ = fastForward_ = fastForwardToggled_ = false;
+    resetRewind();
     nextFrame_ = nowSeconds();
     addRecent(path);
     if (video_.window()) SDL_SetWindowTitle(video_.window(), ("Nintendall - " + gameTitle_).c_str());
@@ -482,6 +505,8 @@ void App::stopGame() {
     if (!core_) return;
     saveSram(true);
     core_.reset();
+    rewind_.clear();  // frees its memory
+    rewinding_ = false;
     input_.stopAllRumble();
     audio_.clear();
     std::error_code ec;
@@ -497,6 +522,61 @@ void App::stopGame() {
     }
     paused_ = false;
     if (video_.window()) SDL_SetWindowTitle(video_.window(), "Nintendall");
+}
+
+// ============================================================================
+// Rewind
+
+void App::resetRewind() {
+    rewind_.clear();
+    rewind_.setLimits(256u << 20, 18000);  // up to 256 MB, 5 minutes at 60 fps
+    rewinding_ = false;
+    rewindEvery_ = 1;
+    rewindCount_ = 0;
+    rewindCostMs_ = -1;
+    rewindOff_.clear();
+    // These save states are too big and slow to record many times a second.
+    if (system_ == System::GameCube || system_ == System::Wii || system_ == System::WiiU || system_ == System::N3DS)
+        rewindOff_ = std::string("Rewind isn't available for ") + systemInfo(system_).fullName + " games";
+}
+
+void App::recordRewind() {
+    if (!core_ || !rewindOff_.empty() || ++rewindCount_ < rewindEvery_) return;
+    rewindCount_ = 0;
+    const double t0 = nowSeconds();
+    if (!core_->saveStateInto(rewindBuf_)) {
+        rewindOff_ = "Rewind isn't available for this game";
+        rewind_.clear();
+        return;
+    }
+    rewind_.push(rewindBuf_, std::move(firstInputs_));
+    firstInputs_.clear();
+    // Keep recording cheap: about 1.5 ms per frame on average. Big states are recorded less often
+    // (rewinding then goes back faster); far too slow ones turn rewind off.
+    const double ms = (nowSeconds() - t0) * 1000.0;
+    rewindCostMs_ = rewindCostMs_ < 0 ? ms : rewindCostMs_ * 0.9 + ms * 0.1;
+    if (rewindCostMs_ > 12.0) {
+        rewindOff_ = "Rewind isn't available for this game (it's too big to record)";
+        rewind_.clear();
+        return;
+    }
+    rewindEvery_ = std::clamp(int(rewindCostMs_ / 1.5) + 1, 1, 30);
+}
+
+void App::rewindFrame() {
+    if (!rewinding_) {
+        rewinding_ = true;
+        fastForward_ = false;
+        audio_.clear();
+    }
+    // Load the moment before and run one frame of it to show its picture (sound is muted).
+    Rewind::Inputs inputs;
+    if (rewind_.pop(rewindBuf_, inputs)) {
+        core_->loadState(rewindBuf_);
+        replayInputs_ = &inputs;
+        core_->run();
+        replayInputs_ = nullptr;
+    }
 }
 
 void App::addRecent(const fs::path& path) {
@@ -618,11 +698,24 @@ void App::onAudio(const int16_t* stereo, size_t frames) {
         for (size_t i = 0; i < frames * 2; ++i) audioPeak_ = std::max(audioPeak_, std::abs(int(stereo[i])));
         return;
     }
-    if (fastForward_) return;  // no chipmunk audio while fast-forwarding
+    if (fastForward_ || rewinding_) return;  // no chipmunk audio while fast-forwarding, none while rewinding
     audio_.push(stereo, frames);
 }
 
 int16_t App::onInputState(unsigned port, unsigned device, unsigned index, unsigned id) {
+    // Rewinding: give the game what it read back then, so each moment looks as it did.
+    if (replayInputs_) {
+        for (const auto& r : *replayInputs_)
+            if (r.port == port && r.device == device && r.index == index && r.id == id) return r.value;
+        return 0;
+    }
+    const int16_t v = liveInputState(port, device, index, id);
+    if (frameInputs_.size() < 4096)
+        frameInputs_.push_back({uint8_t(port), uint8_t(index), uint16_t(device), uint16_t(id), v});
+    return v;
+}
+
+int16_t App::liveInputState(unsigned port, unsigned device, unsigned index, unsigned id) {
     if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_POINTER) return port == 0 && index == 0 ? pointerState(id) : 0;
     if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_JOYPAD) {
         // Some systems get their face buttons rearranged (e.g. GameCube A on the bottom button).
@@ -1087,7 +1180,7 @@ void App::doAction(int a) {
                     "  Enter = Start,  Right Shift = Select\n\n"
                     "Shortcuts:\n  Ctrl+O = Open game\n  Ctrl+P = Pause,  Ctrl+R = Reset\n"
                     "  F5 = Save state,  F9 = Load state,  F6 / F7 = Change slot\n"
-                    "  Hold Tab = Fast forward\n  F11 = Fullscreen,  Esc = Leave fullscreen\n  F12 = Screenshot\n\n"
+                    "  Hold Tab = Fast forward,  Hold ` = Rewind\n  F11 = Fullscreen,  Esc = Leave fullscreen\n  F12 = Screenshot\n\n"
                     "Controllers work automatically. Home button, or Select + Start, pauses.\n\n"
                     "Home screen (no game running):\n  Click a console, then click a game to play it\n"
                     "  Arrow keys / D-pad = Choose a game,  Enter / A = Play\n"
@@ -1342,7 +1435,13 @@ void App::draw() {
         video_.fillRect(bx, by, tw + int(32 * s), th + int(16 * s), {0, 0, 0, 170});
         text_.draw(bx + int(16 * s), by + int(8 * s), t, kWhite, Text::Large);
     }
-    if (fastForward_ && core_ && !paused_) text_.draw(area.x + int(10 * s), area.y + int(8 * s), "Fast Forward", kWhite);
+    if (fastForward_ && core_ && !paused_ && !rewinding_)
+        text_.draw(area.x + int(10 * s), area.y + int(8 * s), "Fast Forward", kWhite);
+    if (rewinding_ && core_ && !paused_) {
+        const std::string t = rewind_.empty() ? "Rewind (can't go back further)" : "Rewind";
+        video_.fillRect(area.x + int(6 * s), area.y + int(4 * s), text_.width(t) + int(12 * s), text_.lineHeight() + int(8 * s), {0, 0, 0, 160});
+        text_.draw(area.x + int(12 * s), area.y + int(8 * s), t, kWhite);
+    }
 
     // On-screen message (bottom left).
     if (!osdText_.empty() && !SDL_TICKS_PASSED(SDL_GetTicks(), osdUntil_)) {

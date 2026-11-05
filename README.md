@@ -157,12 +157,21 @@ Q / W = L / R, 1 / 3 = L2 / R2, Enter = Start, Right Shift = Select.
 | F5 / F9 | Save / load state |
 | F6 / F7 | Previous / next state slot |
 | Hold Tab | Fast forward |
+| Hold ` | Rewind (like Mesen): the game plays backwards while held, up to about 5 minutes |
 | F11 or Alt+Enter | Fullscreen (Esc leaves fullscreen) |
 | F12 | Screenshot |
 | F10 | Open the menu bar with the keyboard |
 | Controller Home, or Select + Start | Pause / resume |
 
 The game pauses automatically when the window loses focus or a menu is open.
+
+**Rewind** works for NES, Famicom Disk System, SNES, Game Boy / Color, Game Boy
+Advance, DS and N64 games. Nintendall keeps recording the last few minutes
+(up to 256 MB of memory) and releasing ` carries on playing from that moment.
+Games with big save states are recorded a few frames apart, so they rewind
+faster, and if recording would slow the game down, rewind turns itself off for
+that game. GameCube, Wii, 3DS and Wii U games can't rewind: their states are too
+big to record many times a second.
 
 ### Console Settings
 
@@ -311,6 +320,7 @@ Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen).
 | `src/consolesettings.*`, `src/settingsdialog.*` | the Console Settings list and window |
 | `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |
 | `src/zip.*`, `src/png.*` | zip reading, screenshots |
+| `src/rewind.*` | rewind history (save states stored as packed differences) |
 | `tools/bundle_cores.py` | build step that bundles the emulator cores |
 | `tools/build_windows.sh`, `installer/nintendall.nsi`, `cmake/toolchain-mingw64.cmake` | Windows build and setup.exe |
 | `tools/make_icon.py`, `assets/` | app icon and Windows resources |
