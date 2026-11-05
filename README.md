@@ -38,7 +38,8 @@ then kept in the `covers/` data folder (games without a cover get a plain box;
 Nintendall looks again a week later):
 
 - GameCube, Wii, Wii U, DS, 3DS: from [GameTDB](https://www.gametdb.com), using
-  the game's ID code read from the file (`.iso`, `.gcm`, `.wbfs`, `.rvz`,
+  the game's ID code read from the file (3DS, DS and Wii U in GameTDB's high
+  resolution "HQ" set when there is one) (`.iso`, `.gcm`, `.wbfs`, `.rvz`,
   `.wia`, `.gcz`, `.ciso`, `.nds`, `.3ds`, `.cci`, `.cxi`, `.cia`, Wii U game folders).
 - Every console (and the ones above when there's no ID, e.g. zipped games):
   from the [libretro thumbnail library](https://thumbnails.libretro.com), by

@@ -96,6 +96,13 @@ bool isImage(const std::vector<uint8_t>& b) {
 // ---------------------------------------------------------------------------
 // GameTDB: art.gametdb.com/<platform>/cover/<region>/<ID>.<ext>
 
+// GameTDB's cover sizes, best first. 3DS, DS and Wii U covers come in HQ (768 pixels wide) and
+// M (about 400); GameCube and Wii fronts only in the small size (160 x 224).
+std::vector<const char*> gameTdbSizes(System s) {
+    if (s == System::N3DS || s == System::NDS || s == System::WiiU) return {"coverHQ", "coverM", "cover"};
+    return {"cover"};
+}
+
 const char* gameTdbPlatform(System s, const char*& ext) {
     ext = "jpg";
     switch (s) {
@@ -375,12 +382,13 @@ std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
     std::vector<uint8_t> body;
     const char* ext = nullptr;
     if (const char* platform = gameTdbPlatform(r.system, ext); platform && !r.gameId.empty()) {
-        for (const std::string& region : gameTdbRegions(r.gameId)) {
-            const std::string url =
-                std::string("https://art.gametdb.com/") + platform + "/cover/" + region + "/" + r.gameId + "." + ext;
-            if (get(url, body, reached) == 200 && isImage(body)) return body;
-            if (!reached) return {};
-        }
+        for (const std::string& region : gameTdbRegions(r.gameId))
+            for (const char* size : gameTdbSizes(r.system)) {
+                const std::string url = std::string("https://art.gametdb.com/") + platform + "/" + size + "/" + region +
+                                        "/" + r.gameId + "." + ext;
+                if (get(url, body, reached) == 200 && isImage(body)) return body;
+                if (!reached) return {};
+            }
     }
     const char* sys = libretroSystem(r.system);
     if (!sys) return {};
@@ -393,9 +401,18 @@ std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
 
 Image Covers::Shared::load(const Request& r) {
     Image img;
-    const std::string base = r.gameId.empty() ? "name - " + safeFileName(r.fileName) : "id - " + r.gameId;
+    // Covers found by ID on systems with big GameTDB covers are saved as "hq - <ID>"; small ones
+    // saved by older versions ("id - <ID>") are replaced the first time.
+    const bool hq = gameTdbSizes(r.system).size() > 1;
+    const std::string base =
+        r.gameId.empty() ? "name - " + safeFileName(r.fileName) : (hq ? "hq - " : "id - ") + r.gameId;
     const fs::path dir = cacheDir / systemInfo(r.system).key;
     const fs::path have = dir / (base + ".img"), none = dir / (base + ".none");
+    if (hq && !r.gameId.empty()) {
+        std::error_code ec;
+        fs::remove(dir / ("id - " + r.gameId + ".img"), ec);
+        fs::remove(dir / ("id - " + r.gameId + ".none"), ec);
+    }
 
     std::vector<uint8_t> bytes;
     std::error_code ec;
