@@ -204,6 +204,39 @@ std::string Input::padName(PadBind b) {
 // ---------------------------------------------------------------------------
 // Devices
 
+// Controllers SDL doesn't know (no mapping, e.g. some USB NES pads) still work: we give them
+// a mapping guessed from their buttons, d-pad and sticks, named "Detected Controller".
+// Every button can then be fixed up in Button Config.
+static bool addGuessedMapping(int index) {
+    SDL_Joystick* js = SDL_JoystickOpen(index);
+    if (!js) return false;
+    const int buttons = SDL_JoystickNumButtons(js), axes = SDL_JoystickNumAxes(js), hats = SDL_JoystickNumHats(js);
+    SDL_JoystickClose(js);
+    if (buttons < 2 || (axes < 2 && hats < 1)) return false;  // no d-pad: not a game pad (e.g. a motion sensor)
+
+    char guid[33] = {};
+    SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(index), guid, sizeof guid);
+    std::string m = std::string(guid) + ",Detected Controller,";
+    // Usual button orders: NES-style pads have A, B, Select, Start; bigger pads have the face
+    // buttons, shoulders, (triggers,) Select and Start.
+    std::vector<const char*> names;
+    if (buttons <= 4) names = {"b", "a", "back", "start"};
+    else if (buttons < 10) names = {"a", "b", "x", "y", "leftshoulder", "rightshoulder", "back", "start", "guide"};
+    else
+        names = {"a",    "b",     "x",          "y",          "leftshoulder", "rightshoulder",
+                 "lefttrigger", "righttrigger", "back", "start", "leftstick", "rightstick",
+                 "guide", "misc1", "paddle1", "paddle2", "paddle3", "paddle4"};
+    for (int i = 0; i < buttons && i < int(names.size()); ++i) m += std::string(names[size_t(i)]) + ":b" + std::to_string(i) + ",";
+    if (hats > 0) m += "dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,";
+    if (hats == 0 && axes < 4) {
+        m += "dpleft:-a0,dpright:+a0,dpup:-a1,dpdown:+a1,";  // NES pads usually report the d-pad as a stick
+    } else {
+        m += "leftx:a0,lefty:a1,";
+        if (axes >= 4) m += "rightx:a2,righty:a3,";
+    }
+    return SDL_GameControllerAddMapping(m.c_str()) >= 0;
+}
+
 void Input::init(const std::string& mappingDbPath) {
     for (int p = 0; p < kMaxPlayers; ++p) resetDefaults(p);
     // Extra controller mappings (community gamecontrollerdb.txt) if the user provides one.
@@ -222,12 +255,15 @@ void Input::shutdown() {
 }
 
 bool Input::handleDeviceEvent(const SDL_Event& e, std::string* message) {
-    if (e.type == SDL_CONTROLLERDEVICEADDED) {
-        if (!SDL_IsGameController(e.cdevice.which)) return true;
-        const SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(e.cdevice.which);
+    // SDL reports unknown controllers only as joysticks, so listen for those too.
+    if (e.type == SDL_CONTROLLERDEVICEADDED || e.type == SDL_JOYDEVICEADDED) {
+        const int index = e.type == SDL_JOYDEVICEADDED ? e.jdevice.which : e.cdevice.which;
+        if (!SDL_IsGameController(index) && !addGuessedMapping(index)) return true;
+        if (!SDL_IsGameController(index)) return true;
+        const SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(index);
         for (const auto& p : pads_)
             if (p.id == id) return true;  // already open
-        SDL_GameController* gc = SDL_GameControllerOpen(e.cdevice.which);
+        SDL_GameController* gc = SDL_GameControllerOpen(index);
         if (!gc) return true;
         Pad p;
         p.gc = gc;
@@ -245,8 +281,9 @@ bool Input::handleDeviceEvent(const SDL_Event& e, std::string* message) {
         }
         return true;
     }
-    if (e.type == SDL_CONTROLLERDEVICEREMOVED) {
-        auto it = std::find_if(pads_.begin(), pads_.end(), [&](const Pad& p) { return p.id == e.cdevice.which; });
+    if (e.type == SDL_CONTROLLERDEVICEREMOVED || e.type == SDL_JOYDEVICEREMOVED) {
+        const SDL_JoystickID id = e.type == SDL_JOYDEVICEREMOVED ? e.jdevice.which : e.cdevice.which;
+        auto it = std::find_if(pads_.begin(), pads_.end(), [&](const Pad& p) { return p.id == id; });
         if (it != pads_.end()) {
             if (message) {
                 const char* n = SDL_GameControllerName(it->gc);

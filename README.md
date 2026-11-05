@@ -92,7 +92,9 @@ will warn on first run. Sign it before selling.
 ## Controls
 
 Any controller SDL supports works (Xbox, PlayStation, Switch Pro, 8BitDo, most
-USB pads), and you can plug controllers in or out at any time. Player 1 is the
+USB pads), and you can plug controllers in or out at any time. Controllers SDL
+doesn't know (e.g. some USB NES pads) still work as **Detected Controller**,
+with a guessed button layout you can fix in Button Config. Player 1 is the
 first controller, player 2 the second, and so on, unless you pick a controller
 for a player from the **Controller** drop-down in **Options > Button Config**
 (remembered, and found again when it's plugged back in; "None" makes a player
