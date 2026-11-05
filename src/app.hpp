@@ -103,6 +103,8 @@ private:
     int16_t pointerState(unsigned id) const;
     void updateInputProfile();
     void connectPorts();
+    bool realWiimotes() const;  // Wii game set to use real Wii Remotes
+    bool sdlWiiDriverOff_ = false;
 
     // Subsystems
     Paths paths_;

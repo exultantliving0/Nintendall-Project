@@ -187,6 +187,25 @@ Classic Controller, and Button Config follows. The Wiimote pointer is the right
 stick, or the mouse (Console Settings > Wiimote Pointer). Only players who have a
 controller (or keys) are plugged in, so Wii games don't show extra pointers.
 
+**Real Wii Remotes:** set Console Settings > Wii Controller to **Real Wii Remote**
+(the game restarts), then press a button on each remote to connect it. The remotes
+must first be connected to the PC:
+
+- **Mayflash DolphinBar** (easiest): plug it in, set it to mode 4, and sync each
+  remote with its red button. It's also the sensor bar.
+- **Bluetooth:** pair the remote in the PC's Bluetooth settings (press the red sync
+  button under the battery cover; skip the PIN if asked).
+
+Pointing needs a powered sensor bar (the DolphinBar's, or a USB / battery one; a
+Wii's own bar only works plugged into a Wii). On Linux, Dolphin also needs
+permission to use the remotes; add this as `/etc/udev/rules.d/51-wiimote.rules`
+and reconnect them:
+
+```
+SUBSYSTEM=="hidraw*", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="0306", TAG+="uaccess"
+SUBSYSTEM=="hidraw*", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="0330", TAG+="uaccess"
+```
+
 ### Wii U
 
 Wii U games run on Cemu (OpenGL 4.5). The Layout menu shows the TV picture

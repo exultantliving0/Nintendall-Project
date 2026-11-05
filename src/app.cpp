@@ -177,7 +177,9 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         if (settings_.takeRestartRequest() && core_) {
             const fs::path game = gamePath_;  // reload the game so the new settings apply
             startGame(game);
-            osd("Game restarted with the new settings");
+            osd(realWiimotes() ? "Game restarted - press a button on each Wii Remote to connect it"
+                               : "Game restarted with the new settings",
+                realWiimotes() ? 6000 : 2500);
         } else if (settingsWasOpen_ && !settings_.isOpen() && settings_.restartPending()) {
             osd("Some settings apply the next time the game starts", 4000);
         }
@@ -378,6 +380,12 @@ bool App::startGame(const fs::path& path) {
     input_.setStickAsDpad(usesStickAsDpad(system_));
     updateInputProfile();
     connectPorts();
+    if (realWiimotes()) {
+        // SDL's own Wii Remote driver would talk to the remotes too and confuse them: let Dolphin have them.
+        SDL_SetHint("SDL_JOYSTICK_HIDAPI_WII", "0");
+        sdlWiiDriverOff_ = true;
+        osd("Real Wii Remotes: press a button on each remote to connect it", 6000);
+    }
     video_.clearFrame();
     loadSram();
     paused_ = fastForward_ = fastForwardToggled_ = false;
@@ -414,6 +422,10 @@ void App::stopGame() {
     system_ = System::Unknown;
     updateScreenWindow();  // closes the second window
     updateInputProfile();
+    if (sdlWiiDriverOff_) {  // Wii Remotes can be regular controllers again
+        SDL_SetHint("SDL_JOYSTICK_HIDAPI_WII", "1");
+        sdlWiiDriverOff_ = false;
+    }
     paused_ = false;
     if (video_.window()) SDL_SetWindowTitle(video_.window(), "Nintendall");
 }
@@ -561,13 +573,22 @@ int16_t App::onInputState(unsigned port, unsigned device, unsigned index, unsign
 // Leaving the rest unplugged matters for e.g. Wii games, which show a pointer per Wiimote.
 void App::connectPorts() {
     if (!core_) return;
+    const bool real = realWiimotes();
     for (int p = 0; p < Input::kMaxPlayers; ++p) {
-        const bool present = p == 0 || input_.controllerForPort(p) || input_.hasKeyboardKeys(p);
+        // Real Wii Remotes: every slot stays plugged in (an unplugged slot can't take a real remote).
+        const bool present = p == 0 || real || input_.controllerForPort(p) || input_.hasKeyboardKeys(p);
         // Wii U: player 1 is the GamePad; players 2-4 are Pro Controllers (Cemu's device id for one).
         const unsigned pad = system_ == System::WiiU && p > 0 ? RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 2)
                                                               : RETRO_DEVICE_JOYPAD;
         core_->setPortDevice(unsigned(p), present ? pad : RETRO_DEVICE_NONE);
     }
+}
+
+bool App::realWiimotes() const {
+    if (!core_ || system_ != System::Wii) return false;
+    auto& opts = core_->options();
+    auto it = opts.find("dolphin_wiimote_default_device");
+    return it != opts.end() && it->second.value == "real";
 }
 
 // Which buttons Button Config shows, and how our buttons feed the core's, for the running game.
