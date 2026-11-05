@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nintendall VERSION 0.9.4 LANGUAGES CXX)
+project(Nintendall VERSION 0.10.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,10 +28,14 @@ add_executable(nintendall
   src/config.cpp
   src/consolesettings.cpp
   src/core.cpp
+  src/covers.cpp
   src/detect.cpp
   src/filedialog.cpp
+  src/home.cpp
+  src/http.cpp
   src/hwrender.cpp
   src/input.cpp
+  src/library.cpp
   src/menubar.cpp
   src/paths.cpp
   src/png.cpp
@@ -43,7 +47,7 @@ add_executable(nintendall
   src/zip.cpp
 )
 
-target_include_directories(nintendall PRIVATE src third_party/libretro)
+target_include_directories(nintendall PRIVATE src third_party/libretro third_party/stb)
 target_compile_definitions(nintendall PRIVATE NINTENDALL_VERSION="${PROJECT_VERSION}")
 
 if(TARGET SDL2::SDL2main)
@@ -58,7 +62,7 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(nintendall PRIVATE SDL2_ttf::SDL2_ttf ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
 if(WIN32)
-  target_link_libraries(nintendall PRIVATE comdlg32)
+  target_link_libraries(nintendall PRIVATE comdlg32 winhttp shell32)
 endif()
 
 # UI font, next to the program (Windows uses its own Segoe UI when available).

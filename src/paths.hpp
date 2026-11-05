@@ -15,6 +15,7 @@ struct Paths {
     std::filesystem::path cache;        // temporary files (games extracted from zips)
     std::vector<std::filesystem::path> coreDirs;  // where the bundled emulator cores live
     std::filesystem::path bundledSystem;          // read-only data shipped for some cores (Dolphin's Sys folder)
+    bool portable = false;  // portable.txt next to the program: everything is kept beside it
 
     void init();
     // Full path of an installed core, or empty if it isn't installed.

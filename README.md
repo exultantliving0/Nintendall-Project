@@ -5,8 +5,48 @@ window (or use File > Open) and Nintendall works out which system it's for and
 starts the right emulator automatically. Everything comes in one package: there
 is nothing to install or choose.
 
-The window is deliberately simple: a black screen with a menu bar
-(File, Emulation, State, Options, Help), in the style of classic emulators.
+The window is deliberately simple: a menu bar (File, Emulation, State, Options,
+Help), in the style of classic emulators, over the game.
+
+## Home screen
+
+When no game is running, Nintendall shows your games. Across the top are the
+consoles in release order (NES, Game Boy, SNES, N64, Game Boy Color, Game Boy
+Advance, GameCube, DS, Wii, 3DS, Wii U); click one and its games appear below
+with their box covers. Click a game to play it. With the keyboard or a
+controller: arrow keys / D-pad choose a game, Enter / A plays it, Tab /
+Shift+Tab or L / R switch consoles.
+
+The games come from the **Games folder**, which has one folder per console:
+
+```
+Documents/Nintendall/Games/
+  NES/  Game Boy/  SNES/  Nintendo 64/  Game Boy Color/  Game Boy Advance/
+  GameCube/  Nintendo DS/  Wii/  Nintendo 3DS/  Wii U/
+```
+
+The installer makes it (and can open it at the end); Nintendall also makes any
+missing folders when it starts. **File > Open Games Folder** or the **Open
+Folder** button go there. Games can be in subfolders, zipped (`.zip`), and
+Famicom Disk System games go in `NES/`. New games show up by themselves.
+To use another folder, set `games.folder = "D:/My Games"` in `nintendall.cfg`
+(portable mode uses `Games/` next to the program).
+
+**Box covers** are downloaded automatically the first time a game is shown,
+then kept in the `covers/` data folder (games without a cover get a plain box;
+Nintendall looks again a week later):
+
+- GameCube, Wii, Wii U, DS, 3DS: from [GameTDB](https://www.gametdb.com), using
+  the game's ID code read from the file (`.iso`, `.gcm`, `.wbfs`, `.rvz`,
+  `.wia`, `.gcz`, `.ciso`, `.nds`, `.3ds`, `.cci`, `.cxi`, `.cia`, Wii U game folders).
+- Every console (and the ones above when there's no ID, e.g. zipped games):
+  from the [libretro thumbnail library](https://thumbnails.libretro.com), by
+  matching the file name to its list of game names (No-Intro names like
+  `Super Mario Bros. 3 (USA).nes` match exactly; close names like
+  `Pokemon Red.gb` usually match too).
+
+Only the game's ID or file name is sent, to those two sites. Covers aren't
+bundled with Nintendall; they're fetched by each user.
 
 Under the hood it's a **libretro frontend**. The emulation is done by one proven,
 open-source emulator "core" per system, bundled in `cores/` next to the program.
@@ -251,7 +291,10 @@ beside it instead.
 - `system/`: BIOS / firmware files that some cores need
 - `config/`: per-core settings (`<core>.opt`, editable)
 - `screenshots/`
+- `covers/`: downloaded box covers (safe to delete; they download again)
 - `nintendall.cfg`: settings, button mappings and recent games
+
+Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen).
 
 ## Code layout
 
@@ -262,6 +305,7 @@ beside it instead.
 | `src/core.*` | loads a libretro core and implements the libretro API |
 | `src/hwrender.*` | OpenGL context + framebuffer for GPU-drawn cores (N64, GameCube/Wii, 3DS, Wii U) |
 | `src/app.*` | main window, menu actions, game loop, saves |
+| `src/home.*`, `src/library.*`, `src/covers.*`, `src/http.*` | home screen, Games folder scanning (and game IDs), box cover downloads |
 | `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |
 | `src/consolesettings.*`, `src/settingsdialog.*` | the Console Settings list and window |
 | `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |

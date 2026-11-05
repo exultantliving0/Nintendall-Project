@@ -12,6 +12,7 @@
 #include "config.hpp"
 #include "core.hpp"
 #include "detect.hpp"
+#include "home.hpp"
 #include "input.hpp"
 #include "menubar.hpp"
 #include "paths.hpp"
@@ -47,7 +48,7 @@ public:
 private:
     // Menu actions
     enum Action {
-        ActOpen = 1, ActCloseGame, ActExit,
+        ActOpen = 1, ActCloseGame, ActExit, ActGamesFolder,
         ActRecent = 10,  // + index
         ActPause = 30, ActReset, ActFastForward,
         ActSaveState = 40, ActLoadState,
@@ -80,6 +81,7 @@ private:
     void draw();
     bool menuVisible() const;
     SDL_Rect gameArea() const;
+    SDL_Rect homeArea() const;  // the home screen (game list), under the menu bar
     float uiScale() const;
     void openFileDialog();
     // Wii U disc images are encrypted with keys from the player's own console (Cemu reads keys.txt).
@@ -120,6 +122,7 @@ private:
     Input input_;
     Text text_;
     MenuBar menu_;
+    Home home_;  // shown when no game is running
     ButtonConfig buttonConfig_;
     SettingsDialog settings_;
     bool settingsWasOpen_ = false;

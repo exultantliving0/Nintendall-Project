@@ -37,6 +37,11 @@ Also used:
 | HarfBuzz (inside SDL2_ttf) | MIT ("Old MIT") | https://github.com/harfbuzz/harfbuzz |
 | DejaVu Sans font (`fonts/DejaVuSans.ttf`) | Bitstream Vera / public domain, see `fonts/DejaVu-LICENSE.txt` | https://dejavu-fonts.github.io |
 | zlib | zlib | https://zlib.net |
+| stb_image (PNG / JPEG decoding for box covers, `third_party/stb/stb_image.h`) | MIT or public domain (your choice) | https://github.com/nothings/stb |
+
+Box covers are not part of Nintendall: the home screen downloads them on each
+user's PC from GameTDB (https://www.gametdb.com) and the libretro thumbnail
+library (https://thumbnails.libretro.com).
 
 ## Source code offer
 

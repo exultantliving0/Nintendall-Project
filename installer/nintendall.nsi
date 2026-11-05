@@ -9,7 +9,7 @@ Unicode true
 
 !define APPNAME "Nintendall"
 !ifndef VERSION
-  !define VERSION "0.9.4"
+  !define VERSION "0.10.0"
 !endif
 !ifndef SRCDIR
   !error "Pass -DSRCDIR=<folder with nintendall.exe, SDL2.dll and cores\>"
@@ -43,6 +43,9 @@ VIAddVersionKey "LegalCopyright" "See THIRD_PARTY_LICENSES.md"
 !define MUI_LICENSEPAGE_TEXT_BOTTOM "Click Next to continue."
 !define MUI_FINISHPAGE_RUN "$INSTDIR\nintendall.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Start ${APPNAME}"
+!define MUI_FINISHPAGE_SHOWREADME ""
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "Open the Games folder (put your games in here)"
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION OpenGamesFolder
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${SRCDIR}\THIRD_PARTY_LICENSES.md"
@@ -60,6 +63,12 @@ Function .onInit
     Abort
   ${EndIf}
   SetRegView 64
+FunctionEnd
+
+Function OpenGamesFolder
+  SetShellVarContext current
+  ExecShell "open" "$DOCUMENTS\Nintendall\Games"
+  SetShellVarContext all
 FunctionEnd
 
 Function un.onInit
@@ -89,6 +98,23 @@ Section "${APPNAME} (required)" SecMain
   SetOutPath "$INSTDIR\system"
   File /r "${SRCDIR}\system\*.*"
   SetOutPath "$INSTDIR"
+
+  ; Games folder (Documents\Nintendall\Games) with a folder for each console: put games in
+  ; them and they show up on Nintendall's home screen. Uninstalling leaves it (it holds your games).
+  ; Keep these names in sync with homeConsoles() in src/library.cpp.
+  SetShellVarContext current
+  CreateDirectory "$DOCUMENTS\Nintendall\Games\NES"
+  CreateDirectory "$DOCUMENTS\Nintendall\Games\Game Boy"
+  CreateDirectory "$DOCUMENTS\Nintendall\Games\SNES"
+  CreateDirectory "$DOCUMENTS\Nintendall\Games\Nintendo 64"
+  CreateDirectory "$DOCUMENTS\Nintendall\Games\Game Boy Color"
+  CreateDirectory "$DOCUMENTS\Nintendall\Games\Game Boy Advance"
+  CreateDirectory "$DOCUMENTS\Nintendall\Games\GameCube"
+  CreateDirectory "$DOCUMENTS\Nintendall\Games\Nintendo DS"
+  CreateDirectory "$DOCUMENTS\Nintendall\Games\Wii"
+  CreateDirectory "$DOCUMENTS\Nintendall\Games\Nintendo 3DS"
+  CreateDirectory "$DOCUMENTS\Nintendall\Games\Wii U"
+  SetShellVarContext all
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\${APPNAME}"

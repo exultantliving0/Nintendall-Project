@@ -11,6 +11,7 @@
 #include <set>
 
 #include "filedialog.hpp"
+#include "library.hpp"
 #include "wiimotepair.hpp"
 
 #include <atomic>
@@ -195,6 +196,10 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         if (!fs::exists(db)) db = paths_.data / "gamecontrollerdb.txt";
         input_.init(fs::exists(db) ? db.u8string() : "");
         input_.load(cfg_);
+        // Home screen: Documents/Nintendall/Games (or the folder set as games.folder in nintendall.cfg).
+        const std::string games = cfg_.get("games.folder");
+        home_.start(games.empty() ? defaultGamesFolder(paths_.base, paths_.portable) : fs::u8path(games),
+                    paths_.data / "covers", cfg_.get("home.console"));
     }
     input_.setForcedButtons(opt.holdButtons);
 
@@ -262,6 +267,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
 
     stopGame();
     saveConfig();
+    home_.shutdown();
     text_.shutdown();
     input_.shutdown();
     audio_.shutdown();
@@ -303,6 +309,7 @@ void App::runFrames() {
 
 void App::saveConfig() {
     input_.save(cfg_);
+    if (!opt_.headless) cfg_.set("home.console", home_.consoleKey());
     cfg_.save();
 }
 
@@ -977,6 +984,15 @@ void App::handleEvent(const SDL_Event& e) {
         }
     }
 
+    // Home screen (no game running): pick a console and a game.
+    if (!core_ && !opt_.headless) {
+        fs::path launch;
+        if (home_.handleEvent(e, mouseX_, mouseY_, text_, homeArea(), launch)) {
+            if (!launch.empty()) startGame(launch);
+            return;
+        }
+    }
+
     if (e.type == SDL_KEYDOWN && !e.key.repeat) {
         const SDL_Keysym& k = e.key.keysym;
         if (ctrlHeld(k)) {
@@ -1034,6 +1050,10 @@ void App::doAction(int a) {
     }
     switch (a) {
     case ActOpen: openFileDialog(); break;
+    case ActGamesFolder:
+        createGameFolders(home_.gamesRoot());
+        openFolder(home_.gamesRoot());
+        break;
     case ActCloseGame: stopGame(); break;
     case ActExit: quit_ = true; break;
     case ActPause:
@@ -1064,7 +1084,10 @@ void App::doAction(int a) {
                     "Shortcuts:\n  Ctrl+O = Open game\n  Ctrl+P = Pause,  Ctrl+R = Reset\n"
                     "  F5 = Save state,  F9 = Load state,  F6 / F7 = Change slot\n"
                     "  Hold Tab = Fast forward\n  F11 = Fullscreen,  Esc = Leave fullscreen\n  F12 = Screenshot\n\n"
-                    "Controllers work automatically. Home button, or Select + Start, pauses.",
+                    "Controllers work automatically. Home button, or Select + Start, pauses.\n\n"
+                    "Home screen (no game running):\n  Click a console, then click a game to play it\n"
+                    "  Arrow keys / D-pad = Choose a game,  Enter / A = Play\n"
+                    "  Tab / Shift+Tab or L / R = Next / previous console",
                     false);
         break;
     case ActAbout:
@@ -1209,13 +1232,18 @@ float App::uiScale() const {
 }
 
 bool App::menuVisible() const {
-    // Always shown in a window; in fullscreen it appears when the mouse goes to the top.
-    if (!video_.isFullscreen()) return true;
+    // Always shown in a window and on the home screen; in fullscreen games it appears when the mouse goes to the top.
+    if (!video_.isFullscreen() || !core_) return true;
     return menu_.isOpen() || (SDL_GetTicks() - lastMouseMove_ < 3000 && mouseY_ < menu_.height(text_) * 2);
 }
 
 SDL_Rect App::gameArea() const {
     const int bar = video_.isFullscreen() ? 0 : menu_.height(text_);
+    return {0, bar, video_.width(), std::max(0, video_.height() - bar)};
+}
+
+SDL_Rect App::homeArea() const {
+    const int bar = menu_.height(text_);
     return {0, bar, video_.width(), std::max(0, video_.height() - bar)};
 }
 
@@ -1225,6 +1253,7 @@ void App::buildMenus() {
 
     Menu file{"File", {}};
     file.items.push_back({"Open...", "Ctrl+O", ActOpen});
+    file.items.push_back({"Open Games Folder", "", ActGamesFolder});
     file.items.push_back({"Close Game", "Ctrl+W", ActCloseGame, game});
     const auto recent = recentGames();
     if (!recent.empty()) {
@@ -1299,6 +1328,7 @@ void App::draw() {
     if (core_ && video_.hasFrame()) {
         video_.drawGame(area);
     }
+    if (!core_) home_.draw(video_, text_, homeArea(), mouseX_, mouseY_);
 
     if (core_ && paused_) {
         const std::string t = "Paused";

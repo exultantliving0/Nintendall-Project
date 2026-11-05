@@ -25,6 +25,7 @@ void Paths::init() {
     // Portable mode: drop a "portable.txt" next to the program to keep all data beside it.
     std::error_code ec;
     if (fs::exists(base / "portable.txt", ec)) {
+        portable = true;
         data = base;
     } else if (char* p = SDL_GetPrefPath("", "Nintendall")) {
         data = fs::u8path(p);
