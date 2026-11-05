@@ -25,6 +25,10 @@ public:
     std::filesystem::path consoleFolder() const;
     void refresh();  // look in the folder again
 
+    // Cover size (Ctrl + / Ctrl - / Ctrl 0), as a step in kCoverSizes; 0 = normal.
+    int coverSize() const { return coverSize_; }
+    void setCoverSize(int step);
+
     void draw(Video& v, Text& t, const SDL_Rect& area, int mouseX, int mouseY);
     // True if the home screen used the event. `launch` is set when a game was picked.
     bool handleEvent(const SDL_Event& e, int mouseX, int mouseY, Text& t, const SDL_Rect& area,
@@ -44,6 +48,7 @@ private:
     void selectConsole(int index);
     void moveSelection(const Layout& L, int dx, int dy);
     void scrollTo(const Layout& L, int i);
+    void zoom(Text& t, const SDL_Rect& area, int step);  // change the cover size, keeping the same games in view
     // The title split into lines (remembered: measuring text is slow).
     const std::vector<std::string>& titleLines(Text& t, const LibraryGame& g, int width, int maxLines);
 
@@ -51,6 +56,7 @@ private:
     Covers covers_;
     std::filesystem::path root_;
     int console_ = 0;
+    int coverSize_ = 0;
     std::vector<LibraryGame> games_;
     int scroll_ = 0;
     int selected_ = -1;   // picked with the keyboard / a controller

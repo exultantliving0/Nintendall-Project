@@ -200,6 +200,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         const std::string games = cfg_.get("games.folder");
         home_.start(games.empty() ? defaultGamesFolder(paths_.base, paths_.portable) : fs::u8path(games),
                     paths_.data / "covers", cfg_.get("home.console"));
+        home_.setCoverSize(std::atoi(cfg_.get("home.cover_size").c_str()));
     }
     input_.setForcedButtons(opt.holdButtons);
 
@@ -309,7 +310,10 @@ void App::runFrames() {
 
 void App::saveConfig() {
     input_.save(cfg_);
-    if (!opt_.headless) cfg_.set("home.console", home_.consoleKey());
+    if (!opt_.headless) {
+        cfg_.set("home.console", home_.consoleKey());
+        cfg_.set("home.cover_size", std::to_string(home_.coverSize()));
+    }
     cfg_.save();
 }
 
@@ -1087,7 +1091,8 @@ void App::doAction(int a) {
                     "Controllers work automatically. Home button, or Select + Start, pauses.\n\n"
                     "Home screen (no game running):\n  Click a console, then click a game to play it\n"
                     "  Arrow keys / D-pad = Choose a game,  Enter / A = Play\n"
-                    "  Tab / Shift+Tab or L / R = Next / previous console",
+                    "  Tab / Shift+Tab or L / R = Next / previous console\n"
+                    "  Ctrl + / Ctrl - = Bigger / smaller covers,  Ctrl 0 = Normal size",
                     false);
         break;
     case ActAbout:

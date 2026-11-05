@@ -15,7 +15,8 @@ consoles in release order (NES, Game Boy, SNES, N64, Game Boy Color, Game Boy
 Advance, GameCube, DS, Wii, 3DS, Wii U); click one and its games appear below
 with their box covers. Click a game to play it. With the keyboard or a
 controller: arrow keys / D-pad choose a game, Enter / A plays it, Tab /
-Shift+Tab or L / R switch consoles.
+Shift+Tab or L / R switch consoles. **Ctrl +** and **Ctrl -** make the covers
+bigger or smaller (remembered), **Ctrl 0** puts them back to normal.
 
 The games come from the **Games folder**, which has one folder per console:
 

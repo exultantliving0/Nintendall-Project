@@ -19,6 +19,11 @@ const Color kTileBorder{72, 72, 82};
 const Color kButton{62, 62, 72};
 const Color kButtonHover{82, 82, 94};
 
+// Cover sizes for Ctrl + / Ctrl -: step 0 is normal, each step is about 20% bigger or smaller.
+constexpr float kCoverSizes[] = {0.55f, 0.67f, 0.8f, 1.0f, 1.2f, 1.45f, 1.75f, 2.1f};
+constexpr int kNormalSize = 3;
+constexpr int kMinStep = -kNormalSize, kMaxStep = int(sizeof kCoverSizes / sizeof kCoverSizes[0]) - 1 - kNormalSize;
+
 bool inside(const SDL_Rect& r, int x, int y) { return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h; }
 
 void frame(Video& v, const SDL_Rect& r, int t, Color c) {
@@ -144,11 +149,12 @@ Home::Layout Home::layout(Text& t, const SDL_Rect& area) const {
     L.folderButton = {L.header.x + L.header.w - L.margin - bw, L.header.y + (L.header.h - bh) / 2, bw, bh};
     L.grid = {area.x, L.header.y + L.header.h, area.w, std::max(0, area.y + area.h - L.header.y - L.header.h)};
 
-    L.cardW = int(128 * s);
-    L.coverH = int(180 * s);
+    const float z = kCoverSizes[kNormalSize + coverSize_];
+    L.cardW = int(128 * s * z);
+    L.coverH = int(180 * s * z);
     L.cardH = L.coverH + int(8 * s) + 2 * t.lineHeight();
-    L.gapX = int(22 * s);
-    L.gapY = int(22 * s);
+    L.gapX = int(22 * s * std::min(z, 1.0f));
+    L.gapY = int(22 * s * std::min(z, 1.0f));
     L.cols = std::max(1, (L.grid.w - 2 * L.margin + L.gapX) / (L.cardW + L.gapX));
     L.x0 = L.grid.x + (L.grid.w - (L.cols * L.cardW + (L.cols - 1) * L.gapX)) / 2;
     const int rows = (int(games_.size()) + L.cols - 1) / L.cols;
@@ -175,6 +181,22 @@ void Home::scrollTo(const Layout& L, int i) {
     if (r.y < top) scroll_ -= top - r.y;
     else if (r.y + r.h > bottom) scroll_ += r.y + r.h - bottom;
     scroll_ = std::clamp(scroll_, 0, L.maxScroll);
+}
+
+void Home::setCoverSize(int step) { coverSize_ = std::clamp(step, kMinStep, kMaxStep); }
+
+void Home::zoom(Text& t, const SDL_Rect& area, int step) {
+    // Keep the selected game (or the first one at the top) in view.
+    const Layout before = layout(t, area);
+    int keep = showSelected_ && selected_ >= 0 ? selected_ : -1;
+    if (keep < 0 && !games_.empty())
+        keep = std::max(0, (scroll_ - before.margin / 2) / (before.cardH + before.gapY)) * before.cols;
+    setCoverSize(step);
+    const Layout after = layout(t, area);
+    if (keep >= 0 && keep < int(games_.size())) {
+        scroll_ = std::clamp((keep / after.cols) * (after.cardH + after.gapY), 0, after.maxScroll);
+        if (showSelected_) scrollTo(after, keep);
+    }
 }
 
 void Home::moveSelection(const Layout& L, int dx, int dy) {
@@ -356,7 +378,20 @@ bool Home::handleEvent(const SDL_Event& e, int mx, int my, Text& t, const SDL_Re
         return true;
     }
     case SDL_KEYDOWN: {
-        if (e.key.keysym.mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) return false;
+        // Ctrl + / Ctrl - make the covers bigger / smaller, Ctrl 0 back to normal.
+        if ((e.key.keysym.mod & KMOD_CTRL) && !(e.key.keysym.mod & KMOD_ALT)) {
+            switch (e.key.keysym.sym) {
+            case SDLK_EQUALS:
+            case SDLK_PLUS:
+            case SDLK_KP_PLUS: zoom(t, area, coverSize_ + 1); return true;
+            case SDLK_MINUS:
+            case SDLK_KP_MINUS: zoom(t, area, coverSize_ - 1); return true;
+            case SDLK_0:
+            case SDLK_KP_0: zoom(t, area, 0); return true;
+            default: return false;
+            }
+        }
+        if (e.key.keysym.mod & (KMOD_ALT | KMOD_GUI)) return false;
         switch (e.key.keysym.sym) {
         case SDLK_LEFT: moveSelection(L, -1, 0); return true;
         case SDLK_RIGHT: moveSelection(L, 1, 0); return true;
