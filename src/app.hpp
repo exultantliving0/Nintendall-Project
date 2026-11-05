@@ -16,7 +16,6 @@
 #include "input.hpp"
 #include "menubar.hpp"
 #include "paths.hpp"
-#include "rewind.hpp"
 #include "settingsdialog.hpp"
 #include "text.hpp"
 #include "video.hpp"
@@ -72,10 +71,6 @@ private:
     void saveState();
     void loadState();
     void takeScreenshot();
-    // Rewind (hold `): a state is recorded every frame or few; holding the key steps back through them.
-    void recordRewind();
-    void rewindFrame();
-    void resetRewind();
     void addRecent(const std::filesystem::path& path);
     std::vector<std::string> recentGames() const;
 
@@ -148,18 +143,6 @@ private:
     bool focusLost_ = false;
     bool fastForward_ = false;
     bool fastForwardToggled_ = false;
-    Rewind rewind_;
-    std::vector<uint8_t> rewindBuf_;
-    bool rewinding_ = false;    // the rewind key is held
-    bool rewindKeyWas_ = false;
-    std::string rewindOff_;     // why rewind can't be used for this game ("" = it can)
-    int rewindEvery_ = 1;       // record a state every N frames (more when recording is slow)
-    int rewindCount_ = 0;
-    double rewindCostMs_ = -1;  // average time to record a state
-    Rewind::Inputs frameInputs_;   // controller reads of the frame running now
-    Rewind::Inputs firstInputs_;   // ... of the first frame since the last recorded state
-    const Rewind::Inputs* replayInputs_ = nullptr;  // while rewinding: the reads to give the game
-    int16_t liveInputState(unsigned port, unsigned device, unsigned index, unsigned id);
     bool wasRunning_ = false;
     std::array<int, 16> inputRemap_{};  // button the core asks for -> our button (GameCube/Wii face buttons)
     std::vector<ButtonLabel> buttonRows_;  // what Button Config lists for this game

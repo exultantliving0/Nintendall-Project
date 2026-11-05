@@ -52,7 +52,6 @@ public:
     // Plug a controller type into a port (RETRO_DEVICE_JOYPAD), or unplug it (RETRO_DEVICE_NONE).
     void setPortDevice(unsigned port, unsigned device);
     std::vector<uint8_t> saveState();
-    bool saveStateInto(std::vector<uint8_t>& buf);  // same, reusing a buffer (for rewind, every frame)
     bool loadState(const std::vector<uint8_t>& data);
 
     uint8_t* saveRamData();

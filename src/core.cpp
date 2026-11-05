@@ -194,19 +194,10 @@ void LibretroCore::reset() {
 }
 
 std::vector<uint8_t> LibretroCore::saveState() {
-    std::vector<uint8_t> buf;
-    saveStateInto(buf);
-    return buf;
-}
-
-bool LibretroCore::saveStateInto(std::vector<uint8_t>& buf) {
     if (hwActive_) hw_.makeCurrent();
-    buf.resize(api_.serialize_size());
-    if (buf.empty() || !api_.serialize(buf.data(), buf.size())) {
-        buf.clear();
-        return false;
-    }
-    return true;
+    std::vector<uint8_t> buf(api_.serialize_size());
+    if (buf.empty() || !api_.serialize(buf.data(), buf.size())) buf.clear();
+    return buf;
 }
 
 bool LibretroCore::loadState(const std::vector<uint8_t>& data) {
