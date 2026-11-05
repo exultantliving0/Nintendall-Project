@@ -83,6 +83,57 @@ void chooseRenderer(LibretroCore& core, System s, bool software) {
     }
 }
 
+// Dolphin only sends game sound to a real Wii Remote's speaker with [Core] WiimoteEnableSpeaker
+// on (off by default). The libretro Dolphin has no option for it, but reads its own Dolphin.ini
+// (in <saves>/User/Config), so switch it on there. Other lines are kept as they are.
+void enableWiimoteSpeaker(const fs::path& ini) {
+    std::vector<std::string> lines;
+    {
+        std::ifstream in(ini);
+        for (std::string l; std::getline(in, l);) {
+            if (!l.empty() && l.back() == '\r') l.pop_back();
+            lines.push_back(l);
+        }
+    }
+    auto trim = [](std::string t) {
+        while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back()))) t.pop_back();
+        while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front()))) t.erase(t.begin());
+        return t;
+    };
+    const std::string setting = "WiimoteEnableSpeaker = True";
+    bool inCore = false, done = false;
+    size_t coreEnd = std::string::npos;  // where to add the line if [Core] doesn't have it
+    for (size_t i = 0; i < lines.size() && !done; ++i) {
+        const std::string t = trim(lines[i]);
+        if (!t.empty() && t.front() == '[') {
+            if (inCore) coreEnd = i;
+            inCore = t == "[Core]";
+            if (inCore) coreEnd = i + 1;
+            continue;
+        }
+        if (inCore) {
+            coreEnd = i + 1;
+            if (trim(t.substr(0, t.find('='))) == "WiimoteEnableSpeaker") {
+                if (t == setting) return;  // already on
+                lines[i] = setting;
+                done = true;
+            }
+        }
+    }
+    if (!done) {
+        if (coreEnd == std::string::npos) {
+            lines.push_back("[Core]");
+            lines.push_back(setting);
+        } else {
+            lines.insert(lines.begin() + std::ptrdiff_t(coreEnd), setting);
+        }
+    }
+    std::error_code ec;
+    fs::create_directories(ini.parent_path(), ec);
+    std::ofstream out(ini, std::ios::trunc);
+    for (const auto& l : lines) out << l << '\n';
+}
+
 bool hasTwoScreens(System s) { return s == System::NDS || s == System::N3DS || s == System::WiiU; }
 bool layoutAvailable(System s, int i) {
     return s == System::NDS || (s == System::N3DS && kDsLayouts[i].ctr) || (s == System::WiiU && kDsLayouts[i].wiiu);
@@ -326,6 +377,8 @@ bool App::startGame(const fs::path& path) {
         }
         gameFile = extracted_;
     }
+
+    if (det.system == System::Wii) enableWiimoteSpeaker(paths_.saves / "User" / "Config" / "Dolphin.ini");
 
     // 4. Start the emulator with the game.
     std::string err;

@@ -199,7 +199,8 @@ must first be connected to the PC:
   1 + 2 during a game also connects a remote for that session. (On Linux, pairing
   uses BlueZ's `bluetoothctl`.)
 
-Pointing needs a powered sensor bar (the DolphinBar's, or a USB / battery one; a
+Games' Wii Remote speaker sounds play on the real remotes (Nintendall switches on
+Dolphin's speaker setting). Pointing needs a powered sensor bar (the DolphinBar's, or a USB / battery one; a
 Wii's own bar only works plugged into a Wii). On Linux, Dolphin also needs
 permission to use the remotes; add this as `/etc/udev/rules.d/51-wiimote.rules`
 and reconnect them:
