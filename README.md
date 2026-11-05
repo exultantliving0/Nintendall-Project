@@ -26,7 +26,7 @@ controller support (via SDL), saves and save states.
 | Nintendo 64 | Mupen64Plus-Next | runs, drawn on the GPU (tested with homebrew test ROMs) |
 | GameCube / Wii | Dolphin | runs, drawn on the GPU (tested with homebrew) |
 | 3DS | Azahar | runs, drawn on the GPU (tested with homebrew; needs decrypted games) |
-| Wii U | Cemu | coming soon: needs GPU rendering |
+| Wii U | Cemu (with a GamePad input fix, see `third_party/cemu/`) | runs, drawn on the GPU (tested with homebrew; disc images need your own keys) |
 
 ## How auto-detection works
 
@@ -174,9 +174,31 @@ Classic Controller, and Button Config follows. The Wiimote pointer is the right
 stick, or the mouse (Console Settings > Wiimote Pointer). Only players who have a
 controller (or keys) are plugged in, so Wii games don't show extra pointers.
 
+### Wii U
+
+Wii U games run on Cemu (OpenGL 4.5). The Layout menu shows the TV picture
+(Single Screen, the default), the GamePad screen (Single Screen + Swap Screens),
+or both: Vertical, Side by Side, or Large + Small (GamePad in a corner).
+The GamePad buttons sit where Nintendo puts them (A right, B bottom); ZL / ZR are
+the triggers, + / - are Start / Select, and the mouse is the GamePad touch screen.
+Console Settings has resolution (up to 4K), CPU mode, smoother frame rate,
+shader cache and more. Save states aren't possible (Cemu can't save them), so use
+the game's own saves.
+
+Disc images (.wud / .wux) are encrypted with keys from your own console: add your
+`keys.txt` with **Options > Wii U Keys...** (or put `game.key` next to `game.wux`).
+Decrypted games (.wua, unpacked folders with `code/`, `content/`, `meta/`) and
+homebrew (.rpx, .wuhb) don't need keys.
+
+Cemu is shipped with one fix: in libretro mode it never told games which GamePad
+buttons were *newly* pressed, so most game menus ignored buttons. The patch and
+where it applies are in `third_party/cemu/`; `tools/bundle_cores.py` fetches the
+patched core from `exultantliving0/cemu-libretro-nintendall` (built by GitHub
+Actions there) instead of the libretro buildbot.
+
 ### GPU rendering
 
-Cores that draw with OpenGL (3DS, N64, GameCube/Wii, and DS with its OpenGL renderer) get
+Cores that draw with OpenGL (3DS, N64, GameCube/Wii, Wii U, and DS with its OpenGL renderer) get
 their own OpenGL context on a hidden window and render into an offscreen
 framebuffer. Nintendall copies each finished frame into the normal window, so
 the window itself can use any renderer (Direct3D on Windows). See `src/hwrender.*`.
@@ -202,7 +224,7 @@ beside it instead.
 | `src/detect.*` | works out the system from a file / zip / folder |
 | `src/systems.*` | the list of systems, extensions and the emulator for each |
 | `src/core.*` | loads a libretro core and implements the libretro API |
-| `src/hwrender.*` | OpenGL context + framebuffer for GPU-drawn cores (3DS, N64) |
+| `src/hwrender.*` | OpenGL context + framebuffer for GPU-drawn cores (N64, GameCube/Wii, 3DS, Wii U) |
 | `src/app.*` | main window, menu actions, game loop, saves |
 | `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |
 | `src/consolesettings.*`, `src/settingsdialog.*` | the Console Settings list and window |
@@ -225,6 +247,9 @@ Not legal advice. Have a lawyer review this before selling.
   (keep a copy of each core's source for every release). The safest reading is
   that Nintendall itself then needs a GPL-compatible license.
 - `third_party/libretro/libretro.h` is MIT licensed.
+- Cemu (MPL-2.0) ships with a change of ours. The MPL requires that change to be
+  available to everyone who gets Nintendall, so `third_party/cemu/` (the patch and
+  the upstream commit it applies to) is installed with the program.
 - Never bundle games, BIOS files or console keys. Users must provide their own.
 - "Nintendo" is a trademark, so a commercial product shouldn't use a name or logo
   that suggests it's affiliated with Nintendo.

@@ -9,7 +9,7 @@ Unicode true
 
 !define APPNAME "Nintendall"
 !ifndef VERSION
-  !define VERSION "0.7.2"
+  !define VERSION "0.8.0"
 !endif
 !ifndef SRCDIR
   !error "Pass -DSRCDIR=<folder with nintendall.exe, SDL2.dll and cores\>"
@@ -79,6 +79,7 @@ Section "${APPNAME} (required)" SecMain
   File "${SRCDIR}\SDL2_ttf.dll"
   File "${SRCDIR}\README.md"
   File "${SRCDIR}\THIRD_PARTY_LICENSES.md"
+  File /r "${SRCDIR}\third_party"
   SetOutPath "$INSTDIR\fonts"
   File "${SRCDIR}\fonts\*.*"
   SetOutPath "$INSTDIR\cores"
@@ -132,6 +133,7 @@ Section "Uninstall"
   Delete "$INSTDIR\SDL2_ttf.dll"
   Delete "$INSTDIR\README.md"
   Delete "$INSTDIR\THIRD_PARTY_LICENSES.md"
+  RMDir /r "$INSTDIR\third_party"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
   Delete "$DESKTOP\${APPNAME}.lnk"

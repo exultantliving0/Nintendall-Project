@@ -282,12 +282,44 @@ std::vector<SettingGroup> dolphin(bool wii) {
     return g;
 }
 
+std::vector<SettingGroup> wiiU() {
+    return {
+        {"Picture",
+         {opt("Resolution", "cemu_internal_resolution",
+              {{"0.5x", "0.5x (faster)"}, {"native", "Native (720p)"}, {"1.5x", "1.5x (1080p)"},
+               {"2x", "2x (1440p)"}, {"3x", "3x (4K)"}},
+              true, "Some games draw parts at a fixed size and can look odd when resized"),
+          opt("Smoother Frame Rate", "cemu_render_ahead", kOnOff, false,
+              "Draws the next frame early; smoother in heavy games, one frame more input lag"),
+          opt("Accurate Shader Math", "cemu_accurate_shader_mul",
+              {{"auto", "Game decides"}, {"enabled", "On"}, {"disabled", "Off (faster, may glitch)"}}),
+          opt("Wait for GPU (GX2DrawDone)", "cemu_gx2drawdone_sync", kOnOff, false,
+              "Some games need it to show correctly; off can be faster"),
+          opt("Shader Cache", "cemu_precompiled_shaders",
+              {{"auto", "Game decides"}, {"enabled", "On"}, {"disabled", "Off"}}, false,
+              "Keeps compiled shaders so games stutter less the next time")}},
+        {"Console",
+         {opt("CPU Mode", "cemu_cpu_mode",
+              {{"auto", "Automatic"}, {"multicore_recompiler", "Multi-core (fastest)"},
+               {"singlecore_recompiler", "Single-core"}, {"singlecore_interpreter", "Interpreter (slow, for testing)"}},
+              true, "Multi-core is fastest; single-core fixes a few games"),
+          raw("System Language", "cemu_console_language", true),
+          opt("Audio Thread", "cemu_audio_thread", kOnOff, true,
+              "Keeps sound smooth when the game briefly slows down (loading, new effects)"),
+          opt("Rumble", "cemu_rumble_strength",
+              {{"0", "Off"}, {"50", "50%"}, {"75", "75%"}, {"100", "100%"}}),
+          opt("Stick Dead Zone", "cemu_stick_deadzone_p1",
+              {{"0", "Off"}, {"10", "10%"}, {"15", "15%"}, {"20", "20%"}, {"25", "25%"}, {"30", "30%"}}, false,
+              "Raise this if a character drifts without you touching the stick")}},
+    };
+}
+
 }  // namespace
 
 const std::vector<SettingGroup>& consoleSettings(System s) {
     static const std::vector<SettingGroup> none;
     static const auto nesS = nes(false), fdsS = nes(true), snesS = snes(), gbS = gameBoy(), gbaS = gba(), dsS = ds(),
-                      ctrS = n3ds(), n64S = n64(), gcS = dolphin(false), wiiS = dolphin(true);
+                      ctrS = n3ds(), n64S = n64(), gcS = dolphin(false), wiiS = dolphin(true), wiiuS = wiiU();
     switch (s) {
     case System::NES: return nesS;
     case System::FDS: return fdsS;
@@ -300,6 +332,7 @@ const std::vector<SettingGroup>& consoleSettings(System s) {
     case System::N64: return n64S;
     case System::GameCube: return gcS;
     case System::Wii: return wiiS;
+    case System::WiiU: return wiiuS;
     default: return none;
     }
 }

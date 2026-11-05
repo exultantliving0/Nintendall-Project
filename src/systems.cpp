@@ -27,7 +27,7 @@ static const std::vector<SystemInfo>& table() {
         {System::Wii, "wii", "Wii", "Wii",
          {".wbfs", ".wad"}, "dolphin", "Dolphin", false, nullptr},
         {System::WiiU, "wiiu", "WiiU", "Wii U",
-         {".wud", ".wux", ".wua", ".rpx", ".wuhb"}, "cemu", "Cemu", true, "Needs your own console keys (keys.txt)"},
+         {".wud", ".wux", ".wua", ".rpx", ".wuhb"}, "cemu", "Cemu", false, "Disc images (.wud/.wux) need your own console keys (keys.txt)"},
         {System::N3DS, "3ds", "3DS", "Nintendo 3DS",
          {".3ds", ".cci", ".cxi", ".cia", ".3dsx", ".app", ".zcci", ".zcxi", ".zcia", ".z3dsx"},
          "azahar", "Azahar", false, "Needs decrypted games"},
@@ -90,6 +90,14 @@ const std::vector<ButtonLabel>& systemButtons(System s) {
         {20, "C-Stick Up"}, {21, "C-Stick Down"}, {22, "C-Stick Left"}, {23, "C-Stick Right"},
         {kB, "A"}, {kY, "B"}, {kA, "X"}, {kX, "Y"}, {kR, "Z"}, {kL2, "L"}, {kR2, "R"}, {kStart, "Start"},
     };
+    // Cemu: the Wii U GamePad (Pro Controller on other ports) has the same layout as the RetroPad.
+    static const std::vector<ButtonLabel> wiiu = {
+        {kUp, "D-Pad Up"}, {kDown, "D-Pad Down"}, {kLeft, "D-Pad Left"}, {kRight, "D-Pad Right"},
+        {16, "Left Stick Up"}, {17, "Left Stick Down"}, {18, "Left Stick Left"}, {19, "Left Stick Right"},
+        {20, "Right Stick Up"}, {21, "Right Stick Down"}, {22, "Right Stick Left"}, {23, "Right Stick Right"},
+        {kA, "A"}, {kB, "B"}, {kX, "X"}, {kY, "Y"}, {kL, "L"}, {kR, "R"}, {kL2, "ZL"}, {kR2, "ZR"},
+        {kStart, "+ (Plus)"}, {kSelect, "- (Minus)"}, {kL3, "Left Stick Click"}, {kR3, "Right Stick Click"},
+    };
     static const std::vector<ButtonLabel> all = {
         {kUp, "Up"}, {kDown, "Down"}, {kLeft, "Left"}, {kRight, "Right"},
         {kA, "A"},   {kB, "B"},       {kX, "X"},       {kY, "Y"},
@@ -108,6 +116,7 @@ const std::vector<ButtonLabel>& systemButtons(System s) {
     case System::N64: return n64;
     case System::GameCube: return gc;
     case System::Wii: return wiiButtons("nunchuk");
+    case System::WiiU: return wiiu;
     default: return all;  // no game yet, or systems that aren't playable yet
     }
 }
@@ -154,9 +163,8 @@ int systemPlayers(System s) {
     case System::GBC:
     case System::GBA:
     case System::NDS:
-    case System::N3DS:
-    case System::WiiU: return 1;
-    default: return 4;
+    case System::N3DS: return 1;
+    default: return 4;  // Wii U: the GamePad plus up to three Pro Controllers
     }
 }
 

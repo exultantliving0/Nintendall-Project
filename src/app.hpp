@@ -52,7 +52,7 @@ private:
         ActPause = 30, ActReset, ActFastForward,
         ActSaveState = 40, ActLoadState,
         ActSlot = 50,  // + slot number
-        ActButtonConfig = 70, ActFullscreen, ActConsoleSettings,
+        ActButtonConfig = 70, ActFullscreen, ActConsoleSettings, ActWiiUKeys,
         ActControls = 90, ActAbout,
         ActLayout = 100,  // + layout index
         ActLayoutSwap = 120,
@@ -82,6 +82,10 @@ private:
     SDL_Rect gameArea() const;
     float uiScale() const;
     void openFileDialog();
+    // Wii U disc images are encrypted with keys from the player's own console (Cemu reads keys.txt).
+    void importWiiUKeys();
+    std::filesystem::path wiiUKeysFile() const;
+    bool needsWiiUKeys(const std::filesystem::path& game) const;
     void showMessage(const std::string& title, const std::string& text, bool error);
     void osd(const std::string& msg, unsigned ms = 2500);
     void saveConfig();

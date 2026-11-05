@@ -1,0 +1,40 @@
+diff --git a/src/Cafe/OS/libs/vpad/vpad.cpp b/src/Cafe/OS/libs/vpad/vpad.cpp
+index 84da0222..4cff7011 100644
+--- a/src/Cafe/OS/libs/vpad/vpad.cpp
++++ b/src/Cafe/OS/libs/vpad/vpad.cpp
+@@ -315,6 +315,35 @@ namespace vpad
+ 			status->rightStick.x = rx;
+ 			status->rightStick.y = ry;
+ 
++			// As VPADController::update does outside libretro mode: stick directions also count
++			// as buttons (the stick emulation bits), and trig / release are the buttons that went
++			// down / up since the last read. Without them, games that act on a fresh press (most
++			// menus) never see one.
++			{
++				constexpr uint32 LR_STICK_L_UP = 0x10000000, LR_STICK_L_DOWN = 0x08000000;
++				constexpr uint32 LR_STICK_L_LEFT = 0x40000000, LR_STICK_L_RIGHT = 0x20000000;
++				constexpr uint32 LR_STICK_R_UP = 0x01000000, LR_STICK_R_DOWN = 0x00800000;
++				constexpr uint32 LR_STICK_R_LEFT = 0x04000000, LR_STICK_R_RIGHT = 0x02000000;
++				constexpr float kAxisThreshold = 0.5f;
++				constexpr float kHoldAxisThreshold = 0.1f;
++				static uint32 s_last_hold = 0;
++				uint32 hold = status->hold;
++				auto stickDir = [&](float v, uint32 negative, uint32 positive) {
++					if (v <= -kAxisThreshold || ((s_last_hold & negative) && v <= -kHoldAxisThreshold))
++						hold |= negative;
++					else if (v >= kAxisThreshold || ((s_last_hold & positive) && v >= kHoldAxisThreshold))
++						hold |= positive;
++				};
++				stickDir(lx, LR_STICK_L_LEFT, LR_STICK_L_RIGHT);
++				stickDir(ly, LR_STICK_L_DOWN, LR_STICK_L_UP);
++				stickDir(rx, LR_STICK_R_LEFT, LR_STICK_R_RIGHT);
++				stickDir(ry, LR_STICK_R_DOWN, LR_STICK_R_UP);
++				status->hold = hold;
++				status->trig = ~s_last_hold & hold;
++				status->release = s_last_hold & ~hold;
++				s_last_hold = hold;
++			}
++
+ 			// GamePad Motion, filled as VPADController::update_motion does
+ 			MotionSample motion;
+ 			if (libretro_get_gamepad_motion(motion))

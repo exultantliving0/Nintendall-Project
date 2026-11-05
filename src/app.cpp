@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <set>
 
 #include "filedialog.hpp"
 
@@ -43,34 +44,40 @@ bool usesStickAsDpad(System s) {
 bool ctrlHeld(const SDL_Keysym& k) { return (k.mod & (KMOD_CTRL | KMOD_GUI)) != 0; }
 
 // Two-screen layouts. DS values are melonDS DS's "Screen Layout" option; 3DS values are
-// Azahar's "Screen Layout" option (nullptr = the 3DS emulator can't do that layout).
+// Azahar's "Screen Layout" option; Wii U values are Cemu's (TV + GamePad screens).
+// nullptr = that emulator can't do the layout.
 struct DsLayout {
     const char* label;
     const char* value;    // DS, normal
     const char* swapped;  // DS, with Swap Screens on
     const char* ctr;      // 3DS (swap is a separate option there)
+    const char* wiiu;     // Wii U (swap is a separate option, except for Single Screen)
 };
 const DsLayout kDsLayouts[] = {
-    {"Vertical", "top-bottom", "bottom-top", "default"},
-    {"Side by Side", "left-right", "right-left", "side_by_side"},
-    {"Large + Small Screen", "largescreen-top", "largescreen-bottom", "large_screen"},
-    {"Single Screen", "top", "bottom", "single_screen"},
-    {"Sideways (Rotate Left)", "rotate-left", "rotate-left", nullptr},
-    {"Sideways (Rotate Right)", "rotate-right", "rotate-right", nullptr},
+    {"Vertical", "top-bottom", "bottom-top", "default", "Top Bottom"},
+    {"Side by Side", "left-right", "right-left", "side_by_side", "Side by Side"},
+    {"Large + Small Screen", "largescreen-top", "largescreen-bottom", "large_screen", "Picture in Picture"},
+    {"Single Screen", "top", "bottom", "single_screen", "Default Screen"},
+    {"Sideways (Rotate Left)", "rotate-left", "rotate-left", nullptr, nullptr},
+    {"Sideways (Rotate Right)", "rotate-right", "rotate-right", nullptr, nullptr},
 };
+constexpr int kSingleScreen = 3;
 
 // Systems drawn on the GPU: pick OpenGL, or the core's (slow) software renderer as a fallback.
 bool hasSoftwareFallback(System s) { return s == System::N3DS || s == System::N64; }
 void chooseRenderer(LibretroCore& core, System s, bool software) {
     if (s == System::N3DS) core.forceOption("citra_graphics_api", software ? "Software" : "OpenGL");
+    if (s == System::WiiU) core.forceOption("cemu_gpu_api", "OpenGL");  // we provide OpenGL, not Vulkan
     if (s == System::N64) {
         core.forceOption("mupen64plus-rdp-plugin", software ? "angrylion" : "gliden64");
         core.forceOption("mupen64plus-rsp-plugin", software ? "cxd4" : "hle");
     }
 }
 
-bool hasTwoScreens(System s) { return s == System::NDS || s == System::N3DS; }
-bool layoutAvailable(System s, int i) { return s == System::NDS || (s == System::N3DS && kDsLayouts[i].ctr); }
+bool hasTwoScreens(System s) { return s == System::NDS || s == System::N3DS || s == System::WiiU; }
+bool layoutAvailable(System s, int i) {
+    return s == System::NDS || (s == System::N3DS && kDsLayouts[i].ctr) || (s == System::WiiU && kDsLayouts[i].wiiu);
+}
 constexpr int kDsLayoutCount = int(sizeof kDsLayouts / sizeof kDsLayouts[0]);
 constexpr int kFirstSideways = 4;
 
@@ -264,6 +271,15 @@ bool App::startGame(const fs::path& path) {
                     false);
         return false;
     }
+    if (det.system == System::WiiU && needsWiiUKeys(det.launchPath.empty() ? path : det.launchPath)) {
+        showMessage("Wii U keys needed",
+                    path.filename().u8string() +
+                        "\n\nWii U disc images are encrypted with keys from your own console. Add your keys.txt "
+                        "with Options > Wii U Keys..., then open the game again.\n\n(A game.key file next to the "
+                        "game works too.)",
+                    true);
+        return false;
+    }
     const fs::path corePath = paths_.findCore(sys.core);
     if (corePath.empty()) {
         showMessage("Nintendall is missing a file",
@@ -305,7 +321,7 @@ bool App::startGame(const fs::path& path) {
         core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(sys.core), paths_.saves,
                                                paths_.config / (std::string(sys.core) + ".opt"));
         const bool coreLoaded = core_->load(corePath, err);
-        if (coreLoaded && (det.system == System::NDS || det.system == System::N3DS)) {
+        if (coreLoaded && hasTwoScreens(det.system)) {
             system_ = det.system;
             gameTitle_ = path.stem().u8string();
             loadLayout();
@@ -451,6 +467,10 @@ fs::path App::statePath(int slot) const {
 
 void App::saveState() {
     if (!core_) return;
+    if (system_ == System::WiiU) {
+        osd("Wii U games can't use save states - use the game's own saves");
+        return;
+    }
     const auto data = core_->saveState();
     if (data.empty()) {
         osd("Save states aren't available for this game");
@@ -463,6 +483,10 @@ void App::saveState() {
 
 void App::loadState() {
     if (!core_) return;
+    if (system_ == System::WiiU) {
+        osd("Wii U games can't use save states - use the game's own saves");
+        return;
+    }
     std::ifstream f(statePath(slot_), std::ios::binary);
     if (!f) {
         osd("Slot " + std::to_string(slot_) + " is empty");
@@ -520,7 +544,10 @@ void App::connectPorts() {
     if (!core_) return;
     for (int p = 0; p < Input::kMaxPlayers; ++p) {
         const bool present = p == 0 || p < input_.controllerCount() || input_.hasKeyboardKeys(p);
-        core_->setPortDevice(unsigned(p), present ? RETRO_DEVICE_JOYPAD : RETRO_DEVICE_NONE);
+        // Wii U: player 1 is the GamePad; players 2-4 are Pro Controllers (Cemu's device id for one).
+        const unsigned pad = system_ == System::WiiU && p > 0 ? RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 2)
+                                                              : RETRO_DEVICE_JOYPAD;
+        core_->setPortDevice(unsigned(p), present ? pad : RETRO_DEVICE_NONE);
     }
 }
 
@@ -577,7 +604,7 @@ int16_t App::pointerState(unsigned id) const {
 // DS screen layout
 
 void App::loadLayout() {
-    layout_ = 0;
+    layout_ = system_ == System::WiiU ? kSingleScreen : 0;  // Wii U: just the TV picture, like the real thing
     layoutSwap_ = false;
     const std::string v = cfg_.get("layout." + configSafe(gameTitle_));  // remembered per game, e.g. "4" or "0,swap"
     if (!v.empty()) {
@@ -593,6 +620,13 @@ void App::applyLayout() {
     if (system_ == System::NDS) {
         core_->forceOption("melonds_number_of_screen_layouts", "1");
         core_->forceOption("melonds_screen_layout1", layoutSwap_ ? l.swapped : l.value);
+    } else if (system_ == System::WiiU) {
+        // One layout only (our menu switches them), and no button combo that changes it behind our back.
+        core_->forceOption("cemu_number_of_screen_layouts", "1");
+        core_->forceOption("cemu_next_screen_layout_button", "Disabled");
+        const bool single = layout_ == kSingleScreen;
+        core_->forceOption("cemu_screen_layout1", single && layoutSwap_ ? "GamePad Screen" : l.wiiu);
+        core_->forceOption("cemu_drc_position", !single && layoutSwap_ ? "swapped" : "normal");
     } else {
         core_->forceOption("citra_layout_option", l.ctr);
         core_->forceOption("citra_swap_screen", layoutSwap_ ? "Bottom" : "Top");
@@ -819,6 +853,7 @@ void App::doAction(int a) {
     case ActConsoleSettings:
         if (core_) settings_.open(system_, *core_);
         break;
+    case ActWiiUKeys: importWiiUKeys(); break;
     case ActFullscreen: video_.toggleFullscreen(); break;
     case ActControls:
         showMessage("Controls",
@@ -853,6 +888,95 @@ void App::openFileDialog() {
         return;
     }
     if (!path.empty()) startGame(fs::u8path(path));
+}
+
+// ---- Wii U keys -------------------------------------------------------------
+
+namespace {
+// A keys.txt line: 32 hex digits (one AES key), optionally followed by "# a note".
+std::string keyFromLine(const std::string& line) {
+    std::string hex;
+    for (char c : line) {
+        if (c == '#') break;
+        if (std::isxdigit(static_cast<unsigned char>(c))) hex += char(std::tolower(static_cast<unsigned char>(c)));
+        else if (!std::isspace(static_cast<unsigned char>(c))) return "";  // not a key line
+    }
+    // Cemu writes a template keys.txt containing this example key; it isn't a real one.
+    if (hex == "541b9889519b27d363cd21604b97c67a") return "";
+    return hex.size() == 32 ? hex : "";
+}
+
+std::vector<std::string> readLines(const fs::path& p) {
+    std::vector<std::string> lines;
+    std::ifstream f(p);
+    for (std::string l; std::getline(f, l);) {
+        if (!l.empty() && l.back() == '\r') l.pop_back();
+        lines.push_back(l);
+    }
+    return lines;
+}
+}  // namespace
+
+fs::path App::wiiUKeysFile() const { return paths_.systemDirFor("cemu") / "Cemu" / "keys.txt"; }
+
+bool App::needsWiiUKeys(const fs::path& game) const {
+    std::string ext = game.extension().u8string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    if (ext != ".wud" && ext != ".wux") return false;  // only disc images are encrypted with the console's keys
+    std::error_code ec;
+    if (fs::exists(fs::path(game).replace_extension(".key"), ec)) return false;  // game.key next to game.wux
+    for (const auto& l : readLines(wiiUKeysFile()))
+        if (!keyFromLine(l).empty()) return false;
+    return true;
+}
+
+void App::importWiiUKeys() {
+    menu_.close();
+    audio_.clear();
+    bool unavailable = false;
+    const std::string chosen =
+        ::openFileDialog(video_.window(), "Choose your Wii U keys file", "Key files", {"txt", "key"}, unavailable);
+    nextFrame_ = nowSeconds();
+    if (unavailable) {
+        showMessage("Wii U Keys", "Put your keys.txt in this folder:\n" + wiiUKeysFile().parent_path().u8string(),
+                    false);
+        return;
+    }
+    if (chosen.empty()) return;
+
+    // Add every key that isn't there yet; keep the notes ("# Game name") that come with them.
+    const fs::path dest = wiiUKeysFile();
+    std::set<std::string> have;
+    for (const auto& l : readLines(dest))
+        if (const std::string k = keyFromLine(l); !k.empty()) have.insert(k);
+    std::vector<std::string> add;
+    int found = 0;
+    for (const auto& l : readLines(fs::u8path(chosen))) {
+        const std::string k = keyFromLine(l);
+        if (k.empty()) continue;
+        ++found;
+        if (have.insert(k).second) add.push_back(l);
+    }
+    if (found == 0) {
+        showMessage("Wii U Keys",
+                    "That file doesn't contain any Wii U keys.\n\nA keys file has one key per line: 32 letters and "
+                    "numbers (0-9, a-f), optionally followed by # and a note.",
+                    true);
+        return;
+    }
+    std::error_code ec;
+    fs::create_directories(dest.parent_path(), ec);
+    std::ofstream out(dest, std::ios::app);
+    for (const auto& l : add) out << l << "\n";
+    if (!out) {
+        showMessage("Wii U Keys", "Couldn't write " + dest.u8string(), true);
+        return;
+    }
+    showMessage("Wii U Keys",
+                add.empty() ? "Those keys were already added."
+                            : "Added " + std::to_string(add.size()) + (add.size() == 1 ? " key" : " keys") +
+                                  ". Encrypted Wii U disc images (.wud / .wux) can now be played.",
+                false);
 }
 
 void App::showMessage(const std::string& title, const std::string& text, bool error) {
@@ -920,8 +1044,9 @@ void App::buildMenus() {
     menus.push_back(emu);
 
     Menu state{"State", {}};
-    state.items.push_back({"Save State", "F5", ActSaveState, game});
-    state.items.push_back({"Load State", "F9", ActLoadState, game});
+    const bool states = game && system_ != System::WiiU;  // Cemu can't save states
+    state.items.push_back({"Save State", "F5", ActSaveState, states});
+    state.items.push_back({"Load State", "F9", ActLoadState, states});
     state.items.push_back({});
     for (int i = 1; i <= kSlots; ++i) {
         std::string label = "Slot " + std::to_string(i);
@@ -931,7 +1056,7 @@ void App::buildMenus() {
     }
     menus.push_back(state);
 
-    // Layout: how the two DS / 3DS screens are arranged (other systems have one screen).
+    // Layout: how the two DS / 3DS / Wii U screens are arranged (other systems have one screen).
     const bool twoScreens = game && hasTwoScreens(system_);
     Menu layout{"Layout", {}};
     for (int i = 0; i < kDsLayoutCount; ++i) {
@@ -947,6 +1072,7 @@ void App::buildMenus() {
     Menu options{"Options", {}};
     options.items.push_back({"Button Config...", "", ActButtonConfig});
     options.items.push_back({"Console Settings...", "", ActConsoleSettings, game});
+    options.items.push_back({"Wii U Keys...", "", ActWiiUKeys});
     options.items.push_back({});
     options.items.push_back({"Fullscreen", "F11", ActFullscreen, true, video_.isFullscreen()});
     menus.push_back(options);

@@ -3,6 +3,8 @@
 
 Run automatically by CMake (target "bundle_cores"). Downloads each core once
 from the libretro buildbot into a cache folder, then copies it to --dest.
+Cores we had to fix (PATCHED_CORES) come from our own builds instead; fetching
+those needs the GitHub CLI (`gh`) logged in to an account that can see the repo.
 
   python3 tools/bundle_cores.py --dest build/cores [--cache cores] [--update]
 
@@ -32,6 +34,16 @@ CORES = [
     "azahar",            # 3DS                       (GPL-3.0+)
     "cemu",              # Wii U                     (MPL-2.0)
 ]
+
+
+# Cores Nintendall ships with fixes of its own, built by GitHub Actions in the repo below
+# and attached to a release there. The changed source travels with Nintendall (see
+# third_party/), as the MPL-2.0 requires.
+#   cemu: VPADRead didn't report fresh button presses (trig), so most game menus ignored buttons.
+PATCHED_CORES = {
+    "cemu": {"repo": "exultantliving0/cemu-libretro-nintendall", "tag": "nintendall-1",
+             "platforms": {"linux/x86_64", "windows/x86_64"}},
+}
 
 
 PLATFORMS = {
@@ -101,6 +113,16 @@ def fetch_system_data(cache, dest, update):
             shutil.copytree(cached, target)
 
 
+def download_patched(core, filename, plat, cache):
+    info = PATCHED_CORES[core]
+    folder = os.path.join(cache, "patched", info["tag"])
+    os.makedirs(folder, exist_ok=True)
+    print(f"  downloading {filename} from {info['repo']} release {info['tag']}")
+    subprocess.run(["gh", "release", "download", info["tag"], "-R", info["repo"], "-p", filename, "-D", folder,
+                    "--clobber"], check=True, stdout=subprocess.DEVNULL)
+    return os.path.join(folder, filename)
+
+
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -118,7 +140,12 @@ def main():
         filename = f"{core}_libretro{ext}"
         cached = os.path.join(args.cache, filename)
         try:
-            if args.update or not os.path.isfile(cached):
+            patched = PATCHED_CORES.get(core)
+            if patched and plat in patched["platforms"]:
+                cached = os.path.join(args.cache, "patched", patched["tag"], filename)
+                if args.update or not os.path.isfile(cached):
+                    cached = download_patched(core, filename, plat, args.cache)
+            elif args.update or not os.path.isfile(cached):
                 download(core, filename, plat, args.cache)
             dest = os.path.join(args.dest, filename)
             if os.path.abspath(dest) != os.path.abspath(cached) and (
