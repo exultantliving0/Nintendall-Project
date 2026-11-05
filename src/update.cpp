@@ -225,7 +225,12 @@ std::string shortNotes(const std::string& body) {
             continue;
         }
         const bool bullet = t.rfind("  \xE2\x80\xA2 ", 0) == 0;
-        for (const std::string& part : wrapLine(t, 72, bullet ? "    " : "")) {
+#if defined(_WIN32)
+        const size_t width = 400;  // Windows message boxes wrap long lines themselves
+#else
+        const size_t width = 72;
+#endif
+        for (const std::string& part : wrapLine(t, width, bullet ? "    " : "")) {
             if (lines >= 10) break;
             out += part + "\n";
             ++lines;
@@ -268,5 +273,19 @@ UpdateInfo checkForUpdate(const std::string& currentVersion) {
                        ? (*best)["html_url"].s
                        : std::string("https://github.com/") + kRepo + "/releases/tag/" + urlEncode(tag);
     info.notes = shortNotes((*best)["body"].s);
+
+    // The setup file, if GitHub gives its SHA-256 (it's checked before the setup runs).
+    const std::string downloads = std::string("https://github.com/") + kRepo + "/releases/download/";
+    for (const Json& a : (*best)["assets"].items) {
+        const std::string& name = a["name"].s;
+        const std::string& url = a["browser_download_url"].s;
+        const std::string& digest = a["digest"].s;
+        if (name.size() < 10 || name.compare(name.size() - 10, 10, "-setup.exe") != 0) continue;
+        if (url.rfind(downloads, 0) != 0 || digest.rfind("sha256:", 0) != 0 || digest.size() != 7 + 64) continue;
+        info.setupUrl = url;
+        info.setupSha256 = digest.substr(7);
+        for (char& c : info.setupSha256) c = char(std::tolower(static_cast<unsigned char>(c)));
+        break;
+    }
     return info;
 }

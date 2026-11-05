@@ -11,7 +11,10 @@
 #include <set>
 
 #include "filedialog.hpp"
+#include "http.hpp"
 #include "library.hpp"
+#include "selfupdate.hpp"
+#include "sha256.hpp"
 #include "update.hpp"
 #include "wiimotepair.hpp"
 
@@ -19,6 +22,16 @@
 #include <thread>
 
 namespace fs = std::filesystem;
+
+// Update Now: the setup being downloaded (filled in by a thread).
+struct App::DownloadJob {
+    std::atomic<uint64_t> got{0}, total{0};
+    std::atomic<bool> done{false}, cancel{false};
+    bool ok = false;
+    std::string error;
+    UpdateInfo info;
+    fs::path file;
+};
 
 // Set by Ctrl+C / kill in headless test runs (no window, so no SDL quit event).
 volatile std::sig_atomic_t g_stopRequested = 0;
@@ -202,6 +215,15 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         home_.start(games.empty() ? defaultGamesFolder(paths_.base, paths_.portable) : fs::u8path(games),
                     paths_.data / "covers", cfg_.get("home.console"));
         home_.setCoverSize(std::atoi(cfg_.get("home.cover_size").c_str()));
+        // After Update Now: say whether the new version is running, and tidy the temp folder.
+        removeOldUpdateFiles();
+        const std::string updated = cfg_.get("update.installing");
+        if (!updated.empty()) {
+            cfg_.set("update.installing", "");
+            if (updated == NINTENDALL_VERSION) osd("Nintendall was updated to " + updated, 5000);
+            else if (isNewerVersion(updated, NINTENDALL_VERSION))
+                osd("The update to " + updated + " wasn't installed - you can try again next time", 6000);
+        }
         startUpdateCheck();
     }
     input_.setForcedButtons(opt.holdButtons);
@@ -239,6 +261,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         }
         checkWiimotePairing();
         checkUpdateResult();
+        checkUpdateDownload();
         if (settings_.takeRestartRequest() && core_) {
             const fs::path game = gamePath_;  // reload the game so the new settings apply
             startGame(game);
@@ -939,6 +962,15 @@ void App::handleEvent(const SDL_Event& e) {
         lastMouseMove_ = SDL_GetTicks();
     }
 
+    // Downloading an update: only Esc (cancel) and closing the window do anything.
+    if (download_) {
+        if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) download_->cancel = true;
+        if (e.type == SDL_DROPFILE) SDL_free(e.drop.file);
+        if (e.type == SDL_QUIT || (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE))
+            download_->cancel = true;
+        if (e.type != SDL_QUIT && e.type != SDL_WINDOWEVENT) return;
+    }
+
     switch (e.type) {
     case SDL_QUIT:
         quit_ = true;
@@ -1361,6 +1393,7 @@ void App::draw() {
         menu_.draw(video_, text_, W);
     }
     buttonConfig_.draw(video_, text_, input_, W, H);
+    drawUpdateDownload();
     if (core_) settings_.draw(video_, text_, *core_, W, H);
     video_.present();
 
@@ -1402,12 +1435,16 @@ void App::checkUpdateResult() {
     updateJob_.reset();
     if (!info.available || cfg_.get("update.skip") == info.version) return;
 
+    // Installed on Windows: Update Now does everything. Otherwise: Download opens the release page.
+    const bool self = canUpdateItself(paths_.base, paths_.portable) && !info.setupUrl.empty();
     std::string text = "Nintendall " + info.version + " is available. You have " NINTENDALL_VERSION ".";
     if (!info.notes.empty()) text += "\n\nWhat's new:\n\n" + info.notes;
-    text += "\n\nDownload opens the release page, where you can get the new setup file.";
+    text += self ? "\n\nUpdate Now downloads it, closes Nintendall, installs it and starts the new version.\n"
+                   "Windows will ask for permission to install it."
+                 : "\n\nDownload opens the release page, where you can get the new setup file.";
     enum { Download = 1, Skip, Later };
     const SDL_MessageBoxButtonData buttons[] = {
-        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, Download, "Download"},
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, Download, self ? "Update Now" : "Download"},
         {0, Skip, "Skip This Version"},
         {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, Later, "Later"},
     };
@@ -1416,12 +1453,96 @@ void App::checkUpdateResult() {
     int choice = Later;
     SDL_ShowMessageBox(&box, &choice);
     if (choice == Download) {
-        SDL_OpenURL(info.pageUrl.c_str());
+        if (self) startUpdateDownload(info);
+        else SDL_OpenURL(info.pageUrl.c_str());
     } else if (choice == Skip) {
         cfg_.set("update.skip", info.version);  // asked again only for a newer version than this
         saveConfig();
     }
     nextFrame_ = nowSeconds();
+}
+
+void App::startUpdateDownload(const UpdateInfo& info) {
+    auto job = std::make_shared<DownloadJob>();
+    job->info = info;
+    std::error_code ec;
+    fs::remove_all(updateFolder(), ec);
+    fs::create_directories(updateFolder(), ec);
+    job->file = updateFolder() / ("Nintendall-" + info.version + "-setup.exe");
+    download_ = job;
+    std::thread([job] {
+        const int status = httpDownload(job->info.setupUrl, job->file, [&](uint64_t got, uint64_t total) {
+            job->got = got;
+            job->total = total;
+            return !job->cancel.load();
+        });
+        if (job->cancel) {
+            job->error = "cancelled";
+        } else if (status != 200) {
+            job->error = "The download didn't finish. Check the internet connection and try again.";
+        } else if (sha256File(job->file) != job->info.setupSha256) {
+            // Not exactly the file GitHub published: never run it.
+            job->error = "The downloaded file was damaged, so it wasn't installed. Please try again.";
+        } else {
+            job->ok = true;
+        }
+        if (!job->ok) {
+            std::error_code ec2;
+            fs::remove(job->file, ec2);
+        }
+        job->done = true;
+    }).detach();
+}
+
+void App::checkUpdateDownload() {
+    if (!download_ || !download_->done) return;
+    const auto job = download_;
+    download_.reset();
+    if (job->error == "cancelled") {
+        osd("Update cancelled");
+        return;
+    }
+    std::string error = job->error;
+    if (job->ok) {
+        cfg_.set("update.installing", job->info.version);  // checked when Nintendall starts again
+        saveConfig();
+        if (startInstallingUpdate(job->file, paths_.base, error)) {
+            quit_ = true;  // the helper installs the update once Nintendall has closed
+            return;
+        }
+        cfg_.set("update.installing", "");
+        saveConfig();
+    }
+    showMessage("Update failed", error + "\n\nYou can also download it from the release page:\n" + job->info.pageUrl, true);
+}
+
+void App::drawUpdateDownload() {
+    if (!download_) return;
+    const int W = video_.width(), H = video_.height();
+    const float s = text_.scale();
+    video_.fillRect(0, 0, W, H, {0, 0, 0, 170});
+    const std::string hint = "Nintendall will close, update and start again. Esc cancels.";
+    const int bw = std::min(W - int(40 * s), std::max(int(460 * s), text_.width(hint) + int(40 * s)));
+    const int lh = text_.lineHeight();
+    const int bh = int(40 * s) + 4 * lh + int(36 * s);
+    const int bx = (W - bw) / 2, by = (H - bh) / 2;
+    video_.fillRect(bx, by, bw, bh, {44, 44, 50});
+    int y = by + int(20 * s);
+    const std::string title = "Downloading Nintendall " + download_->info.version;
+    text_.draw(bx + int(20 * s), y, title, kWhite, Text::Large);
+    y += text_.lineHeight(Text::Large) + int(12 * s);
+    // Progress bar
+    const uint64_t got = download_->got, total = download_->total;
+    const int barW = bw - int(40 * s), barH = int(12 * s);
+    video_.fillRect(bx + int(20 * s), y, barW, barH, {70, 70, 80});
+    if (total > 0) video_.fillRect(bx + int(20 * s), y, int(barW * std::min(1.0, double(got) / double(total))), barH, {230, 0, 18});
+    y += barH + int(10 * s);
+    char line[96];
+    if (total > 0) std::snprintf(line, sizeof line, "%.1f of %.1f MB", got / 1048576.0, total / 1048576.0);
+    else std::snprintf(line, sizeof line, "%.1f MB", got / 1048576.0);
+    text_.draw(bx + int(20 * s), y, line, {200, 200, 208});
+    y += lh + int(4 * s);
+    text_.draw(bx + int(20 * s), y, hint, {150, 150, 160});
 }
 
 // ============================================================================

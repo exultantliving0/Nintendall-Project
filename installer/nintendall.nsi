@@ -5,11 +5,12 @@
 Unicode true
 !include "MUI2.nsh"
 !include "x64.nsh"
+!include "LogicLib.nsh"
 !include "FileFunc.nsh"
 
 !define APPNAME "Nintendall"
 !ifndef VERSION
-  !define VERSION "0.11.1"
+  !define VERSION "0.12.0"
 !endif
 !ifndef SRCDIR
   !error "Pass -DSRCDIR=<folder with nintendall.exe, SDL2.dll and cores\>"
@@ -139,6 +140,11 @@ SectionEnd
 
 Section "Desktop shortcut" SecDesktop
   SetShellVarContext all
+  ; Silent installs are Nintendall updating itself: keep the user's choice (no shortcut if they removed it).
+  ${If} ${Silent}
+  ${AndIfNot} ${FileExists} "$DESKTOP\${APPNAME}.lnk"
+    Return
+  ${EndIf}
   CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\nintendall.exe"
 SectionEnd
 

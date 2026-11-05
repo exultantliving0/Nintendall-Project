@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nintendall VERSION 0.11.1 LANGUAGES CXX)
+project(Nintendall VERSION 0.12.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,7 +39,9 @@ add_executable(nintendall
   src/menubar.cpp
   src/paths.cpp
   src/png.cpp
+  src/selfupdate.cpp
   src/settingsdialog.cpp
+  src/sha256.cpp
   src/systems.cpp
   src/text.cpp
   src/update.cpp

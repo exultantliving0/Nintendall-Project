@@ -7,6 +7,8 @@ struct UpdateInfo {
     std::string version;     // its version, e.g. "0.11.0"
     std::string pageUrl;     // its release page (with the download)
     std::string notes;       // the start of its release notes, as plain text
+    // Its Windows setup file (for Update Now): download link and SHA-256 published by GitHub.
+    std::string setupUrl, setupSha256;
 };
 
 // Asks GitHub for the newest release. Blocking (a few seconds at most): run it on a thread.

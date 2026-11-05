@@ -284,9 +284,17 @@ the window itself can use any renderer (Direct3D on Windows). See `src/hwrender.
 ## New versions
 
 When Nintendall starts, it asks GitHub (in the background) whether a newer
-version has been released. If so, a popup shows what's new, with **Download**
-(opens the release page), **Skip This Version** (not asked again until an even
-newer one) and **Later**. The popup only appears on the home screen right after
+version has been released. If so, a popup shows what's new, with **Update Now**
+(**Download** on Linux / Mac, which opens the release page), **Skip This
+Version** (not asked again until an even newer one) and **Later**.
+
+**Update Now** (Windows, installed with the setup): Nintendall downloads the new
+setup with a progress bar (Esc cancels), checks it against the SHA-256
+fingerprint GitHub publishes for it (a damaged or different file is never run),
+then closes. A copy of Nintendall in the temp folder waits for it to close,
+runs the setup silently and starts the new version, which says
+"Nintendall was updated to ...". Windows asks for permission once, as for any
+install in Program Files. Silent updates keep your choice of desktop shortcut. The popup only appears on the home screen right after
 launch: if a game is started first (or Nintendall was opened with a game), it
 isn't shown that time. Nothing is sent except the request for the release list.
 To turn the check off, set `update.check = "false"` in `nintendall.cfg`.
@@ -318,7 +326,7 @@ Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen).
 | `src/hwrender.*` | OpenGL context + framebuffer for GPU-drawn cores (N64, GameCube/Wii, 3DS, Wii U) |
 | `src/app.*` | main window, menu actions, game loop, saves |
 | `src/home.*`, `src/library.*`, `src/covers.*`, `src/http.*` | home screen, Games folder scanning (and game IDs), box cover downloads |
-| `src/update.*` | checks GitHub for a new version at startup |
+| `src/update.*`, `src/selfupdate.*`, `src/sha256.*` | checks GitHub for a new version at startup; Update Now (download, check, install, restart) |
 | `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |
 | `src/consolesettings.*`, `src/settingsdialog.*` | the Console Settings list and window |
 | `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |

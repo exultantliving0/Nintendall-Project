@@ -18,6 +18,7 @@
 #include "paths.hpp"
 #include "settingsdialog.hpp"
 #include "text.hpp"
+#include "update.hpp"
 #include "video.hpp"
 #include "zip.hpp"
 
@@ -98,6 +99,12 @@ private:
     struct UpdateJob;
     std::shared_ptr<UpdateJob> updateJob_;
     bool playedSinceLaunch_ = false;
+    // Update Now (Windows): download the setup with a progress screen, then install and restart.
+    void startUpdateDownload(const UpdateInfo& info);
+    void checkUpdateDownload();
+    void drawUpdateDownload();
+    struct DownloadJob;
+    std::shared_ptr<DownloadJob> download_;
     std::filesystem::path wiiUKeysFile() const;
     bool needsWiiUKeys(const std::filesystem::path& game) const;
     void showMessage(const std::string& title, const std::string& text, bool error);

@@ -1,6 +1,9 @@
 #include "http.hpp"
 
 #include <cstdio>
+#include <fstream>
+
+namespace fs = std::filesystem;
 
 std::string urlEncode(const std::string& s) {
     static const char* hex = "0123456789ABCDEF";
@@ -18,6 +21,11 @@ std::string urlEncode(const std::string& s) {
     return out;
 }
 
+namespace {
+// Receives the body as it arrives; returning false stops the download.
+using Sink = std::function<bool(const uint8_t* data, size_t size, uint64_t total)>;
+}  // namespace
+
 #if defined(_WIN32)
 
 #ifndef NOMINMAX
@@ -27,23 +35,24 @@ std::string urlEncode(const std::string& s) {
 #include <winhttp.h>
 
 namespace {
+
 std::wstring widen(const std::string& s) {
     std::wstring w(size_t(MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), nullptr, 0)), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), w.data(), int(w.size()));
     return w;
 }
-}  // namespace
 
-int httpGet(const std::string& url, std::vector<uint8_t>& body) {
-    body.clear();
+// GET with WinHTTP (it follows redirects, e.g. GitHub downloads -> its file servers).
+// Returns the status code; 0 if the server couldn't be reached or the sink stopped it.
+int fetch(const std::string& url, const Sink& sink) {
     const std::wstring wurl = widen(url);
     URL_COMPONENTS parts{};
     parts.dwStructSize = sizeof parts;
-    wchar_t host[256] = {}, path[2048] = {};
+    wchar_t host[256] = {}, path[4096] = {};
     parts.lpszHostName = host;
     parts.dwHostNameLength = 256;
     parts.lpszUrlPath = path;
-    parts.dwUrlPathLength = 2048;
+    parts.dwUrlPathLength = 4096;
     if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &parts)) return 0;
 
     int status = 0;
@@ -61,16 +70,29 @@ int httpGet(const std::string& url, std::vector<uint8_t>& body) {
                 WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                                     WINHTTP_HEADER_NAME_BY_INDEX, &code, &len, WINHTTP_NO_HEADER_INDEX);
                 status = int(code);
-                DWORD avail = 0;
-                while (WinHttpQueryDataAvailable(req, &avail) && avail > 0) {
-                    const size_t at = body.size();
-                    body.resize(at + avail);
-                    DWORD got = 0;
-                    if (!WinHttpReadData(req, body.data() + at, avail, &got)) {
+                DWORD total = 0;
+                len = sizeof total;
+                if (!WinHttpQueryHeaders(req, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+                                         WINHTTP_HEADER_NAME_BY_INDEX, &total, &len, WINHTTP_NO_HEADER_INDEX))
+                    total = 0;
+                std::vector<uint8_t> buf;
+                for (;;) {
+                    DWORD avail = 0;
+                    if (!WinHttpQueryDataAvailable(req, &avail)) {  // connection lost
                         status = 0;
                         break;
                     }
-                    body.resize(at + got);
+                    if (avail == 0) break;  // finished
+                    buf.resize(avail);
+                    DWORD got = 0;
+                    if (!WinHttpReadData(req, buf.data(), avail, &got)) {
+                        status = 0;
+                        break;
+                    }
+                    if (status == 200 && !sink(buf.data(), got, total)) {
+                        status = 0;
+                        break;
+                    }
                 }
             }
             WinHttpCloseHandle(req);
@@ -78,7 +100,40 @@ int httpGet(const std::string& url, std::vector<uint8_t>& body) {
         WinHttpCloseHandle(connect);
     }
     WinHttpCloseHandle(session);
+    return status;
+}
+
+}  // namespace
+
+int httpGet(const std::string& url, std::vector<uint8_t>& body) {
+    body.clear();
+    const int status = fetch(url, [&](const uint8_t* d, size_t n, uint64_t) {
+        body.insert(body.end(), d, d + n);
+        return true;
+    });
     if (status != 200) body.clear();
+    return status;
+}
+
+int httpDownload(const std::string& url, const fs::path& file,
+                 const std::function<bool(uint64_t, uint64_t)>& progress) {
+    int status = 0;
+    uint64_t got = 0, size = 0;
+    {
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        if (!out) return 0;
+        status = fetch(url, [&](const uint8_t* d, size_t n, uint64_t total) {
+            out.write(reinterpret_cast<const char*>(d), std::streamsize(n));
+            got += n;
+            size = total;
+            return bool(out) && progress(got, total);
+        });
+        out.close();
+        if (!out) status = 0;
+    }
+    if (status == 200 && size != 0 && got != size) status = 0;  // cut off
+    std::error_code ec;
+    if (status != 200) fs::remove(file, ec);
     return status;
 }
 
@@ -107,6 +162,17 @@ int httpGet(const std::string& url, std::vector<uint8_t>& body) {
     body.resize(nl > 0 ? nl - 1 : 0);
     if (status != 200) body.clear();
     return status;
+}
+
+// Linux / Mac don't update themselves (no installer), so this is the simple way.
+int httpDownload(const std::string& url, const fs::path& file,
+                 const std::function<bool(uint64_t, uint64_t)>& progress) {
+    std::vector<uint8_t> body;
+    const int status = httpGet(url, body);
+    if (status != 200 || !progress(body.size(), body.size())) return 0;
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(body.data()), std::streamsize(body.size()));
+    return out ? status : 0;
 }
 
 #endif
