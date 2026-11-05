@@ -11,6 +11,10 @@
 #include <set>
 
 #include "filedialog.hpp"
+#include "wiimotepair.hpp"
+
+#include <atomic>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -174,6 +178,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
             saveConfig();
             connectPorts();
         }
+        checkWiimotePairing();
         if (settings_.takeRestartRequest() && core_) {
             const fs::path game = gamePath_;  // reload the game so the new settings apply
             startGame(game);
@@ -996,6 +1001,7 @@ void App::doAction(int a) {
         if (core_) settings_.open(system_, *core_);
         break;
     case ActWiiUKeys: importWiiUKeys(); break;
+    case ActPairWiimotes: startWiimotePairing(); break;
     case ActFullscreen: video_.toggleFullscreen(); break;
     case ActControls:
         showMessage("Controls",
@@ -1218,6 +1224,7 @@ void App::buildMenus() {
     options.items.push_back({"Button Config...", "", ActButtonConfig});
     options.items.push_back({"Console Settings...", "", ActConsoleSettings, game});
     options.items.push_back({"Wii U Keys...", "", ActWiiUKeys});
+    options.items.push_back({pairJob_ ? "Pairing Wii Remotes..." : "Pair Wii Remotes", "", ActPairWiimotes, !pairJob_});
     options.items.push_back({});
     options.items.push_back({"Fullscreen", "F11", ActFullscreen, true, video_.isFullscreen()});
     menus.push_back(options);
@@ -1269,5 +1276,40 @@ void App::draw() {
         screen2_.clear(kBlack);
         if (core_ && screen2_.hasFrame()) screen2_.drawGame({0, 0, screen2_.width(), screen2_.height()});
         screen2_.present();
+    }
+}
+
+// ============================================================================
+// Pairing real Wii Remotes over Bluetooth
+
+struct App::PairJob {
+    std::atomic<bool> done{false};
+    WiimotePairResult result;
+};
+
+void App::startWiimotePairing() {
+    if (pairJob_) return;
+    auto job = std::make_shared<PairJob>();
+    pairJob_ = job;
+    osd("Searching for Wii Remotes - press the red sync button on each remote now", 30000);
+    // The thread keeps its own reference, so quitting mid-search is safe.
+    std::thread([job] {
+        job->result = pairWiiRemotes();
+        job->done = true;
+    }).detach();
+}
+
+void App::checkWiimotePairing() {
+    if (!pairJob_ || !pairJob_->done) return;
+    const WiimotePairResult r = pairJob_->result;
+    pairJob_.reset();
+    if (!r.error.empty()) {
+        osd(r.error, 6000);
+    } else if (r.paired == 0) {
+        osd("No Wii Remote found - press its red sync button, then choose Pair Wii Remotes again", 6000);
+    } else {
+        const std::string n = r.paired == 1 ? "1 Wii Remote" : std::to_string(r.paired) + " Wii Remotes";
+        osd("Paired " + n + (realWiimotes() ? "" : " - for Wii games, set Console Settings > Wii Controller to Real Wii Remote"),
+            8000);
     }
 }

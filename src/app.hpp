@@ -52,7 +52,7 @@ private:
         ActPause = 30, ActReset, ActFastForward,
         ActSaveState = 40, ActLoadState,
         ActSlot = 50,  // + slot number
-        ActButtonConfig = 70, ActFullscreen, ActConsoleSettings, ActWiiUKeys,
+        ActButtonConfig = 70, ActFullscreen, ActConsoleSettings, ActWiiUKeys, ActPairWiimotes,
         ActControls = 90, ActAbout,
         ActLayout = 100,  // + layout index
         ActLayoutSwap = 120,
@@ -84,6 +84,11 @@ private:
     void openFileDialog();
     // Wii U disc images are encrypted with keys from the player's own console (Cemu reads keys.txt).
     void importWiiUKeys();
+    // Options > Pair Wii Remotes: pairing runs on a thread; the result is shown when it's done.
+    void startWiimotePairing();
+    void checkWiimotePairing();
+    struct PairJob;
+    std::shared_ptr<PairJob> pairJob_;
     std::filesystem::path wiiUKeysFile() const;
     bool needsWiiUKeys(const std::filesystem::path& game) const;
     void showMessage(const std::string& title, const std::string& text, bool error);

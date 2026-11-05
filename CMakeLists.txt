@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nintendall VERSION 0.9.2 LANGUAGES CXX)
+project(Nintendall VERSION 0.9.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,6 +39,7 @@ add_executable(nintendall
   src/systems.cpp
   src/text.cpp
   src/video.cpp
+  src/wiimotepair.cpp
   src/zip.cpp
 )
 
@@ -54,7 +55,8 @@ else()
   target_include_directories(nintendall PRIVATE ${SDL2_INCLUDE_DIRS})
   target_link_libraries(nintendall PRIVATE ${SDL2_LIBRARIES})
 endif()
-target_link_libraries(nintendall PRIVATE SDL2_ttf::SDL2_ttf ZLIB::ZLIB ${CMAKE_DL_LIBS})
+find_package(Threads REQUIRED)
+target_link_libraries(nintendall PRIVATE SDL2_ttf::SDL2_ttf ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
 if(WIN32)
   target_link_libraries(nintendall PRIVATE comdlg32)
 endif()

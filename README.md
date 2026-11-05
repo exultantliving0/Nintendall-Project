@@ -193,8 +193,11 @@ must first be connected to the PC:
 
 - **Mayflash DolphinBar** (easiest): plug it in, set it to mode 4, and sync each
   remote with its red button. It's also the sensor bar.
-- **Bluetooth:** pair the remote in the PC's Bluetooth settings (press the red sync
-  button under the battery cover; skip the PIN if asked).
+- **Bluetooth:** choose **Options > Pair Wii Remotes** and press the red sync
+  button under each remote's battery cover (like Dolphin's Pair button). Paired
+  remotes stay paired: later, any button reconnects them. On Windows, pressing
+  1 + 2 during a game also connects a remote for that session. (On Linux, pairing
+  uses BlueZ's `bluetoothctl`.)
 
 Pointing needs a powered sensor bar (the DolphinBar's, or a USB / battery one; a
 Wii's own bar only works plugged into a Wii). On Linux, Dolphin also needs
