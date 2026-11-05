@@ -91,6 +91,13 @@ private:
     void checkWiimotePairing();
     struct PairJob;
     std::shared_ptr<PairJob> pairJob_;
+    // New version check: asks GitHub on a thread when Nintendall starts. The popup only shows
+    // on the home screen, and never once a game has been started.
+    void startUpdateCheck();
+    void checkUpdateResult();
+    struct UpdateJob;
+    std::shared_ptr<UpdateJob> updateJob_;
+    bool playedSinceLaunch_ = false;
     std::filesystem::path wiiUKeysFile() const;
     bool needsWiiUKeys(const std::filesystem::path& game) const;
     void showMessage(const std::string& title, const std::string& text, bool error);

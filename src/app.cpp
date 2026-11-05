@@ -12,6 +12,7 @@
 
 #include "filedialog.hpp"
 #include "library.hpp"
+#include "update.hpp"
 #include "wiimotepair.hpp"
 
 #include <atomic>
@@ -201,6 +202,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         home_.start(games.empty() ? defaultGamesFolder(paths_.base, paths_.portable) : fs::u8path(games),
                     paths_.data / "covers", cfg_.get("home.console"));
         home_.setCoverSize(std::atoi(cfg_.get("home.cover_size").c_str()));
+        startUpdateCheck();
     }
     input_.setForcedButtons(opt.holdButtons);
 
@@ -236,6 +238,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
             connectPorts();
         }
         checkWiimotePairing();
+        checkUpdateResult();
         if (settings_.takeRestartRequest() && core_) {
             const fs::path game = gamePath_;  // reload the game so the new settings apply
             startGame(game);
@@ -458,6 +461,7 @@ bool App::startGame(const fs::path& path) {
     video_.clearFrame();
     loadSram();
     paused_ = fastForward_ = fastForwardToggled_ = false;
+    playedSinceLaunch_ = true;  // no "new version" popup from now on
     nextFrame_ = nowSeconds();
     addRecent(path);
     if (video_.window()) SDL_SetWindowTitle(video_.window(), ("Nintendall - " + gameTitle_).c_str());
@@ -1365,6 +1369,59 @@ void App::draw() {
         if (core_ && screen2_.hasFrame()) screen2_.drawGame({0, 0, screen2_.width(), screen2_.height()});
         screen2_.present();
     }
+}
+
+// ============================================================================
+// New version popup
+
+struct App::UpdateJob {
+    std::atomic<bool> done{false};
+    UpdateInfo info;
+};
+
+void App::startUpdateCheck() {
+    if (cfg_.get("update.check") == "false") return;  // turned off in nintendall.cfg
+    auto job = std::make_shared<UpdateJob>();
+    updateJob_ = job;
+    std::thread([job] {
+        job->info = checkForUpdate(NINTENDALL_VERSION);
+        job->done = true;
+    }).detach();
+}
+
+void App::checkUpdateResult() {
+    if (!updateJob_ || !updateJob_->done) return;
+    // Never during a game: once one has been started, the popup is dropped for this time.
+    if (core_ || playedSinceLaunch_) {
+        updateJob_.reset();
+        return;
+    }
+    // Wait for menus and dialogs to close first.
+    if (menu_.isOpen() || buttonConfig_.isOpen() || settings_.isOpen()) return;
+    const UpdateInfo info = updateJob_->info;
+    updateJob_.reset();
+    if (!info.available || cfg_.get("update.skip") == info.version) return;
+
+    std::string text = "Nintendall " + info.version + " is available. You have " NINTENDALL_VERSION ".";
+    if (!info.notes.empty()) text += "\n\nWhat's new:\n\n" + info.notes;
+    text += "\n\nDownload opens the release page, where you can get the new setup file.";
+    enum { Download = 1, Skip, Later };
+    const SDL_MessageBoxButtonData buttons[] = {
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, Download, "Download"},
+        {0, Skip, "Skip This Version"},
+        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, Later, "Later"},
+    };
+    const SDL_MessageBoxData box{SDL_MESSAGEBOX_INFORMATION | SDL_MESSAGEBOX_BUTTONS_LEFT_TO_RIGHT, video_.window(),
+                                 "New version of Nintendall", text.c_str(), 3, buttons, nullptr};
+    int choice = Later;
+    SDL_ShowMessageBox(&box, &choice);
+    if (choice == Download) {
+        SDL_OpenURL(info.pageUrl.c_str());
+    } else if (choice == Skip) {
+        cfg_.set("update.skip", info.version);  // asked again only for a newer version than this
+        saveConfig();
+    }
+    nextFrame_ = nowSeconds();
 }
 
 // ============================================================================

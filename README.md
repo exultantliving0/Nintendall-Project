@@ -280,6 +280,16 @@ their own OpenGL context on a hidden window and render into an offscreen
 framebuffer. Nintendall copies each finished frame into the normal window, so
 the window itself can use any renderer (Direct3D on Windows). See `src/hwrender.*`.
 
+## New versions
+
+When Nintendall starts, it asks GitHub (in the background) whether a newer
+version has been released. If so, a popup shows what's new, with **Download**
+(opens the release page), **Skip This Version** (not asked again until an even
+newer one) and **Later**. The popup only appears on the home screen right after
+launch: if a game is started first (or Nintendall was opened with a game), it
+isn't shown that time. Nothing is sent except the request for the release list.
+To turn the check off, set `update.check = "false"` in `nintendall.cfg`.
+
 ## Where files go
 
 User data lives in `~/.local/share/Nintendall/` (Linux),
@@ -307,6 +317,7 @@ Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen).
 | `src/hwrender.*` | OpenGL context + framebuffer for GPU-drawn cores (N64, GameCube/Wii, 3DS, Wii U) |
 | `src/app.*` | main window, menu actions, game loop, saves |
 | `src/home.*`, `src/library.*`, `src/covers.*`, `src/http.*` | home screen, Games folder scanning (and game IDs), box cover downloads |
+| `src/update.*` | checks GitHub for a new version at startup |
 | `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |
 | `src/consolesettings.*`, `src/settingsdialog.*` | the Console Settings list and window |
 | `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |
