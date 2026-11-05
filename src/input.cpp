@@ -69,6 +69,15 @@ void Input::resetDefaults(int player) {
     m.pad[RETRO_DEVICE_ID_JOYPAD_R2] = {PadBind::AxisPos, uint8_t(SDL_CONTROLLER_AXIS_TRIGGERRIGHT)};
     m.pad[RETRO_DEVICE_ID_JOYPAD_L3] = btn(SDL_CONTROLLER_BUTTON_LEFTSTICK);
     m.pad[RETRO_DEVICE_ID_JOYPAD_R3] = btn(SDL_CONTROLLER_BUTTON_RIGHTSTICK);
+    // Stick directions: the real sticks.
+    m.pad[kStickUp] = {PadBind::AxisNeg, uint8_t(SDL_CONTROLLER_AXIS_LEFTY)};
+    m.pad[kStickDown] = {PadBind::AxisPos, uint8_t(SDL_CONTROLLER_AXIS_LEFTY)};
+    m.pad[kStickLeft] = {PadBind::AxisNeg, uint8_t(SDL_CONTROLLER_AXIS_LEFTX)};
+    m.pad[kStickRight] = {PadBind::AxisPos, uint8_t(SDL_CONTROLLER_AXIS_LEFTX)};
+    m.pad[kRStickUp] = {PadBind::AxisNeg, uint8_t(SDL_CONTROLLER_AXIS_RIGHTY)};
+    m.pad[kRStickDown] = {PadBind::AxisPos, uint8_t(SDL_CONTROLLER_AXIS_RIGHTY)};
+    m.pad[kRStickLeft] = {PadBind::AxisNeg, uint8_t(SDL_CONTROLLER_AXIS_RIGHTX)};
+    m.pad[kRStickRight] = {PadBind::AxisPos, uint8_t(SDL_CONTROLLER_AXIS_RIGHTX)};
 }
 
 bool Input::hasKeyboardKeys(int player) const {
@@ -141,7 +150,7 @@ void Input::save(Config& cfg) const {
         for (int b = 0; b < kBindable; ++b) {
             const SDL_Scancode k = maps_[p].keys[b];
             cfg.set(prefix + "key." + kIds[b], k == SDL_SCANCODE_UNKNOWN ? "none" : SDL_GetScancodeName(k));
-            if (!isStickDirection(b)) cfg.set(prefix + "pad." + kIds[b], padToString(maps_[p].pad[b]));
+            cfg.set(prefix + "pad." + kIds[b], padToString(maps_[p].pad[b]));
         }
         const Choice& c = choice_[p];
         cfg.set(prefix + "controller", c.kind == Choice::None ? "none" : c.kind == Choice::Pad ? c.guid : "auto");
@@ -372,13 +381,11 @@ uint16_t Input::buttonMask(unsigned port) const {
     if (SDL_GameController* gc = controllerForPort(int(port))) {
         for (int b = 0; b < kButtons; ++b)
             if (padActive(gc, m.pad[b])) mask |= uint16_t(1u << b);
-        if (stickAsDpad_) {
-            const int x = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX);
-            const int y = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY);
-            if (x < -kStickThreshold) mask |= 1u << RETRO_DEVICE_ID_JOYPAD_LEFT;
-            if (x > kStickThreshold) mask |= 1u << RETRO_DEVICE_ID_JOYPAD_RIGHT;
-            if (y < -kStickThreshold) mask |= 1u << RETRO_DEVICE_ID_JOYPAD_UP;
-            if (y > kStickThreshold) mask |= 1u << RETRO_DEVICE_ID_JOYPAD_DOWN;
+        if (stickAsDpad_) {  // whatever drives the left stick also works as the D-pad
+            if (padActive(gc, m.pad[kStickLeft])) mask |= 1u << RETRO_DEVICE_ID_JOYPAD_LEFT;
+            if (padActive(gc, m.pad[kStickRight])) mask |= 1u << RETRO_DEVICE_ID_JOYPAD_RIGHT;
+            if (padActive(gc, m.pad[kStickUp])) mask |= 1u << RETRO_DEVICE_ID_JOYPAD_UP;
+            if (padActive(gc, m.pad[kStickDown])) mask |= 1u << RETRO_DEVICE_ID_JOYPAD_DOWN;
         }
     }
     return mask;
@@ -398,29 +405,44 @@ int16_t Input::state(unsigned port, unsigned device, unsigned index, unsigned id
             return index == RETRO_DEVICE_INDEX_ANALOG_LEFT || index == RETRO_DEVICE_INDEX_ANALOG_RIGHT
                        ? int16_t(keyStick(port, index, id))
                        : int16_t(0);
-        auto clamp = [](int v) { return int16_t(std::max(-32767, std::min(32767, v))); };
-        if (index == RETRO_DEVICE_INDEX_ANALOG_LEFT) {
+        if (index == RETRO_DEVICE_INDEX_ANALOG_LEFT || index == RETRO_DEVICE_INDEX_ANALOG_RIGHT) {
             const int v = keyStick(port, index, id);
             if (v != 0) return int16_t(v);
-            return clamp(SDL_GameControllerGetAxis(gc, id == RETRO_DEVICE_ID_ANALOG_X ? SDL_CONTROLLER_AXIS_LEFTX
-                                                                                      : SDL_CONTROLLER_AXIS_LEFTY));
-        }
-        if (index == RETRO_DEVICE_INDEX_ANALOG_RIGHT) {
-            const int v = keyStick(port, index, id);
-            if (v != 0) return int16_t(v);
-            return clamp(SDL_GameControllerGetAxis(gc, id == RETRO_DEVICE_ID_ANALOG_X ? SDL_CONTROLLER_AXIS_RIGHTX
-                                                                                      : SDL_CONTROLLER_AXIS_RIGHTY));
+            return int16_t(padStick(port, index, id));
         }
         if (index == RETRO_DEVICE_INDEX_ANALOG_BUTTON) {
-            if (id == RETRO_DEVICE_ID_JOYPAD_L2) return clamp(SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERLEFT));
-            if (id == RETRO_DEVICE_ID_JOYPAD_R2) return clamp(SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERRIGHT));
-            return ((buttonMask(port) >> id) & 1) ? 32767 : 0;
+            if (id >= unsigned(kButtons)) return 0;
+            // Analog buttons (L2/R2 triggers): as far as the bound input is pushed.
+            const int v = padAmount(gc, maps_[port].pad[id]);
+            if (v > 0) return int16_t(v);
+            return ((buttonMask(port) >> id) & 1) ? 32767 : 0;  // e.g. a keyboard key
         }
         return 0;
     }
     default:
         return 0;
     }
+}
+
+// How far a controller input is pushed, 0..32767 (buttons: 0 or 32767).
+int Input::padAmount(SDL_GameController* gc, PadBind b) {
+    switch (b.kind) {
+    case PadBind::Button: return SDL_GameControllerGetButton(gc, SDL_GameControllerButton(b.index)) ? 32767 : 0;
+    case PadBind::AxisPos: return std::max(0, int(SDL_GameControllerGetAxis(gc, SDL_GameControllerAxis(b.index))));
+    case PadBind::AxisNeg: return std::min(32767, std::max(0, -int(SDL_GameControllerGetAxis(gc, SDL_GameControllerAxis(b.index)))));
+    default: return 0;
+    }
+}
+
+// A stick axis from the controller inputs bound to its two directions.
+int Input::padStick(unsigned port, unsigned stick, unsigned axis) const {
+    SDL_GameController* gc = controllerForPort(int(port));
+    if (!gc) return 0;
+    const PlayerMap& m = maps_[port];
+    const int base = stick == RETRO_DEVICE_INDEX_ANALOG_RIGHT ? kRStickUp : kStickUp;  // up, down, left, right
+    const int v = axis == RETRO_DEVICE_ID_ANALOG_X ? padAmount(gc, m.pad[base + 3]) - padAmount(gc, m.pad[base + 2])
+                                                   : padAmount(gc, m.pad[base + 1]) - padAmount(gc, m.pad[base]);
+    return std::max(-32767, std::min(32767, v));
 }
 
 // A stick pushed by keyboard keys (full tilt), or 0 if none are held.

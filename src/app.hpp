@@ -95,6 +95,11 @@ private:
     void loadLayout();
     void applyLayout();
     void fitWindowToGame();
+    // "Separate Windows" layout: the second screen gets its own window.
+    bool separateWindows() const;
+    SDL_Rect screenCrop(bool bottom, int frameW, int frameH) const;  // one screen's part of the frame
+    void updateScreenWindow();  // open / close the second window to match the layout
+    void setLayout(int layout, bool swap);
     int16_t pointerState(unsigned id) const;
     void updateInputProfile();
     void connectPorts();
@@ -103,6 +108,7 @@ private:
     Paths paths_;
     Config cfg_;
     Video video_;
+    Video screen2_;  // the second screen's window (Separate Windows layout only)
     Audio audio_;
     Input input_;
     Text text_;

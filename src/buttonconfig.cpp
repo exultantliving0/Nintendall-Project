@@ -65,7 +65,6 @@ void ButtonConfig::handleEvent(const SDL_Event& e, int mx, int my, Input& input)
         for (size_t r = 0; r < rows_.size(); ++r)
             for (int c = 0; c < 2; ++c)
                 if (inside(cells_[r][size_t(c)], mx, my)) {
-                    if (c == 1 && Input::isStickDirection(rows_[r].id)) return;  // always the real stick
                     if (e.button.button == SDL_BUTTON_RIGHT) {  // right-click clears
                         if (c == 0) input.setKey(player_, rows_[r].id, SDL_SCANCODE_UNKNOWN);
                         else input.setPad(player_, rows_[r].id, PadBind{});
@@ -196,18 +195,15 @@ void ButtonConfig::draw(Video& v, Text& t, const Input& input, int W, int H) {
         for (int c = 0; c < 2; ++c) {
             SDL_Rect cell{c == 0 ? col0 : col1, y + 1, colW, rowH - 2};
             cells_[r][size_t(c)] = cell;
-            const bool fixedStick = c == 1 && Input::isStickDirection(b);  // controller uses the real stick
             const bool listening = listenRow_ == int(r) && listenCol_ == c;
-            const bool hover = inside(cell, mouseX_, mouseY_) && !fixedStick;
-            box(v, cell, listening ? kListenBg : (fixedStick ? kDialogBg : kField),
-                listening || hover ? kAccent : kFieldBorder);
+            const bool hover = inside(cell, mouseX_, mouseY_);
+            box(v, cell, listening ? kListenBg : kField, listening || hover ? kAccent : kFieldBorder);
             std::string label = listening ? (c == 0 ? "Press a key..."
                                              : input.controllerForPort(player_) ? "Press a controller button..."
                                                                                 : "Pick a controller above first")
-                              : fixedStick ? Input::stickName(b)
                               : (c == 0 ? Input::keyName(input.key(player_, b)) : Input::padName(input.pad(player_, b)));
             t.draw(cell.x + int(6 * s), cell.y + (cell.h - lh) / 2, label,
-                   listening ? kAccent : (fixedStick ? kDim : kTextC));
+                   listening ? kAccent : kTextC);
         }
         y += rowH;
     }

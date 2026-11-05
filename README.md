@@ -97,7 +97,9 @@ first controller, player 2 the second, and so on, unless you pick a controller
 for a player from the **Controller** drop-down in **Options > Button Config**
 (remembered, and found again when it's plugged back in; "None" makes a player
 keyboard-only). All keys and controller buttons can be changed there too (per
-player); only the player's own controller can set its buttons. Extra
+player), including the analog stick directions: map them to another stick, a
+trigger or a button (by default they're the real sticks). Only the player's own
+controller can set its buttons. Extra
 controller mappings can go in `gamecontrollerdb.txt` next to the program.
 
 Default keyboard (player 1): arrows = D-pad, X / Z = A / B, S / A = X / Y,
@@ -141,20 +143,26 @@ the `config/` folder.
 ### Nintendo DS screens
 
 The **Layout** menu arranges the two DS screens: Vertical (like a real DS),
-Side by Side, Large + Small Screen, Single Screen, and two **Sideways**
-layouts for games played with the DS held like a book (e.g. Ninja Gaiden:
-Dragon Sword). **Swap Screens** switches which screen comes first. The window
-resizes to fit, and the layout is remembered for each game.
+Side by Side, Large + Small Screen, Single Screen, **Separate Windows**, and
+two **Sideways** layouts for games played with the DS held like a book (e.g.
+Ninja Gaiden: Dragon Sword). **Swap Screens** switches which screen comes
+first. The window resizes to fit, and the layout is remembered for each game.
 
-The mouse is the stylus: click and drag on the touch screen, in any layout.
+**Separate Windows** puts the top screen in the main window and the bottom
+screen in a second window next to it (Swap Screens trades them), so each can
+be moved, resized, or put on its own monitor. Closing the second window goes
+back to Vertical.
+
+The mouse is the stylus: click and drag on the touch screen, in any layout
+(and in either window).
 
 ### Nintendo 3DS
 
 3DS games are drawn on the graphics card with OpenGL 4.3 (most PCs from 2013
 on). If a PC can't provide that, Nintendall automatically falls back to the
 much slower software renderer. The Layout menu has Vertical, Side by Side,
-Large + Small Screen, Single Screen and Swap Screens for 3DS (no sideways
-layouts). Controls: the Circle Pad is a controller's left stick or I / J / K / L
+Large + Small Screen, Single Screen, Separate Windows and Swap Screens for 3DS
+(no sideways layouts). Controls: the Circle Pad is a controller's left stick or I / J / K / L
 on the keyboard, the C-Stick is the right stick, ZL / ZR are the triggers (1 / 3),
 and the mouse is the stylus. Games must be decrypted dumps (.3ds / .cci / .cxi / .3dsx).
 

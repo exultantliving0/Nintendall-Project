@@ -60,8 +60,13 @@ const DsLayout kDsLayouts[] = {
     {"Single Screen", "top", "bottom", "single_screen", "Default Screen"},
     {"Sideways (Rotate Left)", "rotate-left", "rotate-left", nullptr, nullptr},
     {"Sideways (Rotate Right)", "rotate-right", "rotate-right", nullptr, nullptr},
+    // The emulator draws Vertical; Nintendall shows each half in its own window (swap = which goes where).
+    {"Separate Windows", "top-bottom", "top-bottom", "default", nullptr},
 };
 constexpr int kSingleScreen = 3;
+constexpr int kSeparate = 6;
+// Order in the Layout menu (-1 = separator). Indexes are saved per game, so new layouts go at the end.
+constexpr int kLayoutMenuOrder[] = {0, 1, 2, 3, kSeparate, -1, 4, 5};
 
 // Systems drawn on the GPU: pick OpenGL, or the core's (slow) software renderer as a fallback.
 bool hasSoftwareFallback(System s) { return s == System::N3DS || s == System::N64; }
@@ -380,7 +385,10 @@ bool App::startGame(const fs::path& path) {
     addRecent(path);
     if (video_.window()) SDL_SetWindowTitle(video_.window(), ("Nintendall - " + gameTitle_).c_str());
     // If the game's shape is very different from the window (e.g. NES -> tall DS), refit the window.
-    {
+    updateScreenWindow();
+    if (separateWindows()) {
+        fitWindowToGame();
+    } else {
         const SDL_Rect a = gameArea();
         const auto& g = av.geometry;
         const double gameAspect = g.aspect_ratio > 0 ? g.aspect_ratio : double(g.base_width) / std::max(1u, g.base_height);
@@ -404,6 +412,7 @@ void App::stopGame() {
     extracted_.clear();
     video_.clearFrame();
     system_ = System::Unknown;
+    updateScreenWindow();  // closes the second window
     updateInputProfile();
     paused_ = false;
     if (video_.window()) SDL_SetWindowTitle(video_.window(), "Nintendall");
@@ -510,6 +519,16 @@ void App::takeScreenshot() {
 
 void App::onVideo(const void* data, unsigned w, unsigned h, size_t pitch, retro_pixel_format fmt) {
     video_.uploadFrame(data, w, h, pitch, fmt);
+    if (separateWindows()) {  // main window: top screen (bottom when swapped); second window: the other
+        video_.setCrop(screenCrop(layoutSwap_, int(w), int(h)));
+        if (screen2_.window()) {
+            screen2_.uploadFrame(data, w, h, pitch, fmt);
+            screen2_.setAspect(video_.aspect());
+            screen2_.setCrop(screenCrop(!layoutSwap_, int(w), int(h)));
+        }
+    } else {
+        video_.setCrop({});
+    }
 }
 
 void App::onAudio(const int16_t* stereo, size_t frames) {
@@ -577,18 +596,24 @@ void App::updateInputProfile() {
 // The mouse acts as the stylus / finger: libretro pointer coordinates run from
 // -0x7fff to 0x7fff across the picture the core sent, wherever we drew it.
 int16_t App::pointerState(unsigned id) const {
-    const SDL_Rect& r = video_.gameRect();
     int wx = 0, wy = 0;
-    const Uint32 buttons = SDL_GetMouseState(&wx, &wy);
-    const float pr = video_.pixelRatio();
-    const int mx = int(wx * pr), my = int(wy * pr);
-    const bool inside = r.w > 0 && r.h > 0 && mx >= r.x && my >= r.y && mx < r.x + r.w && my < r.y + r.h &&
-                        !(menuVisible() && my < menu_.height(text_));
+    const Uint32 buttons = SDL_GetMouseState(&wx, &wy);  // relative to the window the mouse is over
+    SDL_Window* over = SDL_GetMouseFocus();
+    double fx = 0, fy = 0;
+    bool inside = false;
+    if (over && over == screen2_.window()) {
+        const float pr = screen2_.pixelRatio();
+        inside = screen2_.toFrame(int(wx * pr), int(wy * pr), fx, fy);
+    } else if (!over || over == video_.window()) {
+        const float pr = video_.pixelRatio();
+        const int mx = int(wx * pr), my = int(wy * pr);
+        inside = video_.toFrame(mx, my, fx, fy) && !(menuVisible() && my < menu_.height(text_));
+    }
     switch (id) {
     case RETRO_DEVICE_ID_POINTER_X:
-        return inside ? int16_t(std::lround((double(mx - r.x) / r.w * 2.0 - 1.0) * 0x7fff)) : int16_t(-0x8000);
+        return inside ? int16_t(std::lround((fx * 2.0 - 1.0) * 0x7fff)) : int16_t(-0x8000);
     case RETRO_DEVICE_ID_POINTER_Y:
-        return inside ? int16_t(std::lround((double(my - r.y) / r.h * 2.0 - 1.0) * 0x7fff)) : int16_t(-0x8000);
+        return inside ? int16_t(std::lround((fy * 2.0 - 1.0) * 0x7fff)) : int16_t(-0x8000);
     case RETRO_DEVICE_ID_POINTER_PRESSED:
         return inside && (buttons & SDL_BUTTON_LMASK) ? 1 : 0;
     case RETRO_DEVICE_ID_POINTER_COUNT:
@@ -629,7 +654,7 @@ void App::applyLayout() {
         core_->forceOption("cemu_drc_position", !single && layoutSwap_ ? "swapped" : "normal");
     } else {
         core_->forceOption("citra_layout_option", l.ctr);
-        core_->forceOption("citra_swap_screen", layoutSwap_ ? "Bottom" : "Top");
+        core_->forceOption("citra_swap_screen", layoutSwap_ && layout_ != kSeparate ? "Bottom" : "Top");
     }
 }
 
@@ -638,10 +663,21 @@ void App::fitWindowToGame() {
     if (!win || !core_ || video_.isFullscreen() || (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED)) return;
     const auto& g = core_->avInfo().geometry;
     const bool sideways = core_->rotation() % 2 == 1;
-    const double baseH = std::max(1u, sideways ? g.base_width : g.base_height);  // height as shown
-    const double aspect = g.aspect_ratio > 0 ? g.aspect_ratio : (sideways ? double(g.base_height) : double(g.base_width)) / baseH;
+    double baseH = std::max(1u, sideways ? g.base_width : g.base_height);  // height as shown
+    double aspect = g.aspect_ratio > 0 ? g.aspect_ratio : (sideways ? double(g.base_height) : double(g.base_width)) / baseH;
     const float pr = video_.pixelRatio();
     const int bar = menu_.height(text_);
+    // Separate Windows: this window shows one screen, and the other window goes next to it.
+    const bool separate = separateWindows() && !sideways;
+    double aspect2 = 0;
+    if (separate) {
+        const double pixelShape = aspect / (double(g.base_width) / baseH);
+        const SDL_Rect c1 = screenCrop(layoutSwap_, int(g.base_width), int(g.base_height));
+        const SDL_Rect c2 = screenCrop(!layoutSwap_, int(g.base_width), int(g.base_height));
+        aspect = double(c1.w) / std::max(1, c1.h) * pixelShape;
+        aspect2 = double(c2.w) / std::max(1, c2.h) * pixelShape;
+        baseH = std::max(1, c1.h);
+    }
 
     // Largest size (up to 3x) that fits on the screen.
     SDL_Rect usable{0, 0, 1280, 720};
@@ -649,22 +685,97 @@ void App::fitWindowToGame() {
     SDL_GetDisplayUsableBounds(display < 0 ? 0 : display, &usable);
     const double maxH = usable.h * pr - 80 * text_.scale() - bar;
     const double maxW = usable.w * pr - 40 * text_.scale();
-    double scale = std::min({3.0, maxH / baseH, maxW / (baseH * aspect)});
+    double scale = std::min({3.0, maxH / baseH, maxW / (baseH * (aspect + aspect2))});
     // Whole steps from 2x, half steps from 1x, and below 1x (very large pictures) just fit the screen.
     scale = scale >= 2.0 ? std::floor(scale) : scale >= 1.0 ? std::floor(scale * 2) / 2 : scale;
     const int h = int(std::lround(baseH * scale)) + bar;
     const int w = int(std::lround(baseH * scale * aspect));
     SDL_SetWindowSize(win, int(w / pr), int(h / pr));
-    SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED_DISPLAY(display < 0 ? 0 : display),
-                          SDL_WINDOWPOS_CENTERED_DISPLAY(display < 0 ? 0 : display));
+    if (separate && screen2_.window()) {
+        // Same picture size in both windows, side by side and centred together.
+        const int h2 = int((h - bar) / pr), w2 = int(std::lround(h2 * aspect2));
+        const int gap = int(12 * text_.scale() / pr);
+        const int x = usable.x + std::max(0, (usable.w - int(w / pr) - gap - w2) / 2);
+        const int y = usable.y + std::max(0, (usable.h - int(h / pr)) / 2);
+        SDL_SetWindowPosition(win, x, y);
+        SDL_SetWindowSize(screen2_.window(), w2, h2);
+        SDL_SetWindowPosition(screen2_.window(), x + int(w / pr) + gap, y + int(bar / pr));
+        screen2_.onResize();
+    } else {
+        SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED_DISPLAY(display < 0 ? 0 : display),
+                              SDL_WINDOWPOS_CENTERED_DISPLAY(display < 0 ? 0 : display));
+    }
     video_.onResize();
+}
+
+bool App::separateWindows() const { return core_ && hasTwoScreens(system_) && layout_ == kSeparate; }
+
+// Where one screen is in a Vertical-layout frame. Worked out from the width, so it holds at any
+// resolution and with a gap between the screens: DS screens are 4:3; the 3DS top screen is
+// 400x240 and its 320x240 bottom screen is centred under it.
+SDL_Rect App::screenCrop(bool bottom, int fw, int fh) const {
+    if (system_ == System::N3DS) {
+        const int sh = std::min(fh / 2, fw * 3 / 5);
+        return bottom ? SDL_Rect{fw / 10, fh - sh, fw * 4 / 5, sh} : SDL_Rect{0, 0, fw, sh};
+    }
+    const int sh = std::min(fh / 2, fw * 3 / 4);
+    return bottom ? SDL_Rect{0, fh - sh, fw, sh} : SDL_Rect{0, 0, fw, sh};
+}
+
+void App::updateScreenWindow() {
+    const bool want = separateWindows() && video_.window();
+    if (want && !screen2_.window()) {
+        std::string err;
+        // No vsync here: the main window already waits for it.
+        if (!screen2_.init(false, false, 512, 384, err, "Nintendall", false)) {
+            std::fprintf(stderr, "%s\n", err.c_str());
+            osd("Couldn't open the second window");
+            setLayout(0, layoutSwap_);
+            return;
+        }
+        SDL_SetWindowMinimumSize(screen2_.window(), 128, 96);
+        SDL_RaiseWindow(video_.window());  // keep the main window (and its menus) in front
+    } else if (!want && screen2_.window()) {
+        screen2_.shutdown();
+    }
+    if (!want) video_.setCrop({});
+    if (screen2_.window())
+        SDL_SetWindowTitle(screen2_.window(), (std::string(layoutSwap_ ? "Top Screen" : "Bottom Screen") + " - " +
+                                               gameTitle_).c_str());
+}
+
+// Switch the DS / 3DS / Wii U screen layout (remembered per game).
+void App::setLayout(int layout, bool swap) {
+    if (!core_ || !hasTwoScreens(system_) || !layoutAvailable(system_, layout)) return;
+    const bool wasSeparate = separateWindows();
+    layout_ = layout;
+    layoutSwap_ = swap;
+    cfg_.set("layout." + configSafe(gameTitle_), std::to_string(layout_) + (layoutSwap_ ? ",swap" : ""));
+    cfg_.save();
+    applyLayout();
+    updateScreenWindow();
+    pendingFitFrames_ = 30;
+    avChanged_ = false;
+    if (paused_) {  // show the new layout right away
+        core_->run();
+        audio_.clear();
+        if (avChanged_) {
+            fitWindowToGame();
+            pendingFitFrames_ = 0;
+        }
+    }
+    // Separate Windows uses the same emulator picture as Vertical, so its size may not change: fit now.
+    if (wasSeparate || separateWindows()) fitWindowToGame();
 }
 
 bool App::onRumble(unsigned port, retro_rumble_effect effect, uint16_t strength) {
     return input_.rumble(port, effect, strength);
 }
 
-void App::onMessage(const std::string& msg, unsigned durationMs) { osd(msg, std::max(1500u, durationMs)); }
+void App::onMessage(const std::string& msg, unsigned durationMs) {
+    if (msg.empty()) return;  // melonDS sends empty messages every frame; they'd wipe ours
+    osd(msg, std::max(1500u, durationMs));
+}
 
 void App::hwOutputSize(unsigned& w, unsigned& h) const {
     w = h = 0;
@@ -700,6 +811,28 @@ void App::handleEvent(const SDL_Event& e) {
         return;
     }
 
+    // The second screen's window: its mouse is the touch screen (read directly in pointerState),
+    // and closing it goes back to one window.
+    if (const Uint32 id2 = screen2_.windowId()) {
+        Uint32 id = 0;
+        if (e.type == SDL_WINDOWEVENT) id = e.window.windowID;
+        else if (e.type == SDL_MOUSEMOTION) id = e.motion.windowID;
+        else if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) id = e.button.windowID;
+        else if (e.type == SDL_MOUSEWHEEL) id = e.wheel.windowID;
+        if (id == id2) {
+            if (e.type == SDL_WINDOWEVENT) {
+                if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) screen2_.onResize();
+                if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) focusLost_ = true;
+                if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) focusLost_ = false;
+                if (e.window.event == SDL_WINDOWEVENT_CLOSE) {
+                    setLayout(0, layoutSwap_);
+                    osd("Back to one window (Layout menu)");
+                }
+            }
+            return;
+        }
+    }
+
     // Mouse position in renderer pixels.
     const float pr = video_.pixelRatio();
     if (e.type == SDL_MOUSEMOTION) {
@@ -717,6 +850,7 @@ void App::handleEvent(const SDL_Event& e) {
         quit_ = true;
         return;
     case SDL_WINDOWEVENT:
+        if (e.window.event == SDL_WINDOWEVENT_CLOSE && e.window.windowID == video_.windowId()) quit_ = true;
         if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) video_.onResize();
         if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) focusLost_ = true;
         if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) focusLost_ = false;
@@ -815,21 +949,8 @@ void App::doAction(int a) {
     if ((a >= ActLayout && a < ActLayout + kDsLayoutCount) || a == ActLayoutSwap) {
         if (!core_ || !hasTwoScreens(system_)) return;
         if (a != ActLayoutSwap && !layoutAvailable(system_, a - ActLayout)) return;
-        if (a == ActLayoutSwap) layoutSwap_ = !layoutSwap_;
-        else layout_ = a - ActLayout;
-        cfg_.set("layout." + configSafe(gameTitle_), std::to_string(layout_) + (layoutSwap_ ? ",swap" : ""));
-        cfg_.save();
-        applyLayout();
-        pendingFitFrames_ = 30;
-        avChanged_ = false;
-        if (paused_) {  // show the new layout right away
-            core_->run();
-            audio_.clear();
-            if (avChanged_) {
-                fitWindowToGame();
-                pendingFitFrames_ = 0;
-            }
-        }
+        if (a == ActLayoutSwap) setLayout(layout_, !layoutSwap_);
+        else setLayout(a - ActLayout, layoutSwap_);
         return;
     }
     switch (a) {
@@ -1059,13 +1180,16 @@ void App::buildMenus() {
     // Layout: how the two DS / 3DS / Wii U screens are arranged (other systems have one screen).
     const bool twoScreens = game && hasTwoScreens(system_);
     Menu layout{"Layout", {}};
-    for (int i = 0; i < kDsLayoutCount; ++i) {
-        if (i == kFirstSideways) layout.items.push_back({});
+    for (const int i : kLayoutMenuOrder) {
+        if (i < 0) {
+            layout.items.push_back({});
+            continue;
+        }
         const bool ok = twoScreens && layoutAvailable(system_, i);
         layout.items.push_back({kDsLayouts[i].label, "", ActLayout + i, ok, ok && layout_ == i});
     }
     layout.items.push_back({});
-    layout.items.push_back({"Swap Screens", "", ActLayoutSwap, twoScreens && layout_ < kFirstSideways,
+    layout.items.push_back({"Swap Screens", "", ActLayoutSwap, twoScreens && (layout_ < kFirstSideways || layout_ == kSeparate),
                             twoScreens && layoutSwap_});
     menus.push_back(layout);
 
@@ -1119,4 +1243,10 @@ void App::draw() {
     buttonConfig_.draw(video_, text_, input_, W, H);
     if (core_) settings_.draw(video_, text_, *core_, W, H);
     video_.present();
+
+    if (screen2_.window()) {
+        screen2_.clear(kBlack);
+        if (core_ && screen2_.hasFrame()) screen2_.drawGame({0, 0, screen2_.width(), screen2_.height()});
+        screen2_.present();
+    }
 }

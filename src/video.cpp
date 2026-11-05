@@ -5,25 +5,27 @@
 
 #include "png.hpp"
 
-bool Video::init(bool headless, bool fullscreen, int width, int height, std::string& error) {
+bool Video::init(bool headless, bool fullscreen, int width, int height, std::string& error, const char* title,
+                 bool vsync) {
     headless_ = headless;
     if (headless_) return true;
 
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");  // sharp pixels
     Uint32 flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
     if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
-    window_ = SDL_CreateWindow("Nintendall", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
+    window_ = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
     if (!window_) {
         error = std::string("Couldn't create window: ") + SDL_GetError();
         return false;
     }
-    renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    // Only one window may wait for vsync, or each would halve the frame rate.
+    renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_ACCELERATED | (vsync ? SDL_RENDERER_PRESENTVSYNC : 0));
     if (!renderer_) renderer_ = SDL_CreateRenderer(window_, -1, 0);
     if (!renderer_) {
         error = std::string("Couldn't create renderer: ") + SDL_GetError();
         return false;
     }
-    vsync_ = true;
+    vsync_ = vsync;
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     onResize();
     return true;
@@ -36,6 +38,9 @@ void Video::shutdown() {
     frameTex_ = nullptr;
     renderer_ = nullptr;
     window_ = nullptr;
+    texW_ = texH_ = 0;
+    texFormat_ = 0;
+    clearFrame();
 }
 
 void Video::onResize() {
@@ -124,13 +129,18 @@ void Video::drawGame(const SDL_Rect& area) {
     if (!renderer_ || !frameTex_ || frameW_ == 0 || area.w <= 0 || area.h <= 0) return;
     const bool sideways = rotation_ % 2 == 1;
     const double shownW = sideways ? frameH_ : frameW_, shownH = sideways ? frameW_ : frameH_;
-    const double aspect = aspect_ > 0 ? aspect_ : shownW / shownH;
+    double aspect = aspect_ > 0 ? aspect_ : shownW / shownH;
+    SDL_Rect src{0, 0, int(frameW_), int(frameH_)};
+    if (crop_.w > 0 && crop_.h > 0 && rotation_ == 0) {
+        const SDL_Rect full = src;
+        if (!SDL_IntersectRect(&crop_, &full, &src)) return;
+        aspect *= (double(src.w) / src.h) / (shownW / shownH);  // keep the frame's pixel shape
+    }
     int w = area.w, h = int(area.w / aspect);
     if (h > area.h) {
         h = area.h;
         w = int(area.h * aspect);
     }
-    SDL_Rect src{0, 0, int(frameW_), int(frameH_)};
     SDL_Rect box{area.x + (area.w - w) / 2, area.y + (area.h - h) / 2, w, h};
     gameRect_ = box;
     if (rotation_ == 0) {
@@ -141,6 +151,20 @@ void Video::drawGame(const SDL_Rect& area) {
     SDL_Rect dst = box;
     if (sideways) dst = {box.x + (w - h) / 2, box.y + (h - w) / 2, h, w};
     SDL_RenderCopyEx(renderer_, frameTex_, &src, &dst, -90.0 * rotation_, nullptr, SDL_FLIP_NONE);
+}
+
+bool Video::toFrame(int x, int y, double& fx, double& fy) const {
+    const SDL_Rect& r = gameRect_;
+    if (frameW_ == 0 || r.w <= 0 || r.h <= 0 || x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h) return false;
+    const double u = double(x - r.x) / r.w, v = double(y - r.y) / r.h;
+    if (crop_.w > 0 && crop_.h > 0 && rotation_ == 0) {
+        fx = (crop_.x + u * crop_.w) / frameW_;
+        fy = (crop_.y + v * crop_.h) / frameH_;
+    } else {
+        fx = u;
+        fy = v;
+    }
+    return true;
 }
 
 bool Video::saveScreenshot(const std::filesystem::path& path) const {
