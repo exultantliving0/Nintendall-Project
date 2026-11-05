@@ -93,8 +93,11 @@ will warn on first run. Sign it before selling.
 
 Any controller SDL supports works (Xbox, PlayStation, Switch Pro, 8BitDo, most
 USB pads), and you can plug controllers in or out at any time. Player 1 is the
-first controller, player 2 the second, and so on. All keys and controller
-buttons can be changed in **Options > Button Config** (per player). Extra
+first controller, player 2 the second, and so on, unless you pick a controller
+for a player from the **Controller** drop-down in **Options > Button Config**
+(remembered, and found again when it's plugged back in; "None" makes a player
+keyboard-only). All keys and controller buttons can be changed there too (per
+player); only the player's own controller can set its buttons. Extra
 controller mappings can go in `gamecontrollerdb.txt` next to the program.
 
 Default keyboard (player 1): arrows = D-pad, X / Z = A / B, S / A = X / Y,

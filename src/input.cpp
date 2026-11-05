@@ -127,7 +127,12 @@ void Input::load(const Config& cfg) {
             const std::string pd = cfg.get(prefix + "pad." + kIds[b]);
             if (!pd.empty()) maps_[p].pad[b] = padFromString(pd, maps_[p].pad[b]);
         }
+        const std::string c = cfg.get(prefix + "controller");
+        choice_[p] = {};
+        if (c == "none") choice_[p].kind = Choice::None;
+        else if (!c.empty() && c != "auto") choice_[p] = {Choice::Pad, c, -1};
     }
+    reassign();
 }
 
 void Input::save(Config& cfg) const {
@@ -138,6 +143,8 @@ void Input::save(Config& cfg) const {
             cfg.set(prefix + "key." + kIds[b], k == SDL_SCANCODE_UNKNOWN ? "none" : SDL_GetScancodeName(k));
             if (!isStickDirection(b)) cfg.set(prefix + "pad." + kIds[b], padToString(maps_[p].pad[b]));
         }
+        const Choice& c = choice_[p];
+        cfg.set(prefix + "controller", c.kind == Choice::None ? "none" : c.kind == Choice::Pad ? c.guid : "auto");
     }
 }
 
@@ -216,10 +223,16 @@ bool Input::handleDeviceEvent(const SDL_Event& e, std::string* message) {
         Pad p;
         p.gc = gc;
         p.id = id;
+        char guid[33] = {};
+        SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(SDL_GameControllerGetJoystick(gc)), guid, sizeof guid);
+        p.guid = guid;
         pads_.push_back(p);
+        reassign();
         if (message) {
             const char* n = SDL_GameControllerName(gc);
-            *message = std::string(n ? n : "Controller") + " connected (Player " + std::to_string(pads_.size()) + ")";
+            const int player = portForController(id);
+            *message = std::string(n ? n : "Controller") + " connected" +
+                       (player >= 0 ? " (Player " + std::to_string(player + 1) + ")" : std::string());
         }
         return true;
     }
@@ -232,26 +245,104 @@ bool Input::handleDeviceEvent(const SDL_Event& e, std::string* message) {
             }
             SDL_GameControllerClose(it->gc);
             pads_.erase(it);
+            reassign();
         }
         return true;
     }
     return false;
 }
 
+// Players who chose a controller get it first (the exact one if still plugged in, else
+// the first free one of the same model); the others take the remaining controllers in
+// the order they were plugged in.
+void Input::reassign() {
+    std::vector<bool> taken(pads_.size(), false);
+    for (int& s : slot_) s = -1;
+    auto give = [&](int player, size_t i) {
+        slot_[player] = int(i);
+        taken[i] = true;
+        choice_[player].id = pads_[i].id;
+    };
+    for (int p = 0; p < kMaxPlayers; ++p)
+        if (choice_[p].kind == Choice::Pad)
+            for (size_t i = 0; i < pads_.size(); ++i)
+                if (!taken[i] && pads_[i].id == choice_[p].id) {
+                    give(p, i);
+                    break;
+                }
+    for (int p = 0; p < kMaxPlayers; ++p)
+        if (choice_[p].kind == Choice::Pad && slot_[p] < 0)
+            for (size_t i = 0; i < pads_.size(); ++i)
+                if (!taken[i] && pads_[i].guid == choice_[p].guid) {
+                    give(p, i);
+                    break;
+                }
+    size_t next = 0;
+    for (int p = 0; p < kMaxPlayers; ++p) {
+        if (choice_[p].kind != Choice::Auto) continue;
+        while (next < pads_.size() && taken[next]) ++next;
+        if (next < pads_.size()) {
+            slot_[p] = int(next);
+            taken[next] = true;
+        }
+    }
+}
+
+void Input::assignController(int player, SDL_JoystickID id) {
+    if (player < 0 || player >= kMaxPlayers) return;
+    if (id < 0) {
+        choice_[player] = {Choice::None, "", -1};
+        reassign();
+        return;
+    }
+    auto it = std::find_if(pads_.begin(), pads_.end(), [&](const Pad& p) { return p.id == id; });
+    if (it == pads_.end()) return;
+    // Whoever had this controller swaps: they get this player's old one (or none).
+    const Pad* old = padForPort(player);
+    for (int p = 0; p < kMaxPlayers; ++p) {
+        if (p == player || !padForPort(p) || padForPort(p)->id != id) continue;
+        choice_[p] = old ? Choice{Choice::Pad, old->guid, old->id} : Choice{Choice::None, "", -1};
+    }
+    choice_[player] = {Choice::Pad, it->guid, it->id};
+    reassign();
+}
+
+std::vector<Input::ControllerInfo> Input::controllers() const {
+    std::vector<ControllerInfo> out;
+    for (const auto& pad : pads_) {
+        const char* n = SDL_GameControllerName(pad.gc);
+        std::string name = n && *n ? n : "Controller";
+        int same = 1;
+        for (const auto& o : out)
+            if (o.name == name || o.name.rfind(name + " #", 0) == 0) ++same;
+        if (same > 1) name += " #" + std::to_string(same);
+        out.push_back({pad.id, name, portForController(pad.id)});
+    }
+    return out;
+}
+
+const Input::Pad* Input::padForPort(int port) const {
+    if (port < 0 || port >= kMaxPlayers || slot_[port] < 0 || slot_[port] >= int(pads_.size())) return nullptr;
+    return &pads_[size_t(slot_[port])];
+}
+
 SDL_GameController* Input::controllerForPort(int port) const {
-    return port >= 0 && port < int(pads_.size()) ? pads_[size_t(port)].gc : nullptr;
+    const Pad* p = padForPort(port);
+    return p ? p->gc : nullptr;
 }
 
 int Input::portForController(SDL_JoystickID id) const {
-    for (size_t i = 0; i < pads_.size(); ++i)
-        if (pads_[i].id == id) return int(i);
+    for (int p = 0; p < kMaxPlayers; ++p)
+        if (const Pad* pad = padForPort(p); pad && pad->id == id) return p;
     return -1;
 }
 
 std::string Input::controllerName(int port) const {
-    SDL_GameController* gc = controllerForPort(port);
-    const char* n = gc ? SDL_GameControllerName(gc) : nullptr;
-    return n ? n : "";
+    const Pad* pad = padForPort(port);
+    if (!pad) return "";
+    for (const auto& c : controllers())
+        if (c.id == pad->id) return c.name;
+    return "";
 }
 
 // ---------------------------------------------------------------------------
@@ -344,8 +435,8 @@ int Input::keyStick(unsigned port, unsigned stick, unsigned axis) const {
 }
 
 bool Input::rumble(unsigned port, retro_rumble_effect effect, uint16_t strength) {
-    if (port >= pads_.size()) return false;
-    Pad& p = pads_[port];
+    if (port >= kMaxPlayers || slot_[port] < 0 || slot_[port] >= int(pads_.size())) return false;
+    Pad& p = pads_[size_t(slot_[port])];
     (effect == RETRO_RUMBLE_STRONG ? p.rumbleStrong : p.rumbleWeak) = strength;
     return SDL_GameControllerRumble(p.gc, p.rumbleStrong, p.rumbleWeak, (p.rumbleStrong || p.rumbleWeak) ? 5000 : 0) == 0;
 }

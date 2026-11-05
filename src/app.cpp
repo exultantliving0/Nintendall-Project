@@ -543,7 +543,7 @@ int16_t App::onInputState(unsigned port, unsigned device, unsigned index, unsign
 void App::connectPorts() {
     if (!core_) return;
     for (int p = 0; p < Input::kMaxPlayers; ++p) {
-        const bool present = p == 0 || p < input_.controllerCount() || input_.hasKeyboardKeys(p);
+        const bool present = p == 0 || input_.controllerForPort(p) || input_.hasKeyboardKeys(p);
         // Wii U: player 1 is the GamePad; players 2-4 are Pro Controllers (Cemu's device id for one).
         const unsigned pad = system_ == System::WiiU && p > 0 ? RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 2)
                                                               : RETRO_DEVICE_JOYPAD;

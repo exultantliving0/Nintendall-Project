@@ -18,8 +18,9 @@ struct PadBind {
 
 // Turns SDL keyboards + game controllers into libretro "RetroPad" input.
 // Any controller SDL understands works, and controllers can be plugged in or
-// unplugged at any time. Player N uses the Nth connected controller plus its
-// own keyboard keys. Every button can be remapped (Options > Button Config).
+// unplugged at any time. By default player N uses the Nth connected controller
+// plus its own keyboard keys; Button Config can give a player a specific
+// controller (or none). Every button can be remapped (Options > Button Config).
 class Input {
 public:
     static constexpr int kMaxPlayers = 4;
@@ -43,7 +44,20 @@ public:
     void setStickAsDpad(bool on) { stickAsDpad_ = on; }
     void setForcedButtons(uint16_t mask) { forced_ = mask; }  // test hook (--hold)
 
-    int controllerCount() const { return int(pads_.size()); }
+    // Connected controllers, in the order they were plugged in.
+    struct ControllerInfo {
+        SDL_JoystickID id;
+        std::string name;  // "#2" added when two have the same name
+        int player;        // player using it, or -1
+    };
+    std::vector<ControllerInfo> controllers() const;
+    // Give `player` this controller (any player using it gets this player's old one).
+    // id -1 = no controller (keyboard only).
+    void assignController(int player, SDL_JoystickID id);
+    bool keyboardOnly(int player) const { return choice_[player].kind == Choice::None; }
+    // The player chose a controller that isn't plugged in right now.
+    bool waitingForController(int player) const { return choice_[player].kind == Choice::Pad && slot_[player] < 0; }
+
     std::string controllerName(int port) const;
     SDL_GameController* controllerForPort(int port) const;
     int portForController(SDL_JoystickID id) const;
@@ -70,7 +84,15 @@ private:
     struct Pad {
         SDL_GameController* gc = nullptr;
         SDL_JoystickID id = -1;
+        std::string guid;  // same for every controller of one model; remembered between runs
         uint16_t rumbleStrong = 0, rumbleWeak = 0;
+    };
+    // Which controller a player wants: the default (next free one), a chosen one, or none.
+    struct Choice {
+        enum Kind : uint8_t { Auto, Pad, None };
+        Kind kind = Auto;
+        std::string guid;        // chosen model (to find it again after a restart / replug)
+        SDL_JoystickID id = -1;  // the exact chosen controller while it stays plugged in
     };
     struct PlayerMap {
         SDL_Scancode keys[kBindable]{};
@@ -79,8 +101,12 @@ private:
     uint16_t buttonMask(unsigned port) const;
     int keyStick(unsigned port, unsigned stick, unsigned axis) const;
     static bool padActive(SDL_GameController* gc, PadBind b);
+    void reassign();  // work out which controller each player uses
+    const Pad* padForPort(int port) const;
 
     std::vector<Pad> pads_;
+    Choice choice_[kMaxPlayers];
+    int slot_[kMaxPlayers] = {-1, -1, -1, -1};  // index into pads_ per player, -1 = none
     PlayerMap maps_[kMaxPlayers];
     bool keyboardEnabled_ = true;
     bool stickAsDpad_ = true;

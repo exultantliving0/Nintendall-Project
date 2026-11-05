@@ -11,12 +11,13 @@
 
 // Options > Button Config: a small window for remapping keyboard keys and
 // controller buttons for each player. Click a box, then press the new key/button.
+// A drop-down picks which connected controller the player uses.
 // It only lists the buttons (and players) of the system that's running.
 class ButtonConfig {
 public:
     // `rows` = the buttons to list (they depend on the system, and for Wii on the controller type).
     void open(System system, const std::vector<ButtonLabel>& rows);
-    void close() { open_ = false; listenRow_ = -1; }
+    void close() { open_ = false; listenRow_ = -1; dropOpen_ = false; }
     bool isOpen() const { return open_; }
     // True once after the mapping was changed (so the app can save it).
     bool takeChanged() {
@@ -43,4 +44,10 @@ private:
     SDL_Rect tabs_[Input::kMaxPlayers]{};
     std::vector<std::array<SDL_Rect, 2>> cells_;
     SDL_Rect resetBtn_{}, closeBtn_{};
+
+    // Controller drop-down: the connected controllers, then "None (keyboard only)".
+    bool dropOpen_ = false;
+    SDL_Rect dropBox_{};
+    std::vector<SDL_Rect> dropItems_;
+    std::vector<SDL_JoystickID> dropIds_;  // -1 = none
 };
