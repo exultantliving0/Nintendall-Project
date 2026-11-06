@@ -2,10 +2,81 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
+#include <fstream>
 
 #include "uistyle.hpp"
 
 using namespace ui;
+
+namespace {
+
+// Cemu's option key for a graphic pack setting (CemuLibretro.cpp, libretro_pack_option_key): FNV-1a of
+// the pack's folder (relative to graphicPacks or customGraphicPacks) and the preset group.
+std::string packOptionKey(const std::string& folder, const std::string& category, bool custom) {
+    uint64_t hash = 0xcbf29ce484222325ULL;
+    for (const char c : std::string(custom ? "custom\x1f" : "") + folder + '\x1f' + category) {
+        hash ^= uint8_t(c);
+        hash *= 0x100000001b3ULL;
+    }
+    char key[32];
+    std::snprintf(key, sizeof key, "cemu_zgp_%016llx", static_cast<unsigned long long>(hash));
+    return key;
+}
+
+// The pack's place in Cemu's graphic pack list ("<game>/Graphics/Resolution"), from its rules.txt.
+std::string packListPath(const std::filesystem::path& rules) {
+    std::ifstream f(rules);
+    bool definition = false;
+    for (std::string line; std::getline(f, line);) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.empty() && line[0] == '[') {
+            if (definition) break;
+            definition = line.rfind("[Definition]", 0) == 0;
+            continue;
+        }
+        if (!definition || line.rfind("path", 0) != 0) continue;
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string v = line.substr(eq + 1);
+        while (!v.empty() && (v.front() == ' ' || v.front() == '"')) v.erase(v.begin());
+        while (!v.empty() && (v.back() == ' ' || v.back() == '"')) v.pop_back();
+        return v;
+    }
+    return {};
+}
+
+}  // namespace
+
+// The loaded Wii U game's Resolution pack: the one listed as "<game>/Graphics/Resolution" (not
+// "Performance Resolution", which some games also have under the name "Resolution"). Cemu declares
+// options only for the loaded game's packs, so the one whose keys exist is the game's. A copy in
+// customGraphicPacks replaces the bundled one, as in Cemu.
+void SettingsDialog::findResolutionPack(std::map<std::string, CoreOption>& options, std::string& enableKey,
+                                        std::string& presetKey) const {
+    namespace fs = std::filesystem;
+    for (const bool custom : {true, false}) {
+        const fs::path& root = custom ? customPacks_ : bundledPacks_;
+        std::error_code ec;
+        if (root.empty() || !fs::is_directory(root, ec)) continue;
+        for (fs::recursive_directory_iterator it(root, ec), end; it != end; it.increment(ec)) {
+            if (ec) break;
+            if (it.depth() > 3) it.disable_recursion_pending();
+            if (it->path().filename() != "rules.txt") continue;
+            const std::string list = packListPath(it->path());
+            const size_t slash = list.rfind('/');
+            if (slash == std::string::npos || list.compare(slash + 1, std::string::npos, "Resolution") != 0) continue;
+            const std::string folder = it->path().parent_path().lexically_relative(root).generic_string();
+            const std::string e = packOptionKey(folder, std::string("\x1e") + "enabled", custom);
+            const std::string p = packOptionKey(folder, "", custom);
+            if (options.count(e) && options.count(p)) {
+                enableKey = e;
+                presetKey = p;
+                return;
+            }
+        }
+    }
+}
 
 void SettingsDialog::open(System system, LibretroCore& core) {
     system_ = system;
@@ -16,17 +87,10 @@ void SettingsDialog::open(System system, LibretroCore& core) {
     std::vector<SettingGroup> groups = consoleSettings(system);
     if (system == System::WiiU && !groups.empty()) {
         // Upscaling the way standalone Cemu does it: the game's own Resolution graphic pack, made for
-        // that game (Cemu's generic resize broke shadows). Cemu declares each pack of the loaded game
-        // as options named after the pack: "Resolution" (on/off) and "Resolution: <group>" (preset).
+        // that game (Cemu's generic resize broke shadows).
         std::string enableKey, presetKey;
-        for (const auto& [key, o] : options) {
-            if (key.rfind("cemu_zgp_", 0) != 0) continue;
-            if (o.description == "Resolution") enableKey = key;
-            else if (o.description.rfind("Resolution: ", 0) == 0 &&
-                     (presetKey.empty() || o.description == "Resolution: Preset"))
-                presetKey = key;
-        }
-        if (!enableKey.empty() && !presetKey.empty()) {
+        findResolutionPack(options, enableKey, presetKey);
+        if (!enableKey.empty()) {
             Setting res;
             res.label = "Resolution";
             res.keys = {enableKey, presetKey};
@@ -34,7 +98,8 @@ void SettingsDialog::open(System system, LibretroCore& core) {
             res.hint = "This game's own resolution pack: sharper, with shadows and effects kept right";
             res.choices.push_back({"Off (native)", {{enableKey, "disabled"}}});
             for (const std::string& preset : options[presetKey].values)
-                res.choices.push_back({preset, {{enableKey, "enabled"}, {presetKey, preset}}});
+                if (preset.rfind("--", 0) != 0)  // "-- 21:9 -- resolutions" are headings, not sizes
+                    res.choices.push_back({preset, {{enableKey, "enabled"}, {presetKey, preset}}});
             auto& picture = groups[0].settings;
             picture.insert(picture.begin() + std::min<size_t>(1, picture.size()), res);
         }

@@ -10,7 +10,7 @@ Unicode true
 
 !define APPNAME "Nintendall"
 !ifndef VERSION
-  !define VERSION "0.13.2"
+  !define VERSION "0.13.3"
 !endif
 !ifndef SRCDIR
   !error "Pass -DSRCDIR=<folder with nintendall.exe, SDL2.dll and cores\>"

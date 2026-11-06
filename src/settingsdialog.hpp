@@ -1,6 +1,7 @@
 #pragma once
 #include <SDL.h>
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,12 @@
 class SettingsDialog {
 public:
     void open(System system, LibretroCore& core);
+    // Wii U: Cemu's graphic pack folders (system/Cemu/graphicPacks and customGraphicPacks), to
+    // find the loaded game's Resolution pack.
+    void setWiiUPackFolders(const std::filesystem::path& bundled, const std::filesystem::path& custom) {
+        bundledPacks_ = bundled;
+        customPacks_ = custom;
+    }
     void close() { open_ = false; }
     bool isOpen() const { return open_; }
     // True once after the player clicked "Restart Game".
@@ -42,9 +49,12 @@ private:
         SDL_Rect valueBox{}, prevBox{}, nextBox{};
     };
     int currentChoice(const Row& r, LibretroCore& core) const;
+    void findResolutionPack(std::map<std::string, CoreOption>& options, std::string& enableKey,
+                            std::string& presetKey) const;
     void apply(Row& r, int choice, LibretroCore& core);
 
     System system_ = System::Unknown;
+    std::filesystem::path bundledPacks_, customPacks_;
     std::vector<Row> rows_;
     bool open_ = false;
     bool pendingRestart_ = false;

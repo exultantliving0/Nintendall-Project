@@ -226,6 +226,8 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         const fs::path coversRoot = covers.empty() ? gamesRoot.parent_path() / "Box Covers" : fs::u8path(covers);
         home_.start(gamesRoot, coversRoot, paths_.data / "covers", cfg_.get("home.console"));
         home_.setCoverSize(std::atoi(cfg_.get("home.cover_size").c_str()));
+        settings_.setWiiUPackFolders(paths_.systemDirFor("cemu") / "Cemu" / "graphicPacks",
+                                     paths_.systemDirFor("cemu") / "Cemu" / "customGraphicPacks");
         // After Update Now: say whether the new version is running, and tidy the temp folder.
         removeOldUpdateFiles();
         const std::string updated = cfg_.get("update.installing");
