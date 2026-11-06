@@ -80,18 +80,27 @@ const DsLayout kDsLayouts[] = {
     {"Sideways (Rotate Left)", "rotate-left", "rotate-left", nullptr, nullptr},
     {"Sideways (Rotate Right)", "rotate-right", "rotate-right", nullptr, nullptr},
     // The emulator draws Vertical; Nintendall shows each half in its own window (swap = which goes where).
-    {"Separate Windows", "top-bottom", "top-bottom", "default", nullptr},
+    {"Separate Windows", "top-bottom", "top-bottom", "default", "Top Bottom"},
 };
 constexpr int kSingleScreen = 3;
 constexpr int kSeparate = 6;
 // Order in the Layout menu (-1 = separator). Indexes are saved per game, so new layouts go at the end.
 constexpr int kLayoutMenuOrder[] = {0, 1, 2, 3, kSeparate, -1, 4, 5};
 
-// Systems drawn on the GPU: pick OpenGL, or the core's (slow) software renderer as a fallback.
+// Systems drawn on the GPU: OpenGL, Vulkan (GameCube / Wii, 3DS, Wii U, if chosen in Console
+// Settings), or the core's (slow) software renderer as a last resort.
+enum class Renderer { OpenGL, Vulkan, Software };
 bool hasSoftwareFallback(System s) { return s == System::N3DS || s == System::N64; }
-void chooseRenderer(LibretroCore& core, System s, bool software) {
-    if (s == System::N3DS) core.forceOption("citra_graphics_api", software ? "Software" : "OpenGL");
-    if (s == System::WiiU) core.forceOption("cemu_gpu_api", "OpenGL");  // we provide OpenGL, not Vulkan
+void chooseRenderer(LibretroCore& core, System s, Renderer r) {
+    const bool vulkan = r == Renderer::Vulkan, software = r == Renderer::Software;
+    core.setPreferVulkan(vulkan);  // Dolphin follows what we prefer
+    if (s == System::N3DS) core.forceOptionValue("citra_graphics_api", software ? "Software" : vulkan ? "Vulkan" : "OpenGL");
+    if (s == System::WiiU) {
+        core.forceOptionValue("cemu_gpu_api", vulkan ? "Vulkan" : "OpenGL");
+        // Always the Wii U's own 720p: resizing breaks shadows and effects in games such as
+        // Twilight Princess HD.
+        core.forceOption("cemu_internal_resolution", "native");
+    }
     if (s == System::N64) {
         core.forceOption("mupen64plus-rdp-plugin", software ? "angrylion" : "gliden64");
         core.forceOption("mupen64plus-rsp-plugin", software ? "cxd4" : "hle");
@@ -270,6 +279,13 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
             osd(realWiimotes() ? "Game restarted - press a button on each Wii Remote to connect it"
                                : "Game restarted with the new settings",
                 realWiimotes() ? 6000 : 2500);
+        } else if (settings_.takeClearCacheRequest() && core_) {
+            // The running game has the cache open: close it, clear, start it again.
+            const fs::path game = gamePath_;
+            stopGame();
+            clearWiiUShaderCache();
+            startGame(game);
+            osd("Shader cache cleared - the game rebuilds its shaders as you play", 6000);
         } else if (settingsWasOpen_ && !settings_.isOpen() && settings_.restartPending()) {
             osd("Some settings apply the next time the game starts", 4000);
         }
@@ -419,9 +435,12 @@ bool App::startGame(const fs::path& path) {
 
     if (det.system == System::Wii) enableWiimoteSpeaker(paths_.saves / "User" / "Config" / "Dolphin.ini");
 
-    // 4. Start the emulator with the game.
+    // 4. Start the emulator with the game. GPU systems try the chosen renderer first, then fall
+    //    back: Vulkan -> OpenGL -> software (3DS / N64), if this PC can't do the first.
     std::string err;
-    for (int attempt = 0; attempt < 2; ++attempt) {
+    std::vector<Renderer> renderers;
+    std::string startNote;
+    for (size_t attempt = 0; attempt == 0 || attempt < renderers.size(); ++attempt) {
         core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(sys.core), paths_.saves,
                                                paths_.config / (std::string(sys.core) + ".opt"));
         const bool coreLoaded = core_->load(corePath, err);
@@ -433,7 +452,27 @@ bool App::startGame(const fs::path& path) {
                 core_->forceOption("melonds_show_current_layout", "disabled");  // we have our own menu
             applyLayout();
         }
-        if (coreLoaded) chooseRenderer(*core_, det.system, attempt > 0);
+        if (coreLoaded && attempt == 0) {
+            if (canUseVulkan(det.system))
+                core_->addAppOption(kGraphicsApiOption, "Graphics API", "vulkan", {"vulkan", "opengl"}, {"Vulkan", "OpenGL"});
+            if (canUseVulkan(det.system) && core_->optionValue(kGraphicsApiOption) == "vulkan")
+                renderers.push_back(Renderer::Vulkan);
+            renderers.push_back(Renderer::OpenGL);
+            if (hasSoftwareFallback(det.system)) renderers.push_back(Renderer::Software);
+        }
+        if (coreLoaded && canUseVulkan(det.system) && attempt > 0)  // keep the user's choice in the file
+            core_->addAppOption(kGraphicsApiOption, "Graphics API", "vulkan", {"vulkan", "opengl"}, {"Vulkan", "OpenGL"});
+        if (coreLoaded) chooseRenderer(*core_, det.system, renderers[attempt]);
+        if (coreLoaded && attempt == 0 && det.system == System::WiiU) {
+            // A different Cemu than the one that built the shader cache (an update): start it afresh.
+            std::error_code sec;
+            const std::string build = core_->version() + "/" + std::to_string(fs::file_size(corePath, sec));
+            if (cfg_.get("wiiu.shader_cache_build") != build) {
+                clearWiiUShaderCache();
+                cfg_.set("wiiu.shader_cache_build", build);
+                saveConfig();
+            }
+        }
         if (coreLoaded && (det.system == System::GameCube || det.system == System::Wii)) {
             core_->forceOption("dolphin_osd_enabled", "disabled");  // no emulator info text over the game
             // Dolphin's dual-core mode keeps the game running between our frames, so games ran too fast
@@ -445,15 +484,20 @@ bool App::startGame(const fs::path& path) {
             core_->preferDefault("dolphin_wiimote_default_device", "nunchuk");  // what most Wii games expect
             core_->preferDefault("dolphin_ir_offset", "10");  // pointer lines up with the mouse / stick
         }
-        if (coreLoaded && core_->loadGame(gameFile, err)) break;
+        if (coreLoaded && core_->loadGame(gameFile, err)) {
+            if (attempt > 0 && renderers[0] == Renderer::Vulkan)
+                startNote = renderers[attempt] == Renderer::OpenGL ? "Vulkan couldn't start on this PC - using OpenGL"
+                                                                   : "Vulkan couldn't start on this PC";
+            break;
+        }
 
-        // If this PC couldn't give the emulator OpenGL, try once more with software rendering.
-        const bool retry = attempt == 0 && hasSoftwareFallback(det.system) && core_->wantsHardwareRendering() &&
+        // If this PC couldn't give the emulator its GPU renderer, try the next one.
+        const bool retry = coreLoaded && attempt + 1 < renderers.size() && core_->wantsHardwareRendering() &&
                            !core_->usingHardwareRendering();
         std::fprintf(stderr, "Core failed: %s\n", err.c_str());
         core_.reset();
         if (!retry) break;
-        std::fprintf(stderr, "Retrying with software rendering\n");
+        std::fprintf(stderr, "Retrying with %s\n", renderers[attempt + 1] == Renderer::OpenGL ? "OpenGL" : "software rendering");
     }
     if (!core_) {
         system_ = System::Unknown;
@@ -488,6 +532,7 @@ bool App::startGame(const fs::path& path) {
     paused_ = fastForward_ = fastForwardToggled_ = false;
     playedSinceLaunch_ = true;  // no "new version" popup from now on
     nextFrame_ = nowSeconds();
+    if (!startNote.empty()) osd(startNote, 6000);
     addRecent(path);
     if (video_.window()) SDL_SetWindowTitle(video_.window(), ("Nintendall - " + gameTitle_).c_str());
     // If the game's shape is very different from the window (e.g. NES -> tall DS), refit the window.
@@ -630,11 +675,14 @@ void App::takeScreenshot() {
 void App::onVideo(const void* data, unsigned w, unsigned h, size_t pitch, retro_pixel_format fmt) {
     video_.uploadFrame(data, w, h, pitch, fmt);
     if (separateWindows()) {  // main window: top screen (bottom when swapped); second window: the other
-        video_.setCrop(screenCrop(layoutSwap_, int(w), int(h)));
+        // Wii U: Cemu squeezes both 16:9 screens into one 16:9 picture; each window shows its
+        // screen at 16:9 again.
+        const double shape = system_ == System::WiiU ? 16.0 / 9.0 : 0.0;
+        video_.setCrop(screenCrop(layoutSwap_, int(w), int(h)), shape);
         if (screen2_.window()) {
             screen2_.uploadFrame(data, w, h, pitch, fmt);
             screen2_.setAspect(video_.aspect());
-            screen2_.setCrop(screenCrop(!layoutSwap_, int(w), int(h)));
+            screen2_.setCrop(screenCrop(!layoutSwap_, int(w), int(h)), shape);
         }
     } else {
         video_.setCrop({});
@@ -770,7 +818,8 @@ void App::applyLayout() {
         core_->forceOption("cemu_next_screen_layout_button", "Disabled");
         const bool single = layout_ == kSingleScreen;
         core_->forceOption("cemu_screen_layout1", single && layoutSwap_ ? "GamePad Screen" : l.wiiu);
-        core_->forceOption("cemu_drc_position", !single && layoutSwap_ ? "swapped" : "normal");
+        // Separate Windows: the TV stays on top; which window gets which screen is ours to swap.
+        core_->forceOption("cemu_drc_position", !single && layoutSwap_ && layout_ != kSeparate ? "swapped" : "normal");
     } else {
         core_->forceOption("citra_layout_option", l.ctr);
         core_->forceOption("citra_swap_screen", layoutSwap_ && layout_ != kSeparate ? "Bottom" : "Top");
@@ -796,6 +845,10 @@ void App::fitWindowToGame() {
         aspect = double(c1.w) / std::max(1, c1.h) * pixelShape;
         aspect2 = double(c2.w) / std::max(1, c2.h) * pixelShape;
         baseH = std::max(1, c1.h);
+        if (system_ == System::WiiU) {  // both screens are shown at 16:9, at the TV's size
+            aspect = aspect2 = 16.0 / 9.0;
+            baseH = std::max(1u, g.base_height);
+        }
     }
 
     // Largest size (up to 3x) that fits on the screen.
@@ -837,6 +890,10 @@ SDL_Rect App::screenCrop(bool bottom, int fw, int fh) const {
         const int sh = std::min(fh / 2, fw * 3 / 5);
         return bottom ? SDL_Rect{fw / 10, fh - sh, fw * 4 / 5, sh} : SDL_Rect{0, 0, fw, sh};
     }
+    if (system_ == System::WiiU) {  // Cemu's Top Bottom: TV in the top 70%, GamePad in the bottom 30%
+        const int split = fh * 70 / 100;
+        return bottom ? SDL_Rect{0, split, fw, fh - split} : SDL_Rect{0, 0, fw, split};
+    }
     const int sh = std::min(fh / 2, fw * 3 / 4);
     return bottom ? SDL_Rect{0, fh - sh, fw, sh} : SDL_Rect{0, 0, fw, sh};
 }
@@ -859,7 +916,9 @@ void App::updateScreenWindow() {
     }
     if (!want) video_.setCrop({});
     if (screen2_.window())
-        SDL_SetWindowTitle(screen2_.window(), (std::string(layoutSwap_ ? "Top Screen" : "Bottom Screen") + " - " +
+        SDL_SetWindowTitle(screen2_.window(), (std::string(system_ == System::WiiU ? (layoutSwap_ ? "TV" : "GamePad")
+                                                                           : (layoutSwap_ ? "Top Screen" : "Bottom Screen")) +
+                                                   " - " +
                                                gameTitle_).c_str());
 }
 
@@ -903,6 +962,9 @@ void App::hwOutputSize(unsigned& w, unsigned& h) const {
     const bool sideways = core_->rotation() % 2 == 1;  // the picture is turned after copying
     w = unsigned(sideways ? r.h : r.w);
     h = unsigned(sideways ? r.w : r.h);
+    // Separate Windows: each window shows only part of the frame, so copy it whole (shrinking it
+    // to one window's size would leave each screen with a fraction of its pixels).
+    if (separateWindows()) w = h = 0;
 }
 
 void App::onAvInfoChanged() {
@@ -1409,6 +1471,17 @@ void App::draw() {
         if (core_ && screen2_.hasFrame()) screen2_.drawGame({0, 0, screen2_.width(), screen2_.height()});
         screen2_.present();
     }
+}
+
+// ============================================================================
+// Wii U shader cache
+
+fs::path App::wiiUShaderCache() const { return paths_.systemDirFor("cemu") / "Cemu" / "shaderCache"; }
+
+void App::clearWiiUShaderCache() {
+    std::error_code ec;
+    fs::remove_all(wiiUShaderCache(), ec);
+    if (ec) std::fprintf(stderr, "Couldn't clear the Wii U shader cache: %s\n", ec.message().c_str());
 }
 
 // ============================================================================

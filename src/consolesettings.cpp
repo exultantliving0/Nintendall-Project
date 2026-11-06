@@ -29,6 +29,11 @@ Setting raw(const std::string& label, const std::string& key, bool restart = fal
 }
 
 const Choices kOnOff = {{"disabled", "Off"}, {"enabled", "On"}};
+
+Setting graphicsApi() {
+    return opt("Graphics API", kGraphicsApiOption, {{"vulkan", "Vulkan"}, {"opengl", "OpenGL"}}, true,
+               "Vulkan draws Wii U games best on most PCs; if it can't start, OpenGL is used");
+}
 const Choices kOffOnCaps = {{"OFF", "Off"}, {"ON", "On"}};
 const Choices kFalseTrue = {{"False", "Off"}, {"True", "On"}};
 
@@ -285,10 +290,7 @@ std::vector<SettingGroup> dolphin(bool wii) {
 std::vector<SettingGroup> wiiU() {
     return {
         {"Picture",
-         {opt("Resolution", "cemu_internal_resolution",
-              {{"0.5x", "0.5x (faster)"}, {"native", "Native (720p)"}, {"1.5x", "1.5x (1080p)"},
-               {"2x", "2x (1440p)"}, {"3x", "3x (4K)"}},
-              true, "Some games draw parts at a fixed size and can look odd when resized"),
+         {graphicsApi(),
           opt("Smoother Frame Rate", "cemu_render_ahead", kOnOff, false,
               "Draws the next frame early; smoother in heavy games, one frame more input lag"),
           opt("Accurate Shader Math", "cemu_accurate_shader_mul",
@@ -315,6 +317,8 @@ std::vector<SettingGroup> wiiU() {
 }
 
 }  // namespace
+
+bool canUseVulkan(System s) { return s == System::WiiU; }
 
 const std::vector<SettingGroup>& consoleSettings(System s) {
     static const std::vector<SettingGroup> none;

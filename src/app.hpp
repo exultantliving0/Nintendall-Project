@@ -125,6 +125,11 @@ private:
     void updateInputProfile();
     void connectPorts();
     bool realWiimotes() const;  // Wii game set to use real Wii Remotes
+    // Wii U: Cemu's shader cache (system/Cemu/shaderCache). Shaders compiled by another build of
+    // Cemu can draw parts of games black, so it's cleared when the built-in Cemu changes, and on
+    // request (Console Settings > Clear Shader Cache).
+    std::filesystem::path wiiUShaderCache() const;
+    void clearWiiUShaderCache();
     bool sdlWiiDriverOff_ = false;
 
     // Subsystems

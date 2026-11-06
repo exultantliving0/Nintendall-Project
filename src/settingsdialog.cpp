@@ -100,6 +100,11 @@ void SettingsDialog::handleEvent(const SDL_Event& e, int mx, int my, LibretroCor
             close();
             return;
         }
+        if (system_ == System::WiiU && inside(cacheBtn_, mx, my)) {
+            clearCacheRequested_ = true;
+            close();
+            return;
+        }
         if (inside(restartBtn_, mx, my) && pendingRestart_) {
             restartRequested_ = true;
             pendingRestart_ = false;
@@ -230,6 +235,9 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
         t.draw(rect.x + (rect.w - t.width(label)) / 2, fy + (bh - lh) / 2, label, enabled ? kTextC : kDisabledText);
     };
     button(resetBtn_, dialog_.x + pad, "Reset to Defaults", true);
+    // Wii U: Cemu's compiled shaders can go stale (parts of games drawn black); this rebuilds them.
+    cacheBtn_ = {};
+    if (system_ == System::WiiU) button(cacheBtn_, resetBtn_.x + resetBtn_.w + int(8 * s), "Clear Shader Cache", true);
     const int closeW = std::max(int(80 * s), t.width("Close") + int(28 * s));
     button(closeBtn_, dialog_.x + dw - pad - closeW, "Close", true);
     const int restartW = std::max(int(80 * s), t.width("Restart Game") + int(28 * s));

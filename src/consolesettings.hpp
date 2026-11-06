@@ -28,5 +28,11 @@ struct SettingGroup {
 
 const std::vector<SettingGroup>& consoleSettings(System s);
 
+// Nintendall's own option (kept in the core's options file): draw with "vulkan" or "opengl".
+// Offered for Wii U, where Vulkan is the default (Cemu on some drivers, e.g. Intel's, draws parts
+// of games black with OpenGL).
+inline constexpr const char* kGraphicsApiOption = "nintendall_graphics_api";
+bool canUseVulkan(System s);
+
 // Friendly label for a raw core option value ("enabled" -> "On", ...).
 std::string prettyValue(const std::string& value);

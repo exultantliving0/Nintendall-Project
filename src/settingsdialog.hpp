@@ -23,6 +23,12 @@ public:
         return r;
     }
     bool restartPending() const { return pendingRestart_; }
+    // True once after the player clicked "Clear Shader Cache" (Wii U).
+    bool takeClearCacheRequest() {
+        const bool r = clearCacheRequested_;
+        clearCacheRequested_ = false;
+        return r;
+    }
 
     // Modal: uses every event while open. Mouse coordinates in renderer pixels.
     void handleEvent(const SDL_Event& e, int mouseX, int mouseY, LibretroCore& core);
@@ -43,7 +49,8 @@ private:
     bool open_ = false;
     bool pendingRestart_ = false;
     bool restartRequested_ = false;
+    bool clearCacheRequested_ = false;
     int scroll_ = 0, maxScroll_ = 0, rowH_ = 1;
     int mouseX_ = 0, mouseY_ = 0;
-    SDL_Rect dialog_{}, list_{}, resetBtn_{}, restartBtn_{}, closeBtn_{};
+    SDL_Rect dialog_{}, list_{}, resetBtn_{}, restartBtn_{}, closeBtn_{}, cacheBtn_{};
 };

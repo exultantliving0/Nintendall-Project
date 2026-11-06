@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nintendall VERSION 0.12.7 LANGUAGES CXX)
+project(Nintendall VERSION 0.13.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -46,11 +46,12 @@ add_executable(nintendall
   src/text.cpp
   src/update.cpp
   src/video.cpp
+  src/vkrender.cpp
   src/wiimotepair.cpp
   src/zip.cpp
 )
 
-target_include_directories(nintendall PRIVATE src third_party/libretro third_party/stb)
+target_include_directories(nintendall PRIVATE src third_party/libretro third_party/stb third_party/vulkan)
 target_compile_definitions(nintendall PRIVATE NINTENDALL_VERSION="${PROJECT_VERSION}")
 
 if(TARGET SDL2::SDL2main)

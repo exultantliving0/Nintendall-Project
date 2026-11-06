@@ -29,8 +29,12 @@ public:
     unsigned rotation() const { return rotation_; }
     void clearFrame();
     bool hasFrame() const { return frameW_ > 0; }
-    // Show only this part of the frame (in frame pixels); empty = all of it.
-    void setCrop(const SDL_Rect& r) { crop_ = r; }
+    // Show only this part of the frame (in frame pixels); empty = all of it. shownAspect: show it
+    // at this shape instead of its own (for a screen the emulator squeezed into the frame).
+    void setCrop(const SDL_Rect& r, double shownAspect = 0) {
+        crop_ = r;
+        cropAspect_ = shownAspect;
+    }
     void drawGame(const SDL_Rect& area);  // letterboxed into `area`
     const SDL_Rect& gameRect() const { return gameRect_; }  // where the game was last drawn
     // A point in this window (renderer pixels) as a position across the whole frame, 0..1.
@@ -78,5 +82,6 @@ private:
     double aspect_ = 4.0 / 3.0;
     SDL_Rect gameRect_{0, 0, 0, 0};
     SDL_Rect crop_{0, 0, 0, 0};
+    double cropAspect_ = 0;  // shape to show the cropped part at (0 = the frame's own pixel shape)
     unsigned rotation_ = 0;
 };

@@ -180,6 +180,8 @@ the game that's running, with friendly names. Settings marked * apply after
 | System | Settings |
 |---|---|
 | N64 | Resolution upscaling (to 4K), widescreen hack, MSAA / FXAA, texture filters and HD texture enhancement (xBRZ, HQ4x), Expansion Pak, Rumble / Controller Pak, stick sensitivity |
+| GameCube / Wii | Resolution upscaling (to 8x), widescreen hack, aspect ratio, anti-aliasing, texture filtering, CPU speed, language, rumble |
+| Wii U | Graphics API (Vulkan / OpenGL), smoother frame rate, accurate shader math, Clear Shader Cache, and more. Games always draw at the Wii U's own 720p (resizing breaks shadows and effects in some games) |
 | 3DS | Resolution upscaling (to 10x), texture filters (Anime4K, ScaleForce, xBRZ), stereoscopic 3D, New / Old 3DS, region, language, CPU speed |
 | DS | OpenGL renderer with 3D upscaling (to 8x), gap between screens, stylus cursor, sound smoothing |
 | SNES | HD Mode 7, run-ahead (less input lag), CPU and Super FX overclock, TV filters, no sprite limit |
@@ -201,7 +203,8 @@ first. The window resizes to fit, and the layout is remembered for each game.
 **Separate Windows** puts the top screen in the main window and the bottom
 screen in a second window next to it (Swap Screens trades them), so each can
 be moved, resized, or put on its own monitor. Closing the second window goes
-back to Vertical.
+back to Vertical. Wii U has it too: the TV picture in the main window and the
+GamePad in the second one, each at 16:9.
 
 The mouse is the stylus: click and drag on the touch screen, in any layout
 (and in either window).
@@ -287,6 +290,14 @@ their own OpenGL context on a hidden window and render into an offscreen
 framebuffer. Nintendall copies each finished frame into the normal window, so
 the window itself can use any renderer (Direct3D on Windows). See `src/hwrender.*`.
 
+**Vulkan:** Wii U games draw with Vulkan by default (Cemu with OpenGL draws parts
+of some games black on some drivers, e.g. Intel's); **Graphics API** in the Wii U
+Console Settings switches to OpenGL. The other consoles use OpenGL. Nintendall creates the Vulkan device through libretro's
+negotiation interface (the core asks for what it needs), gives the core a hidden
+window's surface, and copies each frame it hands over (`set_image`) into the
+window, shrunk on the GPU like the OpenGL path. If Vulkan can't start on a PC,
+the game starts with OpenGL and says so. See `src/vkrender.*`.
+
 ## New versions
 
 When Nintendall starts, it asks GitHub (in the background) whether a newer
@@ -332,6 +343,7 @@ Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen).
 | `src/systems.*` | the list of systems, extensions and the emulator for each |
 | `src/core.*` | loads a libretro core and implements the libretro API |
 | `src/hwrender.*` | OpenGL context + framebuffer for GPU-drawn cores (N64, GameCube/Wii, 3DS, Wii U) |
+| `src/vkrender.*` | Vulkan device and frame copy for Wii U |
 | `src/app.*` | main window, menu actions, game loop, saves |
 | `src/home.*`, `src/library.*`, `src/covers.*`, `src/http.*` | home screen, Games folder scanning (and game IDs), box cover downloads |
 | `src/update.*`, `src/selfupdate.*`, `src/sha256.*` | checks GitHub for a new version at startup; Update Now (download, check, install, restart) |

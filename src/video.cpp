@@ -134,7 +134,8 @@ void Video::drawGame(const SDL_Rect& area) {
     if (crop_.w > 0 && crop_.h > 0 && rotation_ == 0) {
         const SDL_Rect full = src;
         if (!SDL_IntersectRect(&crop_, &full, &src)) return;
-        aspect *= (double(src.w) / src.h) / (shownW / shownH);  // keep the frame's pixel shape
+        if (cropAspect_ > 0) aspect = cropAspect_;
+        else aspect *= (double(src.w) / src.h) / (shownW / shownH);  // keep the frame's pixel shape
     }
     int w = area.w, h = int(area.w / aspect);
     if (h > area.h) {
