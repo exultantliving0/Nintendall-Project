@@ -298,10 +298,12 @@ Version** (not asked again until an even newer one) and **Later**.
 **Update Now** (Windows, installed with the setup): Nintendall downloads the new
 setup with a progress bar (Esc cancels), checks it against the SHA-256
 fingerprint GitHub publishes for it (a damaged or different file is never run),
-then closes. A copy of Nintendall in the temp folder waits for it to close,
-runs the setup silently and starts the new version, which says
-"Nintendall was updated to ...". Windows asks for permission once, as for any
-install in Program Files. Silent updates keep your choice of desktop shortcut. The popup only appears on the home screen right after
+then starts it (Windows asks for permission once, as for any install in Program
+Files) and closes. The setup waits for Nintendall to close, installs silently
+into the same folder and starts the new version, which says
+"Nintendall was updated to ...". Silent updates keep your choice of desktop shortcut.
+
+The popup only appears on the home screen right after
 launch: if a game is started first (or Nintendall was opened with a game), it
 isn't shown that time. Nothing is sent except the request for the release list.
 To turn the check off, set `update.check = "false"` in `nintendall.cfg`.

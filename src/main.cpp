@@ -4,7 +4,6 @@
 //   nintendall                      open the window (drag games in, or File > Open)
 //   nintendall <game file>          detect the system and play it
 //   nintendall --detect <files...>  print what system each file is for
-//   nintendall --finish-update ...  (internal) install a downloaded update, see selfupdate.hpp
 //
 // Options:
 //   --fullscreen         start fullscreen
@@ -15,7 +14,6 @@
 #include <SDL.h>
 
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -23,7 +21,6 @@
 #include "app.hpp"
 #include "detect.hpp"
 #include "paths.hpp"
-#include "selfupdate.hpp"
 #include "systems.hpp"
 
 namespace fs = std::filesystem;
@@ -58,10 +55,6 @@ static void usage() {
 }
 
 int main(int argc, char** argv) {
-    // The update helper (started by Update Now): no window, just install and restart.
-    if (argc == 5 && std::strcmp(argv[1], "--finish-update") == 0)
-        return finishUpdate(argv[2], std::strtoul(argv[3], nullptr, 10), argv[4]);
-
     LaunchOptions opt;
     std::string start;
     std::vector<std::string> detectFiles;

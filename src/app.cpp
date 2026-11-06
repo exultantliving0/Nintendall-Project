@@ -1506,12 +1506,17 @@ void App::checkUpdateDownload() {
     if (job->ok) {
         cfg_.set("update.installing", job->info.version);  // checked when Nintendall starts again
         saveConfig();
-        if (startInstallingUpdate(job->file, paths_.base, error)) {
-            quit_ = true;  // the helper installs the update once Nintendall has closed
+        const InstallStart started = startInstallingUpdate(job->file, paths_.base, error);
+        if (started == InstallStart::Started) {
+            quit_ = true;  // the setup waits for Nintendall to close, installs and starts it again
             return;
         }
         cfg_.set("update.installing", "");
         saveConfig();
+        if (started == InstallStart::Refused) {
+            osd("Update not installed - Windows needs your permission to install it", 6000);
+            return;
+        }
     }
     showMessage("Update failed", error + "\n\nYou can also download it from the release page:\n" + job->info.pageUrl, true);
 }

@@ -10,7 +10,7 @@ Unicode true
 
 !define APPNAME "Nintendall"
 !ifndef VERSION
-  !define VERSION "0.12.1"
+  !define VERSION "0.12.2"
 !endif
 !ifndef SRCDIR
   !error "Pass -DSRCDIR=<folder with nintendall.exe, SDL2.dll and cores\>"
@@ -64,6 +64,38 @@ Function .onInit
     Abort
   ${EndIf}
   SetRegView 64
+
+  ; Nintendall's Update Now runs: setup.exe /S /RESTART /WAITPID=<its process> /D=<folder>
+  ; Wait (up to a minute) for that Nintendall to close, so its files can be replaced.
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/WAITPID=" $R1
+  ${IfNot} ${Errors}
+    System::Call 'kernel32::OpenProcess(i 0x00100000, i 0, i $R1) p.R2'
+    ${If} $R2 != 0
+      System::Call 'kernel32::WaitForSingleObject(p $R2, i 60000)'
+      System::Call 'kernel32::CloseHandle(p $R2)'
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+; After Update Now: start Nintendall again. Through Explorer, so it runs as the user and not with
+; the setup's administrator rights.
+Function RestartNintendall
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/RESTART" $R1
+  ${IfNot} ${Errors}
+    Exec '"$WINDIR\explorer.exe" "$INSTDIR\nintendall.exe"'
+  ${EndIf}
+FunctionEnd
+
+Function .onInstSuccess
+  Call RestartNintendall
+FunctionEnd
+
+Function .onInstFailed
+  Call RestartNintendall
 FunctionEnd
 
 Function OpenGamesFolder
