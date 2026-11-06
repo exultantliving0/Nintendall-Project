@@ -22,6 +22,9 @@ public:
     void start(const std::filesystem::path& cacheDir);
     // The Box Covers folder of the console being shown.
     void setFolder(const std::filesystem::path& dir) { folder_ = dir; }
+    // The space a cover is shown in (pixels): covers are made exactly that size, so they're sharp.
+    // A new size (cover size changed with Ctrl + / -, or the screen scale) reloads them.
+    void setDisplaySize(int width, int height);
     // A game's cover, or nullptr while it's still loading or if none was found.
     SDL_Texture* get(const LibraryGame& game);
     // Makes textures from finished downloads. Call once per frame, before drawing.

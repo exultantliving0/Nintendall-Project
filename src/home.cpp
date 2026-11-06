@@ -240,9 +240,9 @@ void Home::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
     const Uint32 now = SDL_GetTicks();
     if (now - lastDraw_ > 500 || now - lastScan_ > 3000) refresh();
     lastDraw_ = now;
-    covers_.update(v.renderer());
-
     const Layout L = layout(t, area);
+    covers_.setDisplaySize(L.cardW, L.coverH);
+    covers_.update(v.renderer());
     const float s = L.s;
     scroll_ = std::clamp(scroll_, 0, L.maxScroll);
     v.fillRect(area.x, area.y, area.w, area.h, kBg);

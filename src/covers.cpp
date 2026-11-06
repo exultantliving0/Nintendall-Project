@@ -1,6 +1,7 @@
 #include "covers.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cctype>
 #include <cstring>
@@ -15,6 +16,7 @@
 #include <vector>
 
 #include "http.hpp"
+#include "png.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -34,7 +36,6 @@ namespace fs = std::filesystem;
 
 namespace {
 
-constexpr int kMaxHeight = 400;  // covers are shrunk to this (they're shown about 200 pixels tall)
 constexpr auto kRetryMissing = std::chrono::hours(24 * 7);  // look again for covers that weren't found
 constexpr auto kIndexAge = std::chrono::hours(24 * 30);     // refresh libretro's list of names monthly
 
@@ -101,10 +102,76 @@ bool isImage(const std::vector<uint8_t>& b) {
 // GameTDB: art.gametdb.com/<platform>/cover/<region>/<ID>.<ext>
 
 // GameTDB's cover sizes, best first. 3DS, DS and Wii U covers come in HQ (768 pixels wide) and
-// M (about 400); GameCube and Wii fronts only in the small size (160 x 224).
+// M (about 400). GameCube and Wii fronts only come small (160 x 224), but their whole box (back,
+// spine, front) is in coverfullHQ (1024 x 680): its front is cut out (about 480 x 680).
 std::vector<const char*> gameTdbSizes(System s) {
     if (s == System::N3DS || s == System::NDS || s == System::WiiU) return {"coverHQ", "coverM", "cover"};
-    return {"cover"};
+    return {"coverfullHQ", "cover"};
+}
+
+// The front of a GameCube / Wii box scan: its right part, as wide as a real box front
+// (135 x 191 mm). Returned as a PNG; empty if the picture isn't a box scan.
+std::vector<uint8_t> frontOfFullCover(const std::vector<uint8_t>& scan) {
+    int w = 0, h = 0, n = 0;
+    stbi_uc* px = stbi_load_from_memory(scan.data(), int(scan.size()), &w, &h, &n, 3);
+    if (!px) return {};
+    std::vector<uint8_t> png;
+    const int fw = int(h * 0.709 + 0.5);
+    if (w > h && fw > 0 && fw < w) {
+        std::vector<uint8_t> front(size_t(fw) * h * 3);
+        for (int y = 0; y < h; ++y)
+            std::memcpy(&front[size_t(y) * fw * 3], px + (size_t(y) * w + size_t(w - fw)) * 3, size_t(fw) * 3);
+        png = encodePng(fw, h, front.data());
+    }
+    stbi_image_free(px);
+    return png;
+}
+
+// GameTDB's small GameCube / Wii fronts (saved by versions before full box scans were used).
+bool isSmallGameTdbFront(System s, const std::vector<uint8_t>& bytes) {
+    if (s != System::GameCube && s != System::Wii) return false;
+    int w = 0, h = 0, n = 0;
+    return stbi_info_from_memory(bytes.data(), int(bytes.size()), &w, &h, &n) && w == 160 && h == 224;
+}
+
+// Shrinks an RGBA picture to dw x dh, averaging every source pixel each one covers (sharp, no
+// shimmer). Colors are weighted by alpha so see-through edges don't go dark.
+std::vector<uint8_t> resizeArea(const uint8_t* src, int w, int h, int dw, int dh) {
+    // Horizontal pass into floats (premultiplied), then vertical.
+    std::vector<float> mid(size_t(dw) * h * 4, 0.0f);
+    const double sx = double(w) / dw, sy = double(h) / dh;
+    for (int x = 0; x < dw; ++x) {
+        const double x0 = x * sx, x1 = x0 + sx;
+        for (int ix = int(x0); ix < w && ix < x1; ++ix) {
+            const float wt = float((std::min(x1, double(ix + 1)) - std::max(x0, double(ix))) / sx);
+            for (int y = 0; y < h; ++y) {
+                const uint8_t* p = src + (size_t(y) * w + size_t(ix)) * 4;
+                float* m = &mid[(size_t(y) * dw + size_t(x)) * 4];
+                const float a = p[3] / 255.0f;
+                m[0] += wt * p[0] * a;
+                m[1] += wt * p[1] * a;
+                m[2] += wt * p[2] * a;
+                m[3] += wt * p[3];
+            }
+        }
+    }
+    std::vector<uint8_t> out(size_t(dw) * dh * 4);
+    for (int y = 0; y < dh; ++y) {
+        const double y0 = y * sy, y1 = y0 + sy;
+        for (int x = 0; x < dw; ++x) {
+            float acc[4] = {0, 0, 0, 0};
+            for (int iy = int(y0); iy < h && iy < y1; ++iy) {
+                const float wt = float((std::min(y1, double(iy + 1)) - std::max(y0, double(iy))) / sy);
+                const float* m = &mid[(size_t(iy) * dw + size_t(x)) * 4];
+                for (int c = 0; c < 4; ++c) acc[c] += wt * m[c];
+            }
+            uint8_t* o = &out[(size_t(y) * dw + size_t(x)) * 4];
+            const float a = acc[3] / 255.0f;
+            for (int c = 0; c < 3; ++c) o[c] = uint8_t(std::clamp(a > 0 ? acc[c] / a : 0.0f, 0.0f, 255.0f) + 0.5f);
+            o[3] = uint8_t(std::clamp(acc[3], 0.0f, 255.0f) + 0.5f);
+        }
+    }
+    return out;
 }
 
 const char* gameTdbPlatform(System s, const char*& ext) {
@@ -312,12 +379,14 @@ struct Covers::Shared {
 
     // Used only by the thread.
     std::map<System, Index> indexes;
+    std::atomic<int> boxW{0}, boxH{0};  // the size covers are shown at (set by the home screen)
     std::chrono::steady_clock::time_point offlineUntil;  // no internet: wait a minute before trying again
 
     bool offline() const { return std::chrono::steady_clock::now() < offlineUntil; }
     void run();
     Image load(const Request& r);
     std::vector<uint8_t> download(const Request& r, bool& reached);
+    std::vector<uint8_t> fromGameTdb(const Request& r, bool& reached, bool bestOnly);
     const Index& index(System s);
     int get(const std::string& url, std::vector<uint8_t>& body, bool& reached) {
         if (offline()) return 0;
@@ -382,18 +451,32 @@ const Index& Covers::Shared::index(System s) {
     return idx;
 }
 
-std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
+// The cover from GameTDB by the game's ID (bestOnly: just the biggest size).
+std::vector<uint8_t> Covers::Shared::fromGameTdb(const Request& r, bool& reached, bool bestOnly) {
     std::vector<uint8_t> body;
     const char* ext = nullptr;
-    if (const char* platform = gameTdbPlatform(r.system, ext); platform && !r.gameId.empty()) {
-        for (const std::string& region : gameTdbRegions(r.gameId))
-            for (const char* size : gameTdbSizes(r.system)) {
-                const std::string url = std::string("https://art.gametdb.com/") + platform + "/" + size + "/" + region +
-                                        "/" + r.gameId + "." + ext;
-                if (get(url, body, reached) == 200 && isImage(body)) return body;
-                if (!reached) return {};
+    const char* platform = gameTdbPlatform(r.system, ext);
+    if (!platform || r.gameId.empty()) return {};
+    const std::vector<const char*> sizes = gameTdbSizes(r.system);
+    for (const std::string& region : gameTdbRegions(r.gameId))
+        for (size_t i = 0; i < (bestOnly ? 1 : sizes.size()); ++i) {
+            const std::string size = sizes[i];
+            const std::string url =
+                std::string("https://art.gametdb.com/") + platform + "/" + size + "/" + region + "/" + r.gameId + "." + ext;
+            if (get(url, body, reached) == 200 && isImage(body)) {
+                if (size != "coverfullHQ") return body;
+                std::vector<uint8_t> front = frontOfFullCover(body);
+                if (!front.empty()) return front;
             }
-    }
+            if (!reached) return {};
+        }
+    return {};
+}
+
+std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
+    std::vector<uint8_t> body = fromGameTdb(r, reached, false);
+    if (!body.empty()) return body;
+    if (offline()) return {};  // no internet
     const char* sys = libretroSystem(r.system);
     if (!sys) return {};
     const std::string name = bestMatch(index(r.system), r.fileName, r.title);
@@ -411,6 +494,22 @@ Image Covers::Shared::load(const Request& r) {
     // 1. A picture in the Box Covers folder (the player's own, or one downloaded before).
     if (const fs::path have = findCoverFile(r.folder, r.fileName); !have.empty() && readFile(have, bytes)) {
         img.file = have;
+        // A small GameCube / Wii cover from an older version: swap it for the big one (once).
+        if (isSmallGameTdbFront(r.system, bytes) && !r.gameId.empty()) {
+            const fs::path tried = cacheDir / systemInfo(r.system).key / ("no big cover - " + r.gameId + ".none");
+            if (!fs::exists(tried, ec) || olderThan(tried, kRetryMissing)) {
+                bool reached = false;
+                std::vector<uint8_t> big = fromGameTdb(r, reached, true);
+                if (!big.empty()) {
+                    fs::remove(have, ec);
+                    img.file = r.folder / fs::u8path(r.fileName + ".png");
+                    writeFile(img.file, big.data(), big.size());
+                    bytes = std::move(big);
+                } else if (reached) {
+                    writeFile(tried, "", 0);
+                }
+            }
+        }
     } else {
         // Notes and covers from before the Box Covers folder are in the cache: "hq - <ID>" for
         // 3DS / DS / Wii U covers found by ID, "id - <ID>" for GameCube / Wii, "name - <file>".
@@ -447,22 +546,13 @@ Image Covers::Shared::load(const Request& r) {
     int w = 0, h = 0, n = 0;
     stbi_uc* px = stbi_load_from_memory(bytes.data(), int(bytes.size()), &w, &h, &n, 4);
     if (!px) return img;
-    // Shrink big covers (box filter) so hundreds of them fit in memory.
-    const int scale = (h + kMaxHeight - 1) / kMaxHeight;
-    if (scale > 1) {
-        const int nw = w / scale, nh = h / scale;
-        img.rgba.resize(size_t(nw) * nh * 4);
-        for (int y = 0; y < nh; ++y)
-            for (int x = 0; x < nw; ++x)
-                for (int c = 0; c < 4; ++c) {
-                    unsigned sum = 0;
-                    for (int dy = 0; dy < scale; ++dy)
-                        for (int dx = 0; dx < scale; ++dx)
-                            sum += px[(size_t(y * scale + dy) * w + size_t(x * scale + dx)) * 4 + size_t(c)];
-                    img.rgba[(size_t(y) * nw + size_t(x)) * 4 + size_t(c)] = uint8_t(sum / unsigned(scale * scale));
-                }
-        img.w = nw;
-        img.h = nh;
+    // Shrink it to exactly the size it's shown at (sharp, and hundreds of covers fit in memory).
+    const int bw = boxW, bh = boxH;
+    const double k = bw > 0 && bh > 0 ? std::min(double(bw) / w, double(bh) / h) : 1.0;
+    if (k < 1.0) {
+        img.w = std::max(1, int(w * k + 0.5));
+        img.h = std::max(1, int(h * k + 0.5));
+        img.rgba = resizeArea(px, w, h, img.w, img.h);
     } else {
         img.rgba.assign(px, px + size_t(w) * h * 4);
         img.w = w;
@@ -497,6 +587,13 @@ void Covers::start(const fs::path& cacheDir) {
     shared_->cacheDir = cacheDir;
     // The thread keeps its own reference: quitting during a download is safe.
     std::thread([s = shared_] { s->run(); }).detach();
+}
+
+void Covers::setDisplaySize(int w, int h) {
+    if (!shared_ || (std::abs(w - shared_->boxW) <= 1 && std::abs(h - shared_->boxH) <= 1)) return;
+    shared_->boxW = w;
+    shared_->boxH = h;
+    clear();
 }
 
 SDL_Texture* Covers::get(const LibraryGame& g) {

@@ -42,13 +42,19 @@ or `.jpg` with the game's name there (replacing the downloaded one if there is
 one); it shows up within a few seconds. Delete a cover to get the downloaded
 one back. **File > Open Box Covers Folder** goes there.
 
+Covers are drawn at exactly the size they're shown at, so they stay sharp at
+every cover size (Ctrl + / Ctrl -). Small GameCube / Wii covers saved by older
+versions (160 x 224) are swapped for the big ones automatically; your own
+pictures are never replaced.
+
 Missing covers are downloaded automatically the first time a game is shown and
 saved in that folder (games without a cover get a plain box; Nintendall looks
 again a week later):
 
 - GameCube, Wii, Wii U, DS, 3DS: from [GameTDB](https://www.gametdb.com), using
   the game's ID code read from the file (3DS, DS and Wii U in GameTDB's high
-  resolution "HQ" set when there is one) (`.iso`, `.gcm`, `.wbfs`, `.rvz`,
+  resolution "HQ" set when there is one; for GameCube and Wii, the front is cut
+  out of GameTDB's high resolution scan of the whole box, about 480 x 680) (`.iso`, `.gcm`, `.wbfs`, `.rvz`,
   `.wia`, `.gcz`, `.ciso`, `.nds`, `.3ds`, `.cci`, `.cxi`, `.cia`, Wii U game folders).
 - Every console (and the ones above when there's no ID, e.g. zipped games):
   from the [libretro thumbnail library](https://thumbnails.libretro.com), by
