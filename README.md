@@ -43,17 +43,13 @@ one); it shows up within a few seconds. Delete a cover to get the downloaded
 one back. **File > Open Box Covers Folder** goes there.
 
 Covers are drawn at exactly the size they're shown at, so they stay sharp at
-every cover size (Ctrl + / Ctrl -). Small GameCube / Wii covers saved by older
-versions (160 x 224) are swapped for the big ones automatically; your own
-pictures are never replaced.
+every cover size (Ctrl + / Ctrl -).
 
-Covers are the **USA** version, whatever region the game file is from (a
-European or Japanese cover is used only when the game has no USA release).
-European / Japanese covers saved by older versions are swapped for the USA ones
-automatically, once; pictures you put there yourself are never replaced.
+When a game has no picture there yet, Nintendall downloads a high quality
+**USA** cover and saves it in that folder (another region's cover is used only
+if the game has no USA one). A picture that's already there is never replaced.
 
-Missing covers are downloaded automatically the first time a game is shown and
-saved in that folder (games without a cover get a plain box; Nintendall looks
+Covers are downloaded the first time a game is shown (games without a cover get a plain box; Nintendall looks
 again a week later):
 
 - GameCube, Wii, Wii U, DS, 3DS: from [GameTDB](https://www.gametdb.com), using

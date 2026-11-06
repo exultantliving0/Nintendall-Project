@@ -127,13 +127,6 @@ std::vector<uint8_t> frontOfFullCover(const std::vector<uint8_t>& scan) {
     return png;
 }
 
-// GameTDB's small GameCube / Wii fronts (saved by versions before full box scans were used).
-bool isSmallGameTdbFront(System s, const std::vector<uint8_t>& bytes) {
-    if (s != System::GameCube && s != System::Wii) return false;
-    int w = 0, h = 0, n = 0;
-    return stbi_info_from_memory(bytes.data(), int(bytes.size()), &w, &h, &n) && w == 160 && h == 224;
-}
-
 // Shrinks an RGBA picture to dw x dh, averaging every source pixel each one covers (sharp, no
 // shimmer). Colors are weighted by alpha so see-through edges don't go dark.
 std::vector<uint8_t> resizeArea(const uint8_t* src, int w, int h, int dw, int dh) {
@@ -208,32 +201,17 @@ std::vector<std::string> gameTdbRegions(const std::string& id) {
     return r;
 }
 
-// Which GameTDB covers to try for a game ID: (ID, region folder) pairs. usaFirst: the USA release
-// first (a European "RMGP01" is "RMGE01" in the USA), then the game's own.
-std::vector<std::pair<std::string, std::string>> gameTdbTries(const std::string& id, bool usaFirst) {
+// Which GameTDB covers to try for a game ID: (ID, region folder) pairs. The USA release first
+// (the ID's 4th character is the region: "RMGP01" is "RMGE01" in the USA), then the game's own.
+std::vector<std::pair<std::string, std::string>> gameTdbTries(const std::string& id) {
     std::vector<std::pair<std::string, std::string>> out;
-    if (usaFirst && id.size() >= 4 && id[3] != 'E') {
+    if (id.size() >= 4 && id[3] != 'E') {
         std::string usa = id;
         usa[3] = 'E';
         out.emplace_back(usa, "US");
     }
     for (const std::string& region : gameTdbRegions(id)) out.emplace_back(id, region);
     return out;
-}
-
-// The picture sizes GameTDB covers come in (to recognize covers Nintendall downloaded).
-bool isGameTdbSize(System s, const std::vector<uint8_t>& bytes) {
-    int w = 0, h = 0, n = 0;
-    if (!stbi_info_from_memory(bytes.data(), int(bytes.size()), &w, &h, &n)) return false;
-    auto is = [&](int a, int b) { return w == a && h == b; };
-    switch (s) {
-    case System::GameCube:
-    case System::Wii: return is(482, 680) || is(160, 224);
-    case System::NDS:
-    case System::N3DS: return is(768, 680) || is(400, 352) || is(160, 144);
-    case System::WiiU: return is(768, 1080) || is(350, 500) || is(160, 224);
-    default: return false;
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -338,26 +316,9 @@ bool isRegionTag(const std::string& tag) {
     return false;
 }
 
-// True if the file name says the game is from outside the USA, e.g. "Metroid (Europe)".
-bool nonUsaFileName(const std::string& fileName) {
-    bool region = false;
-    for (size_t a = fileName.find('('); a != std::string::npos; a = fileName.find('(', a + 1)) {
-        const size_t b = fileName.find(')', a);
-        if (b == std::string::npos) break;
-        const std::string tag = fileName.substr(a, b - a + 1);
-        if (!isRegionTag(tag)) continue;
-        if (tag.find("USA") != std::string::npos || tag.find("World") != std::string::npos || tag == "(U)" ||
-            tag == "(UE)" || tag == "(JU)" || tag == "(JUE)")
-            return false;
-        region = true;
-    }
-    return region;
-}
-
 // Picks the best-looking entry: USA first, then World / Europe / Japan, skipping hacks, betas and
 // prototypes unless the file is one too. Other tags the file has ("(Rev 1)") count too.
-// fileRegion: also prefer the file's own region tags (how versions up to 0.12.4 chose).
-int score(const std::string& name, const std::string& fileName, bool fileRegion) {
+int score(const std::string& name, const std::string& fileName) {
     if (name == fileName) return 1000;
     auto has = [](const std::string& s, const char* t) { return s.find(t) != std::string::npos; };
     int sc = 0;
@@ -365,7 +326,7 @@ int score(const std::string& name, const std::string& fileName, bool fileRegion)
         const size_t b = fileName.find(')', a);
         if (b == std::string::npos) break;
         const std::string tag = fileName.substr(a, b - a + 1);
-        if ((fileRegion || !isRegionTag(tag)) && has(name, tag.c_str())) sc += 40;
+        if (!isRegionTag(tag) && has(name, tag.c_str())) sc += 40;
     }
     if (has(name, "(USA")) sc += 30;
     else if (has(name, "(World")) sc += 25;
@@ -377,7 +338,7 @@ int score(const std::string& name, const std::string& fileName, bool fileRegion)
     return sc * 1000 - int(std::min<size_t>(name.size(), 999));  // then the shortest name
 }
 
-std::string bestMatch(const Index& idx, const std::string& fileName, const std::string& title, bool fileRegion) {
+std::string bestMatch(const Index& idx, const std::string& fileName, const std::string& title) {
     std::vector<size_t> found;
     for (const std::string& n : {fileName, title}) {
         const auto it = idx.byKey.find(joinWords(nameWords(n)));
@@ -409,7 +370,7 @@ std::string bestMatch(const Index& idx, const std::string& fileName, const std::
     std::string best;
     int bestScore = 0;
     for (const size_t i : found) {
-        const int sc = score(idx.names[i], fileName, fileRegion);
+        const int sc = score(idx.names[i], fileName);
         if (best.empty() || sc > bestScore) {
             best = idx.names[i];
             bestScore = sc;
@@ -440,9 +401,8 @@ struct Covers::Shared {
     bool offline() const { return std::chrono::steady_clock::now() < offlineUntil; }
     void run();
     Image load(const Request& r);
-    // usaFirst: the USA cover first (false: the game's own region first, as versions up to 0.12.4 did).
-    std::vector<uint8_t> download(const Request& r, bool& reached, bool usaFirst = true);
-    std::vector<uint8_t> fromGameTdb(const Request& r, bool& reached, bool bestOnly, bool usaFirst = true);
+    std::vector<uint8_t> download(const Request& r, bool& reached);
+    std::vector<uint8_t> fromGameTdb(const Request& r, bool& reached);
     const Index& index(System s);
     int get(const std::string& url, std::vector<uint8_t>& body, bool& reached) {
         if (offline()) return 0;
@@ -507,16 +467,16 @@ const Index& Covers::Shared::index(System s) {
     return idx;
 }
 
-// The cover from GameTDB by the game's ID (bestOnly: just the biggest size). The biggest size is
-// tried in every region before smaller ones, so a sharp cover wins over a small USA one.
-std::vector<uint8_t> Covers::Shared::fromGameTdb(const Request& r, bool& reached, bool bestOnly, bool usaFirst) {
+// The cover from GameTDB by the game's ID: the USA one first. The biggest size is tried in every
+// region before smaller ones, so a sharp cover wins over a small one.
+std::vector<uint8_t> Covers::Shared::fromGameTdb(const Request& r, bool& reached) {
     std::vector<uint8_t> body;
     const char* ext = nullptr;
     const char* platform = gameTdbPlatform(r.system, ext);
     if (!platform || r.gameId.empty()) return {};
     const std::vector<const char*> sizes = gameTdbSizes(r.system);
-    const auto tries = gameTdbTries(r.gameId, usaFirst);
-    for (size_t i = 0; i < (bestOnly ? 1 : sizes.size()); ++i)
+    const auto tries = gameTdbTries(r.gameId);
+    for (size_t i = 0; i < sizes.size(); ++i)
         for (const auto& [id, region] : tries) {
             const std::string size = sizes[i];
             const std::string url =
@@ -531,13 +491,13 @@ std::vector<uint8_t> Covers::Shared::fromGameTdb(const Request& r, bool& reached
     return {};
 }
 
-std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached, bool usaFirst) {
-    std::vector<uint8_t> body = fromGameTdb(r, reached, false, usaFirst);
+std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
+    std::vector<uint8_t> body = fromGameTdb(r, reached);
     if (!body.empty()) return body;
     if (offline()) return {};  // no internet
     const char* sys = libretroSystem(r.system);
     if (!sys) return {};
-    const std::string name = bestMatch(index(r.system), r.fileName, r.title, !usaFirst);
+    const std::string name = bestMatch(index(r.system), r.fileName, r.title);
     if (name.empty()) return {};
     const std::string url = "https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/" + urlEncode(name) + ".png";
     if (get(url, body, reached) == 200 && isImage(body)) return body;
@@ -549,77 +509,22 @@ Image Covers::Shared::load(const Request& r) {
     std::vector<uint8_t> bytes;
     std::error_code ec;
 
-    // 1. A picture in the Box Covers folder (the player's own, or one downloaded before).
-    if (const fs::path have = findCoverFile(r.folder, r.fileName); !have.empty() && readFile(have, bytes)) {
-        img.file = have;
-        // A small GameCube / Wii cover from an older version: swap it for the big one (once).
-        if (isSmallGameTdbFront(r.system, bytes) && !r.gameId.empty()) {
-            const fs::path tried = cacheDir / systemInfo(r.system).key / ("no big cover - " + r.gameId + ".none");
-            if (!fs::exists(tried, ec) || olderThan(tried, kRetryMissing)) {
-                bool reached = false;
-                std::vector<uint8_t> big = fromGameTdb(r, reached, true);
-                if (!big.empty()) {
-                    fs::remove(have, ec);
-                    img.file = r.folder / fs::u8path(r.fileName + ".png");
-                    writeFile(img.file, big.data(), big.size());
-                    bytes = std::move(big);
-                } else if (reached) {
-                    writeFile(tried, "", 0);
-                }
-            }
-        }
-        // A European / Japanese cover downloaded by an older version: swap it for the USA one (once).
-        // Only covers Nintendall downloaded itself: GameTDB ones are recognized by their size,
-        // libretro ones by downloading what the older version picked and comparing.
-        const char* ext = nullptr;
-        const bool byId = !r.gameId.empty() && gameTdbPlatform(r.system, ext);
-        const bool foreign = byId ? r.gameId.size() >= 4 && r.gameId[3] != 'E' : nonUsaFileName(r.fileName);
-        const fs::path checked = cacheDir / systemInfo(r.system).key / ("usa checked - " + safeFileName(r.fileName) + ".none");
-        if (foreign && !fs::exists(checked, ec)) {
-            bool reached = false, ours = false;
-            if (byId) {
-                ours = isGameTdbSize(r.system, bytes);
-                reached = true;
-            } else {
-                const std::vector<uint8_t> before = download(r, reached, false);
-                ours = !before.empty() && before == bytes;
-            }
-            if (ours) {
-                bool got = false;
-                std::vector<uint8_t> usa = download(r, got, true);
-                if (!usa.empty() && usa != bytes) {
-                    const bool png = usa.size() > 4 && usa[0] == 0x89 && usa[1] == 'P';
-                    fs::remove(img.file, ec);
-                    img.file = r.folder / fs::u8path(r.fileName + (png ? ".png" : ".jpg"));
-                    writeFile(img.file, usa.data(), usa.size());
-                    bytes = std::move(usa);
-                }
-                reached = got;
-            }
-            if (reached) writeFile(checked, "", 0);  // done: not looked at again
-        }
+    // A picture in the Box Covers folder is always used as it is (never replaced).
+    if (const fs::path have = findCoverFile(r.folder, r.fileName); !have.empty()) {
+        if (readFile(have, bytes)) img.file = have;
     } else {
-        // Notes and covers from before the Box Covers folder are in the cache: "hq - <ID>" for
-        // 3DS / DS / Wii U covers found by ID, "id - <ID>" for GameCube / Wii, "name - <file>".
-        const bool hq = gameTdbSizes(r.system).size() > 1;
-        const std::string base =
-            r.gameId.empty() ? "name - " + safeFileName(r.fileName) : (hq ? "hq - " : "id - ") + r.gameId;
-        const fs::path dir = cacheDir / systemInfo(r.system).key;
-        const fs::path old = dir / (base + ".img"), none = dir / (base + ".none");
-
-        if (readFile(old, bytes)) {  // 2. moved over from the old cache
-            fs::remove(old, ec);
-        } else {
-            // 3. Downloaded (unless it was looked for in the last week and doesn't exist).
-            if (fs::exists(none, ec) && !olderThan(none, kRetryMissing)) return img;
-            bool reached = false;
-            bytes = download(r, reached);
-            if (bytes.empty()) {
-                if (reached) writeFile(none, "", 0);  // the server answered: there's no cover
-                return img;
-            }
+        // No picture yet: download the USA cover in the best quality there is (unless it was
+        // looked for in the last week and doesn't exist), and save it in the Box Covers folder.
+        const std::string base = r.gameId.empty() ? "name - " + safeFileName(r.fileName) : "id - " + r.gameId;
+        const fs::path none = cacheDir / systemInfo(r.system).key / (base + ".none");
+        if (fs::exists(none, ec) && !olderThan(none, kRetryMissing)) return img;
+        bool reached = false;
+        bytes = download(r, reached);
+        if (bytes.empty()) {
+            if (reached) writeFile(none, "", 0);  // the servers answered: there's no cover
+            return img;
         }
-        // Save it in the Box Covers folder, named like the game, unless the player put one there meanwhile.
+        // Named like the game, unless the player put a picture there meanwhile.
         if (const fs::path mine = findCoverFile(r.folder, r.fileName); !mine.empty()) {
             if (!readFile(mine, bytes)) return img;
             img.file = mine;
