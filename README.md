@@ -45,26 +45,16 @@ one back. **File > Open Box Covers Folder** goes there.
 Covers are drawn at exactly the size they're shown at, so they stay sharp at
 every cover size (Ctrl + / Ctrl -).
 
-When a game has no picture there yet, Nintendall downloads a high quality
-**USA** cover and saves it in that folder (another region's cover is used only
-if the game has no USA one). A picture that's already there is never replaced.
-
-Covers are downloaded the first time a game is shown (games without a cover get a plain box; Nintendall looks
-again a week later):
-
-- GameCube, Wii, Wii U, DS, 3DS: from [GameTDB](https://www.gametdb.com), using
-  the game's ID code read from the file (3DS, DS and Wii U in GameTDB's high
-  resolution "HQ" set when there is one; for GameCube and Wii, the front is cut
-  out of GameTDB's high resolution scan of the whole box, about 480 x 680) (`.iso`, `.gcm`, `.wbfs`, `.rvz`,
-  `.wia`, `.gcz`, `.ciso`, `.nds`, `.3ds`, `.cci`, `.cxi`, `.cia`, Wii U game folders).
-- Every console (and the ones above when there's no ID, e.g. zipped games):
-  from the [libretro thumbnail library](https://thumbnails.libretro.com), by
-  matching the file name to its list of game names (No-Intro names like
-  `Super Mario Bros. 3 (USA).nes` match exactly; close names like
-  `Pokemon Red.gb` usually match too).
-
-Only the game's ID or file name is sent, to those two sites. Covers aren't
-bundled with Nintendall; they're fetched by each user.
+When a game has no picture there yet, Nintendall downloads its **USA** cover
+from the [libretro thumbnail library](https://thumbnails.libretro.com) and
+saves it in that folder. A picture that's already there is never replaced.
+Covers are found by matching the game's name (its file name, or the name inside
+GameCube / Wii discs and Wii U games) to the library's list of game names:
+No-Intro names like `Super Mario Bros. 3 (USA).nes` match exactly, and close
+names like `Pokemon Red.gb` usually match too. Only USA releases are used
+(`(USA)`, `(USA, Europe)`, `(Japan, USA)`...); a game with no USA cover there
+gets a plain box with its title (Nintendall looks again a week later). Only the
+game's name is sent, to that one site.
 
 Under the hood it's a **libretro frontend**. The emulation is done by one proven,
 open-source emulator "core" per system, bundled in `cores/` next to the program.

@@ -40,8 +40,7 @@ Also used:
 | stb_image (PNG / JPEG decoding for box covers, `third_party/stb/stb_image.h`) | MIT or public domain (your choice) | https://github.com/nothings/stb |
 
 Box covers are not part of Nintendall: the home screen downloads them on each
-user's PC from GameTDB (https://www.gametdb.com) and the libretro thumbnail
-library (https://thumbnails.libretro.com).
+user's PC from the libretro thumbnail library (https://thumbnails.libretro.com).
 
 ## Source code offer
 

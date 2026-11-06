@@ -128,7 +128,7 @@ std::string cleanTitle(const std::string& fileName) {
 }
 
 // ============================================================================
-// Game IDs (used to find covers on GameTDB)
+// Game IDs and names inside the game files
 
 namespace {
 

@@ -16,7 +16,6 @@
 #include <vector>
 
 #include "http.hpp"
-#include "png.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -42,7 +41,7 @@ constexpr auto kIndexAge = std::chrono::hours(24 * 30);     // refresh libretro'
 struct Request {
     std::string key;  // the game's path
     System system;
-    std::string gameId, fileName, title;
+    std::string fileName, title;
     fs::path folder;  // the console's Box Covers folder
 };
 
@@ -99,33 +98,7 @@ bool isImage(const std::vector<uint8_t>& b) {
 }
 
 // ---------------------------------------------------------------------------
-// GameTDB: art.gametdb.com/<platform>/cover/<region>/<ID>.<ext>
-
-// GameTDB's cover sizes, best first. 3DS, DS and Wii U covers come in HQ (768 pixels wide) and
-// M (about 400). GameCube and Wii fronts only come small (160 x 224), but their whole box (back,
-// spine, front) is in coverfullHQ (1024 x 680): its front is cut out (about 480 x 680).
-std::vector<const char*> gameTdbSizes(System s) {
-    if (s == System::N3DS || s == System::NDS || s == System::WiiU) return {"coverHQ", "coverM", "cover"};
-    return {"coverfullHQ", "cover"};
-}
-
-// The front of a GameCube / Wii box scan: its right part, as wide as a real box front
-// (135 x 191 mm). Returned as a PNG; empty if the picture isn't a box scan.
-std::vector<uint8_t> frontOfFullCover(const std::vector<uint8_t>& scan) {
-    int w = 0, h = 0, n = 0;
-    stbi_uc* px = stbi_load_from_memory(scan.data(), int(scan.size()), &w, &h, &n, 3);
-    if (!px) return {};
-    std::vector<uint8_t> png;
-    const int fw = int(h * 0.709 + 0.5);
-    if (w > h && fw > 0 && fw < w) {
-        std::vector<uint8_t> front(size_t(fw) * h * 3);
-        for (int y = 0; y < h; ++y)
-            std::memcpy(&front[size_t(y) * fw * 3], px + (size_t(y) * w + size_t(w - fw)) * 3, size_t(fw) * 3);
-        png = encodePng(fw, h, front.data());
-    }
-    stbi_image_free(px);
-    return png;
-}
+// Pictures
 
 // Shrinks an RGBA picture to dw x dh, averaging every source pixel each one covers (sharp, no
 // shimmer). Colors are weighted by alpha so see-through edges don't go dark.
@@ -164,53 +137,6 @@ std::vector<uint8_t> resizeArea(const uint8_t* src, int w, int h, int dw, int dh
             o[3] = uint8_t(std::clamp(acc[3], 0.0f, 255.0f) + 0.5f);
         }
     }
-    return out;
-}
-
-const char* gameTdbPlatform(System s, const char*& ext) {
-    ext = "jpg";
-    switch (s) {
-    case System::GameCube:
-    case System::Wii: ext = "png"; return "wii";
-    case System::WiiU: return "wiiu";
-    case System::NDS: return "ds";
-    case System::N3DS: return "3ds";
-    default: return nullptr;
-    }
-}
-
-// The 4th character of an ID is the region; try that region's covers first.
-std::vector<std::string> gameTdbRegions(const std::string& id) {
-    std::vector<std::string> r;
-    switch (id.size() >= 4 ? id[3] : 'E') {
-    case 'J': r = {"JA"}; break;
-    case 'P': case 'X': case 'Y': case 'Z': case 'L': case 'M': r = {"EN", "FR", "DE"}; break;
-    case 'D': r = {"DE"}; break;
-    case 'F': r = {"FR"}; break;
-    case 'S': r = {"ES"}; break;
-    case 'I': r = {"IT"}; break;
-    case 'H': r = {"NL"}; break;
-    case 'U': r = {"AU", "EN"}; break;
-    case 'K': case 'Q': case 'T': r = {"KO"}; break;
-    case 'W': r = {"ZH", "ZHTW"}; break;
-    case 'R': r = {"RU"}; break;
-    default: break;
-    }
-    for (const char* x : {"US", "EN", "JA"})
-        if (std::find(r.begin(), r.end(), x) == r.end()) r.push_back(x);
-    return r;
-}
-
-// Which GameTDB covers to try for a game ID: (ID, region folder) pairs. The USA release first
-// (the ID's 4th character is the region: "RMGP01" is "RMGE01" in the USA), then the game's own.
-std::vector<std::pair<std::string, std::string>> gameTdbTries(const std::string& id) {
-    std::vector<std::pair<std::string, std::string>> out;
-    if (id.size() >= 4 && id[3] != 'E') {
-        std::string usa = id;
-        usa[3] = 'E';
-        out.emplace_back(usa, "US");
-    }
-    for (const std::string& region : gameTdbRegions(id)) out.emplace_back(id, region);
     return out;
 }
 
@@ -338,23 +264,37 @@ int score(const std::string& name, const std::string& fileName) {
     return sc * 1000 - int(std::min<size_t>(name.size(), 999));  // then the shortest name
 }
 
+// True for a USA release: "(USA)", "(USA, Europe)", "(Japan, USA)"...
+bool isUsaName(const std::string& name) {
+    for (size_t a = name.find('('); a != std::string::npos; a = name.find('(', a + 1)) {
+        const size_t b = name.find(')', a);
+        if (b == std::string::npos) break;
+        const std::string tag = name.substr(a, b - a + 1);
+        if (isRegionTag(tag) && tag.find("USA") != std::string::npos) return true;
+    }
+    return false;
+}
+
+// The cover's name for a game: only USA releases ("" if the game has none in the library).
 std::string bestMatch(const Index& idx, const std::string& fileName, const std::string& title) {
     std::vector<size_t> found;
     for (const std::string& n : {fileName, title}) {
         const auto it = idx.byKey.find(joinWords(nameWords(n)));
-        if (it != idx.byKey.end()) {
-            found = it->second;
-            break;
-        }
+        if (it == idx.byKey.end()) continue;
+        for (const size_t i : it->second)
+            if (isUsaName(idx.names[i])) found.push_back(i);
+        if (!found.empty()) break;
     }
-    if (found.empty()) {
-        // Close names: every word of the file's name is in the game's name, which has at most 2
+    for (const std::string& n : {fileName, title}) {
+        if (!found.empty()) break;
+        // Close names: every word of the game's name is in the cover's name, which has at most 2
         // more ("Pokemon Red" -> "Pokemon - Red Version"). Fewest extra words wins.
-        const std::vector<std::string> want = nameWords(fileName);
-        if (want.size() < 2) return {};
+        const std::vector<std::string> want = nameWords(n);
+        if (want.size() < 2) continue;
         const std::set<std::string> wantSet(want.begin(), want.end());
         size_t bestExtra = 3;
         for (size_t i = 0; i < idx.names.size(); ++i) {
+            if (!isUsaName(idx.names[i])) continue;
             const std::vector<std::string> w = nameWords(idx.names[i]);
             if (w.size() < want.size() || w.size() - want.size() > 2 || w.size() - want.size() > bestExtra) continue;
             const std::set<std::string> have(w.begin(), w.end());
@@ -402,7 +342,6 @@ struct Covers::Shared {
     void run();
     Image load(const Request& r);
     std::vector<uint8_t> download(const Request& r, bool& reached);
-    std::vector<uint8_t> fromGameTdb(const Request& r, bool& reached);
     const Index& index(System s);
     int get(const std::string& url, std::vector<uint8_t>& body, bool& reached) {
         if (offline()) return 0;
@@ -467,34 +406,8 @@ const Index& Covers::Shared::index(System s) {
     return idx;
 }
 
-// The cover from GameTDB by the game's ID: the USA one first. The biggest size is tried in every
-// region before smaller ones, so a sharp cover wins over a small one.
-std::vector<uint8_t> Covers::Shared::fromGameTdb(const Request& r, bool& reached) {
-    std::vector<uint8_t> body;
-    const char* ext = nullptr;
-    const char* platform = gameTdbPlatform(r.system, ext);
-    if (!platform || r.gameId.empty()) return {};
-    const std::vector<const char*> sizes = gameTdbSizes(r.system);
-    const auto tries = gameTdbTries(r.gameId);
-    for (size_t i = 0; i < sizes.size(); ++i)
-        for (const auto& [id, region] : tries) {
-            const std::string size = sizes[i];
-            const std::string url =
-                std::string("https://art.gametdb.com/") + platform + "/" + size + "/" + region + "/" + id + "." + ext;
-            if (get(url, body, reached) == 200 && isImage(body)) {
-                if (size != "coverfullHQ") return body;
-                std::vector<uint8_t> front = frontOfFullCover(body);
-                if (!front.empty()) return front;
-            }
-            if (!reached) return {};
-        }
-    return {};
-}
-
 std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
-    std::vector<uint8_t> body = fromGameTdb(r, reached);
-    if (!body.empty()) return body;
-    if (offline()) return {};  // no internet
+    std::vector<uint8_t> body;
     const char* sys = libretroSystem(r.system);
     if (!sys) return {};
     const std::string name = bestMatch(index(r.system), r.fileName, r.title);
@@ -515,8 +428,7 @@ Image Covers::Shared::load(const Request& r) {
     } else {
         // No picture yet: download the USA cover in the best quality there is (unless it was
         // looked for in the last week and doesn't exist), and save it in the Box Covers folder.
-        const std::string base = r.gameId.empty() ? "name - " + safeFileName(r.fileName) : "id - " + r.gameId;
-        const fs::path none = cacheDir / systemInfo(r.system).key / (base + ".none");
+        const fs::path none = cacheDir / systemInfo(r.system).key / ("usa - " + safeFileName(r.fileName) + ".none");
         if (fs::exists(none, ec) && !olderThan(none, kRetryMissing)) return img;
         bool reached = false;
         bytes = download(r, reached);
@@ -596,7 +508,7 @@ SDL_Texture* Covers::get(const LibraryGame& g) {
     textures_[key] = Entry{};
     if (shared_) {
         std::lock_guard<std::mutex> lock(shared_->mutex);
-        shared_->queue.push_back({key, g.system, g.gameId, g.fileName, g.title, folder_});
+        shared_->queue.push_back({key, g.system, g.fileName, g.title, folder_});
         shared_->wake.notify_one();
     }
     return nullptr;

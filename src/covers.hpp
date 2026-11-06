@@ -11,10 +11,9 @@
 // Box covers for the home screen. They live in the Box Covers folder (next to the Games folder,
 // one folder per console), named like the game file: "Box Covers/NES/Super Mario Bros. (World).png".
 // A picture already there is used as it is, so players can add or replace covers with their own
-// (.png or .jpg). Missing ones are downloaded in the background and saved there:
-//   GameCube, Wii, Wii U, DS, 3DS: GameTDB (art.gametdb.com), found by the game's ID code.
-//   Every console (and the above when there's no ID): the libretro thumbnail library
-//   (thumbnails.libretro.com), found by matching the file name against its list of game names.
+// (.png or .jpg). Missing ones are downloaded in the background and saved there, from the libretro
+// thumbnail library (thumbnails.libretro.com): the USA release's cover, found by matching the
+// game's name against the library's list of names. Games with no USA cover there get none.
 class Covers {
 public:
     ~Covers();
