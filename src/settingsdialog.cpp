@@ -13,7 +13,34 @@ void SettingsDialog::open(System system, LibretroCore& core) {
     scroll_ = 0;
     auto& options = core.options();
 
-    for (const auto& group : consoleSettings(system)) {
+    std::vector<SettingGroup> groups = consoleSettings(system);
+    if (system == System::WiiU && !groups.empty()) {
+        // Upscaling the way standalone Cemu does it: the game's own Resolution graphic pack, made for
+        // that game (Cemu's generic resize broke shadows). Cemu declares each pack of the loaded game
+        // as options named after the pack: "Resolution" (on/off) and "Resolution: <group>" (preset).
+        std::string enableKey, presetKey;
+        for (const auto& [key, o] : options) {
+            if (key.rfind("cemu_zgp_", 0) != 0) continue;
+            if (o.description == "Resolution") enableKey = key;
+            else if (o.description.rfind("Resolution: ", 0) == 0 &&
+                     (presetKey.empty() || o.description == "Resolution: Preset"))
+                presetKey = key;
+        }
+        if (!enableKey.empty() && !presetKey.empty()) {
+            Setting res;
+            res.label = "Resolution";
+            res.keys = {enableKey, presetKey};
+            res.restart = true;
+            res.hint = "This game's own resolution pack: sharper, with shadows and effects kept right";
+            res.choices.push_back({"Off (native)", {{enableKey, "disabled"}}});
+            for (const std::string& preset : options[presetKey].values)
+                res.choices.push_back({preset, {{enableKey, "enabled"}, {presetKey, preset}}});
+            auto& picture = groups[0].settings;
+            picture.insert(picture.begin() + std::min<size_t>(1, picture.size()), res);
+        }
+    }
+
+    for (const auto& group : groups) {
         std::vector<Row> groupRows;
         for (const auto& s : group.settings) {
             // Only show settings this build of the emulator actually has.

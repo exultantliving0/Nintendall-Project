@@ -181,7 +181,7 @@ the game that's running, with friendly names. Settings marked * apply after
 |---|---|
 | N64 | Resolution upscaling (to 4K), widescreen hack, MSAA / FXAA, texture filters and HD texture enhancement (xBRZ, HQ4x), Expansion Pak, Rumble / Controller Pak, stick sensitivity |
 | GameCube / Wii | Resolution upscaling (to 8x), widescreen hack, aspect ratio, anti-aliasing, texture filtering, CPU speed, language, rumble |
-| Wii U | Graphics API (Vulkan / OpenGL), smoother frame rate, accurate shader math, Clear Shader Cache, and more. Games always draw at the Wii U's own 720p (resizing breaks shadows and effects in some games) |
+| Wii U | Graphics API (Vulkan / OpenGL), Resolution (from the game's own resolution graphic pack, like standalone Cemu, so shadows and effects stay right; shown for the ~50 games that have one), smoother frame rate, accurate shader math, Clear Shader Cache, and more. Without a pack, games draw at their native resolution (Cemu's generic resize broke shadows) |
 | 3DS | Resolution upscaling (to 10x), texture filters (Anime4K, ScaleForce, xBRZ), stereoscopic 3D, New / Old 3DS, region, language, CPU speed |
 | DS | OpenGL renderer with 3D upscaling (to 8x), gap between screens, stylus cursor, sound smoothing |
 | SNES | HD Mode 7, run-ahead (less input lag), CPU and Super FX overclock, TV filters, no sprite limit |
