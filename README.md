@@ -47,6 +47,11 @@ every cover size (Ctrl + / Ctrl -). Small GameCube / Wii covers saved by older
 versions (160 x 224) are swapped for the big ones automatically; your own
 pictures are never replaced.
 
+Covers are the **USA** version, whatever region the game file is from (a
+European or Japanese cover is used only when the game has no USA release).
+European / Japanese covers saved by older versions are swapped for the USA ones
+automatically, once; pictures you put there yourself are never replaced.
+
 Missing covers are downloaded automatically the first time a game is shown and
 saved in that folder (games without a cover get a plain box; Nintendall looks
 again a week later):
