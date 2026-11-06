@@ -3,6 +3,7 @@
 #include <SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -132,20 +133,32 @@ bool LibretroCore::loadGame(const fs::path& gamePath, std::string& error) {
         gi.data = gameData_.data();
         gi.size = gameData_.size();
     }
-    if (hwActive_) hw_.makeCurrent();
+    makeGlCurrent();
     if (!api_.load_game(&gi)) {
         error = libraryName_ + " couldn't start this game";
         if (hwRequested_ && !hwActive_) error += " (GPU rendering unavailable: " + hwError_ + ")";
         return false;
     }
     gameLoaded_ = true;
+    if (hwActive_ && vulkan_) {
+        // Vulkan: now that the core has said what it needs (negotiation interface), make the device.
+        if (!vk_.create(vkNegotiation_, hwError_)) {
+            cbLog(RETRO_LOG_WARN, "Vulkan unavailable: %s\n", hwError_.c_str());
+            api_.unload_game();
+            gameLoaded_ = false;
+            hwActive_ = false;
+            error = libraryName_ + " couldn't start this game (Vulkan unavailable: " + hwError_ + ")";
+            return false;
+        }
+        std::fprintf(stderr, "GPU rendering: Vulkan on %s\n", vk_.deviceName().c_str());
+    }
     api_.get_system_av_info(&av_);
     if (av_.timing.fps <= 0) av_.timing.fps = 60.0;
     if (av_.timing.sample_rate <= 0) av_.timing.sample_rate = 44100.0;
     if (hwActive_) {
-        // The GL context exists; give the core its framebuffer and let it set up.
+        // The GL context / Vulkan device exists; give the core its framebuffer and let it set up.
         resizeHwFramebuffer();
-        hw_.makeCurrent();
+        makeGlCurrent();
         if (hwCallback_.context_reset) hwCallback_.context_reset();
     }
     return true;
@@ -154,22 +167,29 @@ bool LibretroCore::loadGame(const fs::path& gamePath, std::string& error) {
 void LibretroCore::resizeHwFramebuffer() {
     const unsigned w = av_.geometry.max_width ? av_.geometry.max_width : av_.geometry.base_width;
     const unsigned h = av_.geometry.max_height ? av_.geometry.max_height : av_.geometry.base_height;
+    if (vulkan_) {  // Vulkan cores draw into their own images, sized like the surface
+        vk_.setSurfaceSize(std::max(w, 16u), std::max(h, 16u));
+        return;
+    }
     hw_.resize(std::max(w, 16u), std::max(h, 16u));
 }
 
 void LibretroCore::unload() {
     if (lib_) {
-        if (hwActive_) hw_.makeCurrent();  // GPU cores free their GL objects during these calls
+        makeGlCurrent();  // GPU cores free their GL objects during these calls
         // Let the core release its GPU objects while the game is still loaded
         // (Azahar crashes if this comes after retro_unload_game).
         if (hwActive_ && gameLoaded_ && hwCallback_.context_destroy) hwCallback_.context_destroy();
         if (gameLoaded_) api_.unload_game();
         if (initialized_) api_.deinit();
         if (initialized_) saveOptions();
+        vk_.destroy();  // while the core's code is still loaded (it frees its own device resources)
         SDL_UnloadObject(lib_);
     }
+    vk_.destroy();
     hw_.destroy();
     hwActive_ = false;
+    vulkan_ = false;
     lib_ = nullptr;
     gameLoaded_ = initialized_ = false;
     gameData_.clear();
@@ -177,7 +197,7 @@ void LibretroCore::unload() {
 }
 
 void LibretroCore::run() {
-    if (hwActive_) hw_.makeCurrent();
+    makeGlCurrent();
     if (frameTimeCb_.callback) frameTimeCb_.callback(frameTimeCb_.reference);
     audioBuf_.clear();
     api_.run();
@@ -189,19 +209,19 @@ void LibretroCore::setPortDevice(unsigned port, unsigned device) {
 }
 
 void LibretroCore::reset() {
-    if (hwActive_) hw_.makeCurrent();
+    makeGlCurrent();
     api_.reset();
 }
 
 std::vector<uint8_t> LibretroCore::saveState() {
-    if (hwActive_) hw_.makeCurrent();
+    makeGlCurrent();
     std::vector<uint8_t> buf(api_.serialize_size());
     if (buf.empty() || !api_.serialize(buf.data(), buf.size())) buf.clear();
     return buf;
 }
 
 bool LibretroCore::loadState(const std::vector<uint8_t>& data) {
-    if (hwActive_) hw_.makeCurrent();
+    makeGlCurrent();
     return !data.empty() && api_.unserialize(data.data(), data.size());
 }
 
@@ -250,6 +270,18 @@ void LibretroCore::forceOption(const std::string& key, const std::string& value)
         it->second.value = value;
         optionsDirty_ = true;
     }
+}
+
+void LibretroCore::forceOptionValue(const std::string& key, const std::string& value) {
+    auto lower = [](std::string s) {
+        for (char& c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    const auto it = options_.find(key);
+    if (it != options_.end())
+        for (const std::string& v : it->second.values)
+            if (lower(v) == lower(value)) return forceOption(key, v);
+    forceOption(key, value);
 }
 
 void LibretroCore::preferDefault(const std::string& key, const std::string& value) {
@@ -411,10 +443,18 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
         host_.onAvInfoChanged();
         return true;
     case RETRO_ENVIRONMENT_SET_HW_RENDER: {
-        // GPU rendering: give the core an OpenGL context + framebuffer of its own.
         auto* cb = static_cast<retro_hw_render_callback*>(data);
         hwRequested_ = true;
         hwActive_ = false;
+        if (cb->context_type == RETRO_HW_CONTEXT_VULKAN) {
+            // Vulkan: the device is made after retro_load_game, once the core has sent what it needs.
+            vulkan_ = true;
+            hwCallback_ = *cb;
+            hwActive_ = true;
+            return true;
+        }
+        // GPU rendering: give the core an OpenGL context + framebuffer of its own.
+        vulkan_ = false;
         if (!hw_.create(*cb, hwError_)) {
             cbLog(RETRO_LOG_WARN, "GPU rendering unavailable: %s\n", hwError_.c_str());
             return false;
@@ -428,7 +468,25 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
     case RETRO_ENVIRONMENT_SET_HW_SHARED_CONTEXT:
         return true;
     case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER:
-        *static_cast<unsigned*>(data) = RETRO_HW_CONTEXT_OPENGL_CORE;
+        *static_cast<unsigned*>(data) = preferVulkan_ ? RETRO_HW_CONTEXT_VULKAN : RETRO_HW_CONTEXT_OPENGL_CORE;
+        return true;
+    case RETRO_ENVIRONMENT_GET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_SUPPORT: {
+        auto* q = static_cast<retro_hw_render_context_negotiation_interface*>(data);
+        q->interface_version = q->interface_type == RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN
+                                   ? RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN_VERSION
+                                   : 0;
+        return true;
+    }
+    case RETRO_ENVIRONMENT_SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE: {
+        auto* n = static_cast<const retro_hw_render_context_negotiation_interface_vulkan*>(data);
+        if (!n || n->interface_type != RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN) return false;
+        vkNegotiation_ = n;
+        return true;
+    }
+    case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE:
+        if (!vk_.active()) return false;
+        *static_cast<const retro_hw_render_interface**>(data) =
+            reinterpret_cast<const retro_hw_render_interface*>(vk_.interface());
         return true;
     case RETRO_ENVIRONMENT_SET_ROTATION:
         // e.g. the DS "sideways" layouts: the core sends the picture upright and we turn it.
@@ -521,13 +579,14 @@ void LibretroCore::videoRefresh(const void* data, unsigned w, unsigned h, size_t
         unsigned maxW = 0, maxH = 0, outW = 0, outH = 0;
         host_.hwOutputSize(maxW, maxH);
         const uint32_t* px = !hwActive_ ? nullptr
+                             : vulkan_  ? (data ? vk_.readFrame(w, h, maxW, maxH, outW, outH) : vk_.takePending(outW, outH))
                              : data     ? hw_.readFrame(w, h, maxW, maxH, outW, outH)
                                         : hw_.takePending(outW, outH);
         if (px) {
             host_.onVideo(px, outW, outH, size_t(outW) * 4, RETRO_PIXEL_FORMAT_XRGB8888);
             // Uploading may have switched to the window's own GL context (SDL's OpenGL renderer).
             // The core keeps drawing after this callback returns, so give it its context back.
-            hw_.makeCurrent();
+            makeGlCurrent();
         }
         return;
     }

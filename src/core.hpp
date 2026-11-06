@@ -7,6 +7,7 @@
 
 #include "hwrender.hpp"
 #include "libretro.h"
+#include "vkrender.hpp"
 
 // What a running core needs from the app (screen, speakers, controllers...).
 class CoreHost {
@@ -60,6 +61,9 @@ public:
     const retro_system_av_info& avInfo() const { return av_; }
     const std::string& name() const { return libraryName_; }
     const std::string& version() const { return libraryVersion_; }
+    // Offer Vulkan instead of OpenGL to cores that can use either (call before loadGame).
+    void setPreferVulkan(bool on) { preferVulkan_ = on; }
+    bool usingVulkan() const { return hwActive_ && vulkan_; }
     bool wantsHardwareRendering() const { return hwRequested_; }
     bool usingHardwareRendering() const { return hwActive_; }
     uintptr_t hwFramebuffer() const { return hw_.framebuffer(); }
@@ -69,6 +73,18 @@ public:
 
     // Core options (persisted to the options file on unload).
     std::map<std::string, CoreOption>& options() { return options_; }
+    // An option of Nintendall's own, kept in the core's options file with the core's options
+    // (e.g. the graphics API). Call after load().
+    void addAppOption(const char* key, const char* desc, const char* def, std::vector<std::string> values,
+                      std::vector<std::string> labels) {
+        defineOption(key, desc, def, std::move(values), std::move(labels));
+    }
+    std::string optionValue(const std::string& key) const {
+        const auto it = options_.find(key);
+        return it == options_.end() ? std::string() : it->second.value;
+    }
+    // forceOption, using the core's own spelling of the value ("vulkan" -> "Vulkan").
+    void forceOptionValue(const std::string& key, const std::string& value);
     void setOption(const std::string& key, const std::string& value);
     // Set an option from the app (e.g. the DS screen layout). Applies now, or as soon as
     // the core defines the option, and wins over the user's options file.
@@ -143,6 +159,14 @@ private:
     bool hwActive_ = false;
     std::string hwError_;
     HwRender hw_;
+    // Vulkan instead of OpenGL (GameCube / Wii, 3DS, Wii U when chosen in Console Settings).
+    bool preferVulkan_ = false;  // what GET_PREFERRED_HW_RENDER answers
+    bool vulkan_ = false;        // the core asked for a Vulkan context
+    VkRender vk_;
+    const retro_hw_render_context_negotiation_interface_vulkan* vkNegotiation_ = nullptr;
+    void makeGlCurrent() {
+        if (hwActive_ && !vulkan_) hw_.makeCurrent();
+    }
     retro_hw_render_callback hwCallback_{};
     void resizeHwFramebuffer();
     bool shutdownRequested_ = false;
