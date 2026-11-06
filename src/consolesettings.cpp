@@ -29,11 +29,6 @@ Setting raw(const std::string& label, const std::string& key, bool restart = fal
 }
 
 const Choices kOnOff = {{"disabled", "Off"}, {"enabled", "On"}};
-
-Setting graphicsApi() {
-    return opt("Graphics API", kGraphicsApiOption, {{"opengl", "OpenGL"}, {"vulkan", "Vulkan"}}, true,
-               "Vulkan can run faster on some PCs; if it can't start, OpenGL is used");
-}
 const Choices kOffOnCaps = {{"OFF", "Off"}, {"ON", "On"}};
 const Choices kFalseTrue = {{"False", "Off"}, {"True", "On"}};
 
@@ -165,8 +160,7 @@ std::vector<SettingGroup> ds() {
 std::vector<SettingGroup> n3ds() {
     return {
         {"Picture",
-         {graphicsApi(),
-          opt("Resolution", "citra_resolution_factor",
+         {opt("Resolution", "citra_resolution_factor",
               {{"1", "Native (400x240)"}, {"2", "2x (800x480)"}, {"3", "3x (1200x720)"}, {"4", "4x (1600x960)"},
                {"5", "5x"}, {"6", "6x"}, {"8", "8x"}, {"10", "10x"}},
               true),
@@ -248,8 +242,7 @@ std::vector<SettingGroup> n64() {
 std::vector<SettingGroup> dolphin(bool wii) {
     std::vector<SettingGroup> g = {
         {"Picture",
-         {graphicsApi(),
-          opt("Resolution", "dolphin_efb_scale",
+         {opt("Resolution", "dolphin_efb_scale",
               {{"1", "Native (480p)"}, {"2", "2x (720p)"}, {"3", "3x (1080p)"}, {"4", "4x (1440p)"}, {"5", "5x"},
                {"6", "6x (4K)"}, {"8", "8x"}},
               true, "Renders 3D sharper than the real console"),
@@ -292,8 +285,7 @@ std::vector<SettingGroup> dolphin(bool wii) {
 std::vector<SettingGroup> wiiU() {
     return {
         {"Picture",
-         {graphicsApi(),
-          opt("Resolution", "cemu_internal_resolution",
+         {opt("Resolution", "cemu_internal_resolution",
               {{"0.5x", "0.5x (faster)"}, {"native", "Native (720p)"}, {"1.5x", "1.5x (1080p)"},
                {"2x", "2x (1440p)"}, {"3x", "3x (4K)"}},
               true, "Some games draw parts at a fixed size and can look odd when resized"),
@@ -323,10 +315,6 @@ std::vector<SettingGroup> wiiU() {
 }
 
 }  // namespace
-
-bool canUseVulkan(System s) {
-    return s == System::GameCube || s == System::Wii || s == System::N3DS || s == System::WiiU;
-}
 
 const std::vector<SettingGroup>& consoleSettings(System s) {
     static const std::vector<SettingGroup> none;

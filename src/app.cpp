@@ -87,15 +87,11 @@ constexpr int kSeparate = 6;
 // Order in the Layout menu (-1 = separator). Indexes are saved per game, so new layouts go at the end.
 constexpr int kLayoutMenuOrder[] = {0, 1, 2, 3, kSeparate, -1, 4, 5};
 
-// Systems drawn on the GPU: OpenGL, Vulkan (GameCube / Wii, 3DS, Wii U, if chosen in Console
-// Settings), or the core's (slow) software renderer as a last resort.
-enum class Renderer { OpenGL, Vulkan, Software };
+// Systems drawn on the GPU: pick OpenGL, or the core's (slow) software renderer as a fallback.
 bool hasSoftwareFallback(System s) { return s == System::N3DS || s == System::N64; }
-void chooseRenderer(LibretroCore& core, System s, Renderer r) {
-    const bool vulkan = r == Renderer::Vulkan, software = r == Renderer::Software;
-    core.setPreferVulkan(vulkan);  // Dolphin follows what we prefer
-    if (s == System::N3DS) core.forceOptionValue("citra_graphics_api", software ? "Software" : vulkan ? "Vulkan" : "OpenGL");
-    if (s == System::WiiU) core.forceOptionValue("cemu_gpu_api", vulkan ? "Vulkan" : "OpenGL");
+void chooseRenderer(LibretroCore& core, System s, bool software) {
+    if (s == System::N3DS) core.forceOption("citra_graphics_api", software ? "Software" : "OpenGL");
+    if (s == System::WiiU) core.forceOption("cemu_gpu_api", "OpenGL");  // we provide OpenGL, not Vulkan
     if (s == System::N64) {
         core.forceOption("mupen64plus-rdp-plugin", software ? "angrylion" : "gliden64");
         core.forceOption("mupen64plus-rsp-plugin", software ? "cxd4" : "hle");
@@ -423,12 +419,9 @@ bool App::startGame(const fs::path& path) {
 
     if (det.system == System::Wii) enableWiimoteSpeaker(paths_.saves / "User" / "Config" / "Dolphin.ini");
 
-    // 4. Start the emulator with the game. GPU systems try the chosen renderer first, then fall
-    //    back: Vulkan -> OpenGL -> software (3DS / N64), if this PC can't do the first.
+    // 4. Start the emulator with the game.
     std::string err;
-    std::vector<Renderer> renderers;
-    std::string startNote;
-    for (size_t attempt = 0; attempt == 0 || attempt < renderers.size(); ++attempt) {
+    for (int attempt = 0; attempt < 2; ++attempt) {
         core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(sys.core), paths_.saves,
                                                paths_.config / (std::string(sys.core) + ".opt"));
         const bool coreLoaded = core_->load(corePath, err);
@@ -440,17 +433,7 @@ bool App::startGame(const fs::path& path) {
                 core_->forceOption("melonds_show_current_layout", "disabled");  // we have our own menu
             applyLayout();
         }
-        if (coreLoaded && attempt == 0) {
-            if (canUseVulkan(det.system))
-                core_->addAppOption(kGraphicsApiOption, "Graphics API", "opengl", {"opengl", "vulkan"}, {"OpenGL", "Vulkan"});
-            if (canUseVulkan(det.system) && core_->optionValue(kGraphicsApiOption) == "vulkan")
-                renderers.push_back(Renderer::Vulkan);
-            renderers.push_back(Renderer::OpenGL);
-            if (hasSoftwareFallback(det.system)) renderers.push_back(Renderer::Software);
-        }
-        if (coreLoaded && canUseVulkan(det.system) && attempt > 0)  // keep the user's choice in the file
-            core_->addAppOption(kGraphicsApiOption, "Graphics API", "opengl", {"opengl", "vulkan"}, {"OpenGL", "Vulkan"});
-        if (coreLoaded) chooseRenderer(*core_, det.system, renderers[attempt]);
+        if (coreLoaded) chooseRenderer(*core_, det.system, attempt > 0);
         if (coreLoaded && (det.system == System::GameCube || det.system == System::Wii)) {
             core_->forceOption("dolphin_osd_enabled", "disabled");  // no emulator info text over the game
             // Dolphin's dual-core mode keeps the game running between our frames, so games ran too fast
@@ -462,20 +445,15 @@ bool App::startGame(const fs::path& path) {
             core_->preferDefault("dolphin_wiimote_default_device", "nunchuk");  // what most Wii games expect
             core_->preferDefault("dolphin_ir_offset", "10");  // pointer lines up with the mouse / stick
         }
-        if (coreLoaded && core_->loadGame(gameFile, err)) {
-            if (attempt > 0 && renderers[0] == Renderer::Vulkan)
-                startNote = renderers[attempt] == Renderer::OpenGL ? "Vulkan couldn't start on this PC - using OpenGL"
-                                                                   : "Vulkan couldn't start on this PC";
-            break;
-        }
+        if (coreLoaded && core_->loadGame(gameFile, err)) break;
 
-        // If this PC couldn't give the emulator its GPU renderer, try the next one.
-        const bool retry = coreLoaded && attempt + 1 < renderers.size() && core_->wantsHardwareRendering() &&
+        // If this PC couldn't give the emulator OpenGL, try once more with software rendering.
+        const bool retry = attempt == 0 && hasSoftwareFallback(det.system) && core_->wantsHardwareRendering() &&
                            !core_->usingHardwareRendering();
         std::fprintf(stderr, "Core failed: %s\n", err.c_str());
         core_.reset();
         if (!retry) break;
-        std::fprintf(stderr, "Retrying with %s\n", renderers[attempt + 1] == Renderer::OpenGL ? "OpenGL" : "software rendering");
+        std::fprintf(stderr, "Retrying with software rendering\n");
     }
     if (!core_) {
         system_ = System::Unknown;
@@ -510,7 +488,6 @@ bool App::startGame(const fs::path& path) {
     paused_ = fastForward_ = fastForwardToggled_ = false;
     playedSinceLaunch_ = true;  // no "new version" popup from now on
     nextFrame_ = nowSeconds();
-    if (!startNote.empty()) osd(startNote, 6000);
     addRecent(path);
     if (video_.window()) SDL_SetWindowTitle(video_.window(), ("Nintendall - " + gameTitle_).c_str());
     // If the game's shape is very different from the window (e.g. NES -> tall DS), refit the window.

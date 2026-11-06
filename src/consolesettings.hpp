@@ -28,10 +28,5 @@ struct SettingGroup {
 
 const std::vector<SettingGroup>& consoleSettings(System s);
 
-// Nintendall's own option (kept in the core's options file): draw with "opengl" or "vulkan".
-// Offered for GameCube / Wii, 3DS and Wii U.
-inline constexpr const char* kGraphicsApiOption = "nintendall_graphics_api";
-bool canUseVulkan(System s);
-
 // Friendly label for a raw core option value ("enabled" -> "On", ...).
 std::string prettyValue(const std::string& value);

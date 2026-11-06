@@ -180,9 +180,7 @@ the game that's running, with friendly names. Settings marked * apply after
 | System | Settings |
 |---|---|
 | N64 | Resolution upscaling (to 4K), widescreen hack, MSAA / FXAA, texture filters and HD texture enhancement (xBRZ, HQ4x), Expansion Pak, Rumble / Controller Pak, stick sensitivity |
-| GameCube / Wii | Graphics API (OpenGL / Vulkan), resolution upscaling (to 8x), widescreen hack, aspect ratio, anti-aliasing, texture filtering, CPU speed, language, rumble |
-| Wii U | Graphics API (OpenGL / Vulkan), resolution (0.5x to 4K), smoother frame rate, and more |
-| 3DS | Graphics API (OpenGL / Vulkan), resolution upscaling (to 10x), texture filters (Anime4K, ScaleForce, xBRZ), stereoscopic 3D, New / Old 3DS, region, language, CPU speed |
+| 3DS | Resolution upscaling (to 10x), texture filters (Anime4K, ScaleForce, xBRZ), stereoscopic 3D, New / Old 3DS, region, language, CPU speed |
 | DS | OpenGL renderer with 3D upscaling (to 8x), gap between screens, stylus cursor, sound smoothing |
 | SNES | HD Mode 7, run-ahead (less input lag), CPU and Super FX overclock, TV filters, no sprite limit |
 | NES / FDS | Palettes, TV filters, no sprite limit, hide screen edges, overclock, region, fast disk loading |
@@ -289,14 +287,6 @@ their own OpenGL context on a hidden window and render into an offscreen
 framebuffer. Nintendall copies each finished frame into the normal window, so
 the window itself can use any renderer (Direct3D on Windows). See `src/hwrender.*`.
 
-**Vulkan:** GameCube / Wii, 3DS and Wii U can draw with Vulkan instead: choose
-**Graphics API > Vulkan** in their Console Settings (OpenGL is the default; N64
-stays on OpenGL). Nintendall creates the Vulkan device through libretro's
-negotiation interface (the core asks for what it needs), gives the core a hidden
-window's surface, and copies each frame it hands over (`set_image`) into the
-window, shrunk on the GPU like the OpenGL path. If Vulkan can't start on a PC,
-the game starts with OpenGL and says so. See `src/vkrender.*`.
-
 ## New versions
 
 When Nintendall starts, it asks GitHub (in the background) whether a newer
@@ -342,7 +332,6 @@ Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen).
 | `src/systems.*` | the list of systems, extensions and the emulator for each |
 | `src/core.*` | loads a libretro core and implements the libretro API |
 | `src/hwrender.*` | OpenGL context + framebuffer for GPU-drawn cores (N64, GameCube/Wii, 3DS, Wii U) |
-| `src/vkrender.*` | Vulkan device and frame copy for GameCube/Wii, 3DS and Wii U (when Vulkan is chosen) |
 | `src/app.*` | main window, menu actions, game loop, saves |
 | `src/home.*`, `src/library.*`, `src/covers.*`, `src/http.*` | home screen, Games folder scanning (and game IDs), box cover downloads |
 | `src/update.*`, `src/selfupdate.*`, `src/sha256.*` | checks GitHub for a new version at startup; Update Now (download, check, install, restart) |
