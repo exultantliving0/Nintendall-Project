@@ -47,6 +47,13 @@ Nintendall looks again a week later):
   `Super Mario Bros. 3 (USA).nes` match exactly; close names like
   `Pokemon Red.gb` usually match too).
 
+Covers are the **USA** version unless the game is from somewhere else. Nintendall
+reads that from the file name first (No-Intro tags like `(Europe)`, `(Japan)`,
+`(France)`, short tags like `(E)` / `[J]`, or `(PAL)`), then from the game itself:
+the country code in SNES, N64 and Game Boy Advance games, the ID of DS, 3DS,
+GameCube, Wii and Wii U games, and Game Boy games marked Japan-only. A game from
+France gets the French box if there is one, then the European one.
+
 Only the game's ID or file name is sent, to those two sites. Covers aren't
 bundled with Nintendall; they're fetched by each user.
 

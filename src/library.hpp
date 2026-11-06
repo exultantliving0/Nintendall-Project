@@ -31,6 +31,7 @@ struct LibraryGame {
     std::string title;           // shown under the cover
     std::string fileName;        // file name without extension, for finding the cover by name
     std::string gameId;          // the game's ID code (GameCube, Wii, Wii U, DS, 3DS), for finding its cover
+    std::string region;          // where it's from ("Europe", "Japan", "France"...), "" = USA / not known
 };
 
 class Library {
@@ -50,3 +51,9 @@ private:
 
 // "Legend of Zelda, The (USA) [!]" -> "The Legend of Zelda"
 std::string cleanTitle(const std::string& fileName);
+
+// The regions a name's tags give, in the No-Intro spelling: "Tetris (USA, Europe)" -> {USA, Europe},
+// "Zelda (E) [!]" -> {Europe}, "Mario (PAL)" -> {Europe}. Language lists like (En,Fr,De) are skipped.
+std::vector<std::string> regionsInName(const std::string& name);
+// The wider region a country's covers can fall back to (France -> Europe), or "".
+std::string parentRegion(const std::string& region);

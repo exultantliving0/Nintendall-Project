@@ -128,6 +128,116 @@ std::string cleanTitle(const std::string& fileName) {
 }
 
 // ============================================================================
+// Regions (to pick the cover from the same country as the game; USA when nothing says otherwise)
+
+namespace {
+
+// A region tag word: "USA", "U", "Europe", "PAL", "F"... -> No-Intro region name, or "".
+std::string regionWord(const std::string& w) {
+    static const std::map<std::string, std::string> words = {
+        {"USA", "USA"}, {"US", "USA"}, {"U", "USA"}, {"NTSC-U", "USA"}, {"America", "USA"}, {"Canada", "Canada"},
+        {"Europe", "Europe"}, {"EU", "Europe"}, {"EUR", "Europe"}, {"E", "Europe"}, {"PAL", "Europe"}, {"UK", "UK"},
+        {"Japan", "Japan"}, {"JP", "Japan"}, {"JPN", "Japan"}, {"J", "Japan"}, {"NTSC-J", "Japan"},
+        {"World", "World"}, {"W", "World"},
+        {"France", "France"}, {"F", "France"}, {"Germany", "Germany"}, {"G", "Germany"}, {"Spain", "Spain"},
+        {"S", "Spain"}, {"Italy", "Italy"}, {"I", "Italy"}, {"Netherlands", "Netherlands"}, {"Sweden", "Sweden"},
+        {"Denmark", "Denmark"}, {"Finland", "Finland"}, {"Norway", "Norway"}, {"Portugal", "Portugal"},
+        {"Russia", "Russia"}, {"Korea", "Korea"}, {"K", "Korea"}, {"China", "China"}, {"C", "China"},
+        {"Taiwan", "Taiwan"}, {"Hong Kong", "Hong Kong"}, {"Asia", "Asia"}, {"Australia", "Australia"},
+        {"A", "Australia"}, {"Brazil", "Brazil"}, {"B", "Brazil"},
+        // Country codes some collections use: "(DE)", "(FR)" (upper case; "(De)" is a language).
+        {"DE", "Germany"}, {"FR", "France"}, {"ES", "Spain"}, {"IT", "Italy"}, {"NL", "Netherlands"},
+        {"SE", "Sweden"}, {"KR", "Korea"}, {"CN", "China"}, {"TW", "Taiwan"}, {"AU", "Australia"},
+        {"BR", "Brazil"}, {"GB", "UK"}, {"CA", "Canada"},
+    };
+    const auto it = words.find(w);
+    return it == words.end() ? std::string() : it->second;
+}
+
+// The region letter in Nintendo game codes (4th character of DS / GBA / GameCube / Wii IDs, N64 country byte).
+std::string regionFromCode(char c) {
+    switch (c) {
+    case 'E': case 'N': return "USA";
+    case 'J': return "Japan";
+    case 'P': case 'X': case 'Y': case 'Z': case 'L': case 'M': case 'V': return "Europe";
+    case 'D': return "Germany";
+    case 'F': return "France";
+    case 'S': return "Spain";
+    case 'I': return "Italy";
+    case 'H': return "Netherlands";
+    case 'K': case 'Q': case 'T': return "Korea";
+    case 'C': return "China";
+    case 'W': return "Taiwan";
+    case 'U': return "Australia";
+    case 'B': return "Brazil";
+    case 'R': return "Russia";
+    default: return {};
+    }
+}
+
+// SNES header region byte.
+std::string snesRegion(uint8_t b) {
+    static const char* names[] = {"Japan", "USA", "Europe", "Sweden", "Finland", "Denmark", "France", "Netherlands",
+                                  "Spain", "Germany", "Italy", "China", "", "Korea", "", "Canada", "Brazil", "Australia"};
+    return b < sizeof names / sizeof names[0] ? names[b] : "";
+}
+
+// One region for a list: USA if it's there (the default), else World, else the first.
+std::string pickRegion(const std::vector<std::string>& regions) {
+    if (regions.empty()) return {};
+    for (const char* r : {"USA", "World"})
+        if (std::find(regions.begin(), regions.end(), r) != regions.end()) return r;
+    return regions[0];
+}
+
+}  // namespace
+
+std::vector<std::string> regionsInName(const std::string& name) {
+    std::vector<std::string> out;
+    for (size_t a = name.find_first_of("(["); a != std::string::npos; a = name.find_first_of("([", a + 1)) {
+        const size_t b = name.find_first_of(")]", a);
+        if (b == std::string::npos) break;
+        const std::string group = name.substr(a + 1, b - a - 1);
+        std::vector<std::string> words;
+        std::string w;
+        for (const char c : group + ",") {
+            if (c == ',') {
+                w = trim(w);
+                if (!w.empty()) words.push_back(w);
+                w.clear();
+            } else {
+                w += c;
+            }
+        }
+        // GoodTools letter runs: "(UE)", "(JU)", "(JUE)".
+        if (words.size() == 1 && regionWord(words[0]).empty() && words[0].size() <= 3 &&
+            words[0].find_first_not_of("UEJ") == std::string::npos) {
+            const std::string run = words[0];
+            words.clear();
+            for (const char c : run) words.push_back(std::string(1, c));
+        }
+        std::vector<std::string> found;
+        for (const std::string& x : words)
+            if (const std::string r = regionWord(x); !r.empty()) found.push_back(r);
+        // Only a group made entirely of regions counts ("(En,Fr,De)" is languages, "(Rev 1)" is neither).
+        if (!found.empty() && found.size() == words.size()) out.insert(out.end(), found.begin(), found.end());
+    }
+    return out;
+}
+
+std::string parentRegion(const std::string& region) {
+    static const std::map<std::string, std::string> parent = {
+        {"France", "Europe"}, {"Germany", "Europe"}, {"Spain", "Europe"}, {"Italy", "Europe"},
+        {"Netherlands", "Europe"}, {"Sweden", "Europe"}, {"Denmark", "Europe"}, {"Finland", "Europe"},
+        {"Norway", "Europe"}, {"Portugal", "Europe"}, {"UK", "Europe"}, {"Russia", "Europe"},
+        {"Australia", "Europe"}, {"Canada", "USA"}, {"Brazil", "USA"}, {"Korea", "Asia"}, {"China", "Asia"},
+        {"Taiwan", "Asia"}, {"Hong Kong", "Asia"},
+    };
+    const auto it = parent.find(region);
+    return it == parent.end() ? std::string() : it->second;
+}
+
+// ============================================================================
 // Game IDs (used to find covers on GameTDB)
 
 namespace {
@@ -286,6 +396,8 @@ LibraryGame readGame(const fs::path& path, System console, bool folder) {
     g.system = console;
     g.fileName = folder ? path.filename().u8string() : path.stem().u8string();
     g.title = cleanTitle(g.fileName);
+    // Where the game is from: its file name says first, then the game itself (below).
+    g.region = pickRegion(regionsInName(g.fileName));
 
     if (folder) {  // Wii U game folder: meta/meta.xml has the title and product code
         std::ifstream f(path / "meta" / "meta.xml", std::ios::binary);
@@ -299,6 +411,7 @@ LibraryGame readGame(const fs::path& path, System console, bool folder) {
             const std::string id = code.substr(code.size() - 4) + company.substr(company.size() - 2);
             if (validId(id, 6)) g.gameId = id;
         }
+        if (g.region.empty() && !g.gameId.empty()) g.region = regionFromCode(g.gameId[3]);
         return g;
     }
 
@@ -325,6 +438,36 @@ LibraryGame readGame(const fs::path& path, System console, bool folder) {
     } else if (console == System::N3DS) {
         g.gameId = n3dsId(f);
     }
+
+    if (g.region.empty()) {
+        if (!g.gameId.empty()) {
+            g.region = regionFromCode(g.gameId[3]);
+        } else if (console == System::GBA) {
+            const std::vector<uint8_t> h = readAt(f, 0xAC, 4);  // game code, e.g. "AXVE"
+            if (h.size() == 4 && validId(std::string(h.begin(), h.end()), 4)) g.region = regionFromCode(char(h[3]));
+        } else if (console == System::N64) {
+            const std::vector<uint8_t> h = readAt(f, 0, 0x40);
+            if (h.size() == 0x40) {
+                // Country byte at 0x3E in big-endian (.z64) ROMs; the other byte orders move it.
+                const uint32_t magic = be32(h.data());
+                const size_t at = magic == 0x80371240 ? 0x3E : magic == 0x37804012 ? 0x3F : magic == 0x40123780 ? 0x3D : 0;
+                if (at) g.region = regionFromCode(char(h[at]));
+            }
+        } else if (console == System::SNES) {
+            // Internal header (LoROM / HiROM, maybe after a 512-byte copier header): the one whose
+            // checksum and complement add up holds the region byte.
+            for (const uint64_t base : {0x7FC0, 0xFFC0, 0x81C0, 0x101C0}) {
+                const std::vector<uint8_t> h = readAt(f, base, 0x20);
+                if (h.size() < 0x20 || (uint32_t(h[0x1C] | h[0x1D] << 8) ^ uint32_t(h[0x1E] | h[0x1F] << 8)) != 0xFFFF)
+                    continue;
+                g.region = snesRegion(h[0x19]);
+                break;
+            }
+        } else if (console == System::GB) {
+            const std::vector<uint8_t> h = readAt(f, 0x14A, 1);  // destination: 0 = Japan only
+            if (h.size() == 1 && h[0] == 0) g.region = "Japan";
+        }
+    }
     return g;
 }
 
@@ -339,8 +482,11 @@ std::vector<LibraryGame> Library::scan(const fs::path& folder, System console) {
         const uintmax_t size = isFolder ? 0 : fs::file_size(p, ec);
         const std::string key = p.u8string();
         auto it = known_.find(key);
-        if (it == known_.end() || it->second.time != time || it->second.size != size)
-            it = known_.insert_or_assign(key, Known{time, size, readGame(p, console, isFolder)}).first;
+        if (it == known_.end() || it->second.time != time || it->second.size != size) {
+            LibraryGame game = readGame(p, console, isFolder);
+            if (game.region == "USA") game.region.clear();  // the default
+            it = known_.insert_or_assign(key, Known{time, size, std::move(game)}).first;
+        }
         games.push_back(it->second.game);
     };
 

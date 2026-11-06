@@ -42,6 +42,7 @@ struct Request {
     std::string key;  // the game's path
     System system;
     std::string gameId, fileName, title;
+    std::string region;  // where the game is from ("" = USA)
 };
 
 struct Image {
@@ -229,29 +230,36 @@ std::vector<std::string> parseListing(const std::vector<uint8_t>& html) {
     return names;
 }
 
-// Picks the best-looking entry: same name as the file, then the file's region, then USA / World /
-// Europe / Japan, skipping hacks, betas and prototypes unless the file is one too.
-int score(const std::string& name, const std::string& fileName) {
-    if (name == fileName) return 1000;
+// Picks the best-looking entry: same name as the file, then the game's region (USA unless the
+// game is from somewhere else), skipping hacks, betas and prototypes unless the file is one too.
+int score(const std::string& name, const std::string& fileName, const std::string& region) {
+    if (name == fileName) return 1 << 30;  // exactly the file's name: always the one
     auto has = [](const std::string& s, const char* t) { return s.find(t) != std::string::npos; };
     int sc = 0;
-    // Tags the file has, e.g. "(Europe)": the same tags in the name count.
+    // Other tags the file has, e.g. "(Rev 1)": the same tags in the name count.
     for (size_t a = fileName.find('('); a != std::string::npos; a = fileName.find('(', a + 1)) {
         const size_t b = fileName.find(')', a);
         if (b == std::string::npos) break;
-        if (has(name, fileName.substr(a, b - a + 1).c_str())) sc += 40;
+        if (has(name, fileName.substr(a, b - a + 1).c_str())) sc += 20;
     }
-    if (has(name, "(USA")) sc += 30;
-    else if (has(name, "(World")) sc += 25;
-    else if (has(name, "(Europe")) sc += 15;
-    else if (has(name, "(Japan")) sc += 10;
+    // The region: the game's own first, then the wider one (France -> Europe), then World, USA,
+    // Europe, Japan.
+    const std::vector<std::string> have = regionsInName(name);
+    auto in = [&](const std::string& r) { return !r.empty() && std::find(have.begin(), have.end(), r) != have.end(); };
+    const std::string want = region.empty() ? "USA" : region;
+    if (in(want)) sc += 60;
+    else if (in(parentRegion(want))) sc += 45;
+    else if (in("World")) sc += 35;
+    else if (in("USA")) sc += 30;
+    else if (in("Europe")) sc += 20;
+    else if (in("Japan")) sc += 10;
     for (const char* bad : {"[h", "[b", "[t", "(Beta", "(Proto", "(Demo", "(Sample", "(Pirate", "(Unl", "(Hack", "[a"})
         if (has(name, bad) && !has(fileName, bad)) sc -= 50;
     if (has(name, "(Rev") || has(name, "(Virtual Console")) sc -= 2;
     return sc * 1000 - int(std::min<size_t>(name.size(), 999));  // then the shortest name
 }
 
-std::string bestMatch(const Index& idx, const std::string& fileName, const std::string& title) {
+std::string bestMatch(const Index& idx, const std::string& fileName, const std::string& title, const std::string& region) {
     std::vector<size_t> found;
     for (const std::string& n : {fileName, title}) {
         const auto it = idx.byKey.find(joinWords(nameWords(n)));
@@ -283,7 +291,7 @@ std::string bestMatch(const Index& idx, const std::string& fileName, const std::
     std::string best;
     int bestScore = 0;
     for (const size_t i : found) {
-        const int sc = score(idx.names[i], fileName);
+        const int sc = score(idx.names[i], fileName, region);
         if (best.empty() || sc > bestScore) {
             best = idx.names[i];
             bestScore = sc;
@@ -392,7 +400,7 @@ std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
     }
     const char* sys = libretroSystem(r.system);
     if (!sys) return {};
-    const std::string name = bestMatch(index(r.system), r.fileName, r.title);
+    const std::string name = bestMatch(index(r.system), r.fileName, r.title, r.region);
     if (name.empty()) return {};
     const std::string url = "https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/" + urlEncode(name) + ".png";
     if (get(url, body, reached) == 200 && isImage(body)) return body;
@@ -404,8 +412,10 @@ Image Covers::Shared::load(const Request& r) {
     // Covers found by ID on systems with big GameTDB covers are saved as "hq - <ID>"; small ones
     // saved by older versions ("id - <ID>") are replaced the first time.
     const bool hq = gameTdbSizes(r.system).size() > 1;
-    const std::string base =
-        r.gameId.empty() ? "name - " + safeFileName(r.fileName) : (hq ? "hq - " : "id - ") + r.gameId;
+    // Games from outside the USA have the region in the name (their covers were picked by region).
+    const std::string base = r.gameId.empty()
+                                 ? "name - " + safeFileName(r.fileName) + (r.region.empty() ? "" : " - " + r.region)
+                                 : (hq ? "hq - " : "id - ") + r.gameId;
     const fs::path dir = cacheDir / systemInfo(r.system).key;
     const fs::path have = dir / (base + ".img"), none = dir / (base + ".none");
     if (hq && !r.gameId.empty()) {
@@ -477,7 +487,7 @@ SDL_Texture* Covers::get(const LibraryGame& g) {
     textures_[key] = nullptr;
     if (shared_) {
         std::lock_guard<std::mutex> lock(shared_->mutex);
-        shared_->queue.push_back({key, g.system, g.gameId, g.fileName, g.title});
+        shared_->queue.push_back({key, g.system, g.gameId, g.fileName, g.title, g.region});
         shared_->wake.notify_one();
     }
     return nullptr;
