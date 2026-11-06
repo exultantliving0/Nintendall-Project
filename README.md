@@ -31,11 +31,20 @@ missing folders when it starts. **File > Open Games Folder** or the **Open
 Folder** button go there. Games can be in subfolders, zipped (`.zip`), and
 Famicom Disk System games go in `NES/`. New games show up by themselves.
 To use another folder, set `games.folder = "D:/My Games"` in `nintendall.cfg`
-(portable mode uses `Games/` next to the program).
+(and `covers.folder` for the Box Covers folder; portable mode uses `Games/` and
+`Box Covers/` next to the program).
 
-**Box covers** are downloaded automatically the first time a game is shown,
-then kept in the `covers/` data folder (games without a cover get a plain box;
-Nintendall looks again a week later):
+**Box covers** live in the **Box Covers** folder next to the Games folder
+(`Documents/Nintendall/Box Covers/<console>/`), named like the game file:
+`Box Covers/NES/Super Mario Bros. (World).png` is the cover of
+`Games/NES/Super Mario Bros. (World).nes`. To use your own cover, put a `.png`
+or `.jpg` with the game's name there (replacing the downloaded one if there is
+one); it shows up within a few seconds. Delete a cover to get the downloaded
+one back. **File > Open Box Covers Folder** goes there.
+
+Missing covers are downloaded automatically the first time a game is shown and
+saved in that folder (games without a cover get a plain box; Nintendall looks
+again a week later):
 
 - GameCube, Wii, Wii U, DS, 3DS: from [GameTDB](https://www.gametdb.com), using
   the game's ID code read from the file (3DS, DS and Wii U in GameTDB's high
@@ -46,13 +55,6 @@ Nintendall looks again a week later):
   matching the file name to its list of game names (No-Intro names like
   `Super Mario Bros. 3 (USA).nes` match exactly; close names like
   `Pokemon Red.gb` usually match too).
-
-Covers are the **USA** version unless the game is from somewhere else. Nintendall
-reads that from the file name first (No-Intro tags like `(Europe)`, `(Japan)`,
-`(France)`, short tags like `(E)` / `[J]`, or `(PAL)`), then from the game itself:
-the country code in SNES, N64 and Game Boy Advance games, the ID of DS, 3DS,
-GameCube, Wii and Wii U games, and Game Boy games marked Japan-only. A game from
-France gets the French box if there is one, then the European one.
 
 Only the game's ID or file name is sent, to those two sites. Covers aren't
 bundled with Nintendall; they're fetched by each user.
@@ -320,7 +322,7 @@ beside it instead.
 - `system/`: BIOS / firmware files that some cores need
 - `config/`: per-core settings (`<core>.opt`, editable)
 - `screenshots/`
-- `covers/`: downloaded box covers (safe to delete; they download again)
+- `covers/`: lists of game names for finding covers, and notes of covers that don't exist (the covers themselves are in the Box Covers folder)
 - `nintendall.cfg`: settings, button mappings and recent games
 
 Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen).

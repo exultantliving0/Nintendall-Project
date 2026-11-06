@@ -49,7 +49,7 @@ public:
 private:
     // Menu actions
     enum Action {
-        ActOpen = 1, ActCloseGame, ActExit, ActGamesFolder,
+        ActOpen = 1, ActCloseGame, ActExit, ActGamesFolder, ActCoversFolder,
         ActRecent = 10,  // + index
         ActPause = 30, ActReset, ActFastForward,
         ActSaveState = 40, ActLoadState,

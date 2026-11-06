@@ -16,12 +16,15 @@
 // arrow keys / a controller and press Enter / A) to play it.
 class Home {
 public:
-    void start(const std::filesystem::path& gamesRoot, const std::filesystem::path& coverCache,
-               const std::string& consoleKey);
+    // gamesRoot: the Games folder; coversRoot: the Box Covers folder (both with a folder per console);
+    // coverCache: Nintendall's own cover notes.
+    void start(const std::filesystem::path& gamesRoot, const std::filesystem::path& coversRoot,
+               const std::filesystem::path& coverCache, const std::string& consoleKey);
     void shutdown();  // frees the cover textures (before the renderer goes away)
 
     std::string consoleKey() const;  // the console being shown, e.g. "gba"
     const std::filesystem::path& gamesRoot() const { return root_; }
+    const std::filesystem::path& coversRoot() const { return coversRoot_; }
     std::filesystem::path consoleFolder() const;
     void refresh();  // look in the folder again
 
@@ -54,7 +57,7 @@ private:
 
     Library library_;
     Covers covers_;
-    std::filesystem::path root_;
+    std::filesystem::path root_, coversRoot_;
     int console_ = 0;
     int coverSize_ = 0;
     std::vector<LibraryGame> games_;

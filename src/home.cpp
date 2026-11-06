@@ -74,13 +74,17 @@ std::vector<std::string> wrap(Text& t, const std::string& text, int width, int m
 
 }  // namespace
 
-void Home::start(const fs::path& gamesRoot, const fs::path& coverCache, const std::string& consoleKey) {
+void Home::start(const fs::path& gamesRoot, const fs::path& coversRoot, const fs::path& coverCache,
+                 const std::string& consoleKey) {
     root_ = gamesRoot;
+    coversRoot_ = coversRoot;
     createGameFolders(root_);
+    createGameFolders(coversRoot_);
     covers_.start(coverCache);
     const auto& list = homeConsoles();
     for (size_t i = 0; i < list.size(); ++i)
         if (consoleKey == systemInfo(list[i].system).key) console_ = int(i);
+    covers_.setFolder(coversRoot_ / fs::u8path(list[size_t(console_)].folder));
     refresh();
 }
 
@@ -95,6 +99,7 @@ void Home::refresh() {
     if (!fs::is_directory(consoleFolder(), ec)) createGameFolders(root_);
     games_ = library_.scan(consoleFolder(), homeConsoles()[size_t(console_)].system);
     if (selected_ >= int(games_.size())) selected_ = int(games_.size()) - 1;
+    covers_.recheck(games_);  // covers added or replaced in the Box Covers folder
     lastScan_ = SDL_GetTicks();
 }
 
@@ -102,6 +107,7 @@ void Home::selectConsole(int index) {
     const int n = int(homeConsoles().size());
     console_ = (index % n + n) % n;
     covers_.clear();
+    covers_.setFolder(coversRoot_ / fs::u8path(homeConsoles()[size_t(console_)].folder));
     lines_.clear();
     scroll_ = 0;
     pressed_ = -1;

@@ -10,7 +10,7 @@ Unicode true
 
 !define APPNAME "Nintendall"
 !ifndef VERSION
-  !define VERSION "0.12.2"
+  !define VERSION "0.12.3"
 !endif
 !ifndef SRCDIR
   !error "Pass -DSRCDIR=<folder with nintendall.exe, SDL2.dll and cores\>"
@@ -147,6 +147,18 @@ Section "${APPNAME} (required)" SecMain
   CreateDirectory "$DOCUMENTS\Nintendall\Games\Wii"
   CreateDirectory "$DOCUMENTS\Nintendall\Games\Nintendo 3DS"
   CreateDirectory "$DOCUMENTS\Nintendall\Games\Wii U"
+  ; Box covers (named like the game files; put your own pictures here to replace them).
+  CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\NES"
+  CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\Game Boy"
+  CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\SNES"
+  CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\Nintendo 64"
+  CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\Game Boy Color"
+  CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\Game Boy Advance"
+  CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\GameCube"
+  CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\Nintendo DS"
+  CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\Wii"
+  CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\Nintendo 3DS"
+  CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\Wii U"
   SetShellVarContext all
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"

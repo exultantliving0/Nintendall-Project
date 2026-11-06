@@ -210,10 +210,12 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         if (!fs::exists(db)) db = paths_.data / "gamecontrollerdb.txt";
         input_.init(fs::exists(db) ? db.u8string() : "");
         input_.load(cfg_);
-        // Home screen: Documents/Nintendall/Games (or the folder set as games.folder in nintendall.cfg).
-        const std::string games = cfg_.get("games.folder");
-        home_.start(games.empty() ? defaultGamesFolder(paths_.base, paths_.portable) : fs::u8path(games),
-                    paths_.data / "covers", cfg_.get("home.console"));
+        // Home screen: Documents/Nintendall/Games and, next to it, Box Covers (or the folders set as
+        // games.folder / covers.folder in nintendall.cfg).
+        const std::string games = cfg_.get("games.folder"), covers = cfg_.get("covers.folder");
+        const fs::path gamesRoot = games.empty() ? defaultGamesFolder(paths_.base, paths_.portable) : fs::u8path(games);
+        const fs::path coversRoot = covers.empty() ? gamesRoot.parent_path() / "Box Covers" : fs::u8path(covers);
+        home_.start(gamesRoot, coversRoot, paths_.data / "covers", cfg_.get("home.console"));
         home_.setCoverSize(std::atoi(cfg_.get("home.cover_size").c_str()));
         // After Update Now: say whether the new version is running, and tidy the temp folder.
         removeOldUpdateFiles();
@@ -1094,6 +1096,10 @@ void App::doAction(int a) {
         createGameFolders(home_.gamesRoot());
         openFolder(home_.gamesRoot());
         break;
+    case ActCoversFolder:
+        createGameFolders(home_.coversRoot());
+        openFolder(home_.coversRoot());
+        break;
     case ActCloseGame: stopGame(); break;
     case ActExit: quit_ = true; break;
     case ActPause:
@@ -1295,6 +1301,7 @@ void App::buildMenus() {
     Menu file{"File", {}};
     file.items.push_back({"Open...", "Ctrl+O", ActOpen});
     file.items.push_back({"Open Games Folder", "", ActGamesFolder});
+    file.items.push_back({"Open Box Covers Folder", "", ActCoversFolder});
     file.items.push_back({"Close Game", "Ctrl+W", ActCloseGame, game});
     const auto recent = recentGames();
     if (!recent.empty()) {

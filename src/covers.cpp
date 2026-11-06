@@ -42,7 +42,7 @@ struct Request {
     std::string key;  // the game's path
     System system;
     std::string gameId, fileName, title;
-    std::string region;  // where the game is from ("" = USA)
+    fs::path folder;  // the console's Box Covers folder
 };
 
 struct Image {
@@ -50,7 +50,10 @@ struct Image {
     unsigned generation = 0;
     std::vector<uint8_t> rgba;
     int w = 0, h = 0;
+    fs::path file;  // the picture it came from ("" = no cover)
 };
+
+const char* kCoverExts[] = {".png", ".jpg", ".jpeg"};
 
 // ---------------------------------------------------------------------------
 // Files
@@ -230,36 +233,29 @@ std::vector<std::string> parseListing(const std::vector<uint8_t>& html) {
     return names;
 }
 
-// Picks the best-looking entry: same name as the file, then the game's region (USA unless the
-// game is from somewhere else), skipping hacks, betas and prototypes unless the file is one too.
-int score(const std::string& name, const std::string& fileName, const std::string& region) {
-    if (name == fileName) return 1 << 30;  // exactly the file's name: always the one
+// Picks the best-looking entry: same name as the file, then the file's region, then USA / World /
+// Europe / Japan, skipping hacks, betas and prototypes unless the file is one too.
+int score(const std::string& name, const std::string& fileName) {
+    if (name == fileName) return 1000;
     auto has = [](const std::string& s, const char* t) { return s.find(t) != std::string::npos; };
     int sc = 0;
-    // Other tags the file has, e.g. "(Rev 1)": the same tags in the name count.
+    // Tags the file has, e.g. "(Europe)": the same tags in the name count.
     for (size_t a = fileName.find('('); a != std::string::npos; a = fileName.find('(', a + 1)) {
         const size_t b = fileName.find(')', a);
         if (b == std::string::npos) break;
-        if (has(name, fileName.substr(a, b - a + 1).c_str())) sc += 20;
+        if (has(name, fileName.substr(a, b - a + 1).c_str())) sc += 40;
     }
-    // The region: the game's own first, then the wider one (France -> Europe), then World, USA,
-    // Europe, Japan.
-    const std::vector<std::string> have = regionsInName(name);
-    auto in = [&](const std::string& r) { return !r.empty() && std::find(have.begin(), have.end(), r) != have.end(); };
-    const std::string want = region.empty() ? "USA" : region;
-    if (in(want)) sc += 60;
-    else if (in(parentRegion(want))) sc += 45;
-    else if (in("World")) sc += 35;
-    else if (in("USA")) sc += 30;
-    else if (in("Europe")) sc += 20;
-    else if (in("Japan")) sc += 10;
+    if (has(name, "(USA")) sc += 30;
+    else if (has(name, "(World")) sc += 25;
+    else if (has(name, "(Europe")) sc += 15;
+    else if (has(name, "(Japan")) sc += 10;
     for (const char* bad : {"[h", "[b", "[t", "(Beta", "(Proto", "(Demo", "(Sample", "(Pirate", "(Unl", "(Hack", "[a"})
         if (has(name, bad) && !has(fileName, bad)) sc -= 50;
     if (has(name, "(Rev") || has(name, "(Virtual Console")) sc -= 2;
     return sc * 1000 - int(std::min<size_t>(name.size(), 999));  // then the shortest name
 }
 
-std::string bestMatch(const Index& idx, const std::string& fileName, const std::string& title, const std::string& region) {
+std::string bestMatch(const Index& idx, const std::string& fileName, const std::string& title) {
     std::vector<size_t> found;
     for (const std::string& n : {fileName, title}) {
         const auto it = idx.byKey.find(joinWords(nameWords(n)));
@@ -291,7 +287,7 @@ std::string bestMatch(const Index& idx, const std::string& fileName, const std::
     std::string best;
     int bestScore = 0;
     for (const size_t i : found) {
-        const int sc = score(idx.names[i], fileName, region);
+        const int sc = score(idx.names[i], fileName);
         if (best.empty() || sc > bestScore) {
             best = idx.names[i];
             bestScore = sc;
@@ -400,7 +396,7 @@ std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
     }
     const char* sys = libretroSystem(r.system);
     if (!sys) return {};
-    const std::string name = bestMatch(index(r.system), r.fileName, r.title, r.region);
+    const std::string name = bestMatch(index(r.system), r.fileName, r.title);
     if (name.empty()) return {};
     const std::string url = "https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/" + urlEncode(name) + ".png";
     if (get(url, body, reached) == 200 && isImage(body)) return body;
@@ -409,29 +405,42 @@ std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
 
 Image Covers::Shared::load(const Request& r) {
     Image img;
-    // Covers found by ID on systems with big GameTDB covers are saved as "hq - <ID>"; small ones
-    // saved by older versions ("id - <ID>") are replaced the first time.
-    const bool hq = gameTdbSizes(r.system).size() > 1;
-    // Games from outside the USA have the region in the name (their covers were picked by region).
-    const std::string base = r.gameId.empty()
-                                 ? "name - " + safeFileName(r.fileName) + (r.region.empty() ? "" : " - " + r.region)
-                                 : (hq ? "hq - " : "id - ") + r.gameId;
-    const fs::path dir = cacheDir / systemInfo(r.system).key;
-    const fs::path have = dir / (base + ".img"), none = dir / (base + ".none");
-    if (hq && !r.gameId.empty()) {
-        std::error_code ec;
-        fs::remove(dir / ("id - " + r.gameId + ".img"), ec);
-        fs::remove(dir / ("id - " + r.gameId + ".none"), ec);
-    }
-
     std::vector<uint8_t> bytes;
     std::error_code ec;
-    if (!readFile(have, bytes)) {
-        if (fs::exists(none, ec) && !olderThan(none, kRetryMissing)) return img;
-        bool reached = false;
-        bytes = download(r, reached);
-        if (!bytes.empty()) writeFile(have, bytes.data(), bytes.size());
-        else if (reached) writeFile(none, "", 0);  // the server answered: there's no cover (look again in a week)
+
+    // 1. A picture in the Box Covers folder (the player's own, or one downloaded before).
+    if (const fs::path have = findCoverFile(r.folder, r.fileName); !have.empty() && readFile(have, bytes)) {
+        img.file = have;
+    } else {
+        // Notes and covers from before the Box Covers folder are in the cache: "hq - <ID>" for
+        // 3DS / DS / Wii U covers found by ID, "id - <ID>" for GameCube / Wii, "name - <file>".
+        const bool hq = gameTdbSizes(r.system).size() > 1;
+        const std::string base =
+            r.gameId.empty() ? "name - " + safeFileName(r.fileName) : (hq ? "hq - " : "id - ") + r.gameId;
+        const fs::path dir = cacheDir / systemInfo(r.system).key;
+        const fs::path old = dir / (base + ".img"), none = dir / (base + ".none");
+
+        if (readFile(old, bytes)) {  // 2. moved over from the old cache
+            fs::remove(old, ec);
+        } else {
+            // 3. Downloaded (unless it was looked for in the last week and doesn't exist).
+            if (fs::exists(none, ec) && !olderThan(none, kRetryMissing)) return img;
+            bool reached = false;
+            bytes = download(r, reached);
+            if (bytes.empty()) {
+                if (reached) writeFile(none, "", 0);  // the server answered: there's no cover
+                return img;
+            }
+        }
+        // Save it in the Box Covers folder, named like the game, unless the player put one there meanwhile.
+        if (const fs::path mine = findCoverFile(r.folder, r.fileName); !mine.empty()) {
+            if (!readFile(mine, bytes)) return img;
+            img.file = mine;
+        } else {
+            const bool png = bytes.size() > 4 && bytes[0] == 0x89 && bytes[1] == 'P';
+            img.file = r.folder / fs::u8path(r.fileName + (png ? ".png" : ".jpg"));
+            writeFile(img.file, bytes.data(), bytes.size());
+        }
     }
     if (bytes.empty()) return img;
 
@@ -465,6 +474,16 @@ Image Covers::Shared::load(const Request& r) {
 
 // ============================================================================
 
+fs::path findCoverFile(const fs::path& dir, const std::string& fileName) {
+    if (dir.empty() || fileName.empty()) return {};
+    std::error_code ec;
+    for (const char* ext : kCoverExts) {
+        const fs::path p = dir / fs::u8path(fileName + ext);
+        if (fs::is_regular_file(p, ec)) return p;
+    }
+    return {};
+}
+
 Covers::~Covers() {
     if (!shared_) return;
     std::lock_guard<std::mutex> lock(shared_->mutex);
@@ -483,14 +502,28 @@ void Covers::start(const fs::path& cacheDir) {
 SDL_Texture* Covers::get(const LibraryGame& g) {
     const std::string key = g.path.u8string();
     const auto it = textures_.find(key);
-    if (it != textures_.end()) return it->second;
-    textures_[key] = nullptr;
+    if (it != textures_.end()) return it->second.tex;
+    textures_[key] = Entry{};
     if (shared_) {
         std::lock_guard<std::mutex> lock(shared_->mutex);
-        shared_->queue.push_back({key, g.system, g.gameId, g.fileName, g.title, g.region});
+        shared_->queue.push_back({key, g.system, g.gameId, g.fileName, g.title, folder_});
         shared_->wake.notify_one();
     }
     return nullptr;
+}
+
+void Covers::recheck(const std::vector<LibraryGame>& games) {
+    for (const LibraryGame& g : games) {
+        const auto it = textures_.find(g.path.u8string());
+        if (it == textures_.end() || it->second.loading) continue;
+        const fs::path now = findCoverFile(folder_, g.fileName);
+        std::error_code ec;
+        const auto time = now.empty() ? fs::file_time_type{} : fs::last_write_time(now, ec);
+        if (now.u8string() == it->second.file && time == it->second.time) continue;
+        // Added, replaced or deleted: load it again.
+        if (it->second.tex) SDL_DestroyTexture(it->second.tex);
+        textures_.erase(it);
+    }
 }
 
 void Covers::update(SDL_Renderer* renderer) {
@@ -503,21 +536,27 @@ void Covers::update(SDL_Renderer* renderer) {
         gen = shared_->generation;
     }
     for (Image& img : done) {
-        if (img.generation != gen || img.rgba.empty()) continue;
+        if (img.generation != gen) continue;
         const auto it = textures_.find(img.key);
-        if (it == textures_.end() || it->second) continue;
+        if (it == textures_.end() || !it->second.loading) continue;
+        Entry& e = it->second;
+        e.loading = false;
+        e.file = img.file.u8string();
+        std::error_code ec;
+        if (!img.file.empty()) e.time = fs::last_write_time(img.file, ec);
+        if (img.rgba.empty()) continue;
         SDL_Texture* t = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, img.w, img.h);
         if (!t) continue;
         SDL_UpdateTexture(t, nullptr, img.rgba.data(), img.w * 4);
         SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
         SDL_SetTextureScaleMode(t, SDL_ScaleModeLinear);
-        it->second = t;
+        e.tex = t;
     }
 }
 
 void Covers::clear() {
-    for (auto& [key, t] : textures_)
-        if (t) SDL_DestroyTexture(t);
+    for (auto& [key, e] : textures_)
+        if (e.tex) SDL_DestroyTexture(e.tex);
     textures_.clear();
     if (!shared_) return;
     std::lock_guard<std::mutex> lock(shared_->mutex);
