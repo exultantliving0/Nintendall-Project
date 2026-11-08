@@ -135,7 +135,7 @@ sudo apt install mingw-w64 libz-mingw-w64-dev nsis
 
 The program only needs `SDL2.dll` and `SDL2_ttf.dll` (shipped beside it); the compiler runtime and
 zlib are built in. The setup.exe isn't code-signed yet, so Windows SmartScreen
-will warn on first run. Sign it before selling.
+will warn on first run.
 
 ## Controls
 
