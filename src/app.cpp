@@ -107,10 +107,9 @@ void chooseRenderer(LibretroCore& core, System s, Renderer r) {
     }
 }
 
-// Dolphin only sends game sound to a real Wii Remote's speaker with [Core] WiimoteEnableSpeaker
-// on (off by default). The libretro Dolphin has no option for it, but reads its own Dolphin.ini
-// (in <saves>/User/Config), so switch it on there. Other lines are kept as they are.
-void enableWiimoteSpeaker(const fs::path& ini) {
+// Sets "key = value" in [section] of one of Dolphin's own .ini files (in <saves>/User/Config; the
+// libretro Dolphin reads them), keeping every other line. Adds the line or the section if missing.
+void setDolphinIni(const fs::path& ini, const std::string& section, const std::string& key, const std::string& value) {
     std::vector<std::string> lines;
     {
         std::ifstream in(ini);
@@ -124,32 +123,31 @@ void enableWiimoteSpeaker(const fs::path& ini) {
         while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front()))) t.erase(t.begin());
         return t;
     };
-    const std::string setting = "WiimoteEnableSpeaker = True";
-    bool inCore = false, done = false;
-    size_t coreEnd = std::string::npos;  // where to add the line if [Core] doesn't have it
+    const std::string setting = key + " = " + value, header = "[" + section + "]";
+    bool inSection = false, done = false;
+    size_t sectionEnd = std::string::npos;  // where to add the line if the section doesn't have it
     for (size_t i = 0; i < lines.size() && !done; ++i) {
         const std::string t = trim(lines[i]);
         if (!t.empty() && t.front() == '[') {
-            if (inCore) coreEnd = i;
-            inCore = t == "[Core]";
-            if (inCore) coreEnd = i + 1;
+            inSection = t == header;
+            if (inSection) sectionEnd = i + 1;
             continue;
         }
-        if (inCore) {
-            coreEnd = i + 1;
-            if (trim(t.substr(0, t.find('='))) == "WiimoteEnableSpeaker") {
-                if (t == setting) return;  // already on
+        if (inSection) {
+            if (!t.empty()) sectionEnd = i + 1;
+            if (trim(t.substr(0, t.find('='))) == key) {
+                if (t == setting) return;  // already set
                 lines[i] = setting;
                 done = true;
             }
         }
     }
     if (!done) {
-        if (coreEnd == std::string::npos) {
-            lines.push_back("[Core]");
+        if (sectionEnd == std::string::npos) {
+            lines.push_back(header);
             lines.push_back(setting);
         } else {
-            lines.insert(lines.begin() + std::ptrdiff_t(coreEnd), setting);
+            lines.insert(lines.begin() + std::ptrdiff_t(sectionEnd), setting);
         }
     }
     std::error_code ec;
@@ -435,7 +433,14 @@ bool App::startGame(const fs::path& path) {
         gameFile = extracted_;
     }
 
-    if (det.system == System::Wii) enableWiimoteSpeaker(paths_.saves / "User" / "Config" / "Dolphin.ini");
+    if (det.system == System::GameCube || det.system == System::Wii) {
+        const fs::path config = paths_.saves / "User" / "Config";
+        // Dolphin only sends game sound to a real Wii Remote's speaker with this on (off by default).
+        if (det.system == System::Wii) setDolphinIni(config / "Dolphin.ini", "Core", "WiimoteEnableSpeaker", "True");
+        // The Custom aspect ratio: 21:9, for Console Settings > Widescreen > Ultrawide.
+        setDolphinIni(config / "GFX.ini", "Settings", "CustomAspectRatioWidth", "21");
+        setDolphinIni(config / "GFX.ini", "Settings", "CustomAspectRatioHeight", "9");
+    }
 
     // 4. Start the emulator with the game. GPU systems try the chosen renderer first, then fall
     //    back: Vulkan -> OpenGL -> software (3DS / N64), if this PC can't do the first.

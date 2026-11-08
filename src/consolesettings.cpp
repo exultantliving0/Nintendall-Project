@@ -30,6 +30,22 @@ Setting raw(const std::string& label, const std::string& key, bool restart = fal
 
 const Choices kOnOff = {{"disabled", "Off"}, {"enabled", "On"}};
 
+// Dolphin's widescreen hack: shows more of the 3D world at the sides, at 16:9, or at 21:9 for
+// ultrawide monitors (the Custom aspect ratio, which Nintendall sets to 21:9 in Dolphin's GFX.ini).
+Setting widescreen() {
+    Setting s;
+    s.label = "Widescreen";
+    s.keys = {"dolphin_widescreen_hack", "dolphin_aspect_ratio"};
+    s.choices = {
+        {"Off", {{"dolphin_widescreen_hack", "disabled"}}},
+        {"16:9 (widescreen hack)", {{"dolphin_widescreen_hack", "enabled"}, {"dolphin_aspect_ratio", "3"}}},
+        {"Ultrawide 21:9 (widescreen hack)", {{"dolphin_widescreen_hack", "enabled"}, {"dolphin_aspect_ratio", "4"}}},
+    };
+    s.restart = true;
+    s.hint = "Shows more of the 3D world at the sides; menus may stretch and some games glitch";
+    return s;
+}
+
 Setting graphicsApi() {
     return opt("Graphics API", kGraphicsApiOption, {{"vulkan", "Vulkan"}, {"opengl", "OpenGL"}}, true,
                "Vulkan draws Wii U games best on most PCs; if it can't start, OpenGL is used");
@@ -251,9 +267,9 @@ std::vector<SettingGroup> dolphin(bool wii) {
               {{"1", "Native (480p)"}, {"2", "2x (720p)"}, {"3", "3x (1080p)"}, {"4", "4x (1440p)"}, {"5", "5x"},
                {"6", "6x (4K)"}, {"8", "8x"}},
               true, "Renders 3D sharper than the real console"),
-          opt("Widescreen Hack", "dolphin_widescreen_hack", kOnOff, true, "Shows more of the 3D world in 16:9; some games glitch"),
+          widescreen(),
           opt("Aspect Ratio", "dolphin_aspect_ratio",
-              {{"0", "Auto"}, {"1", "Force 16:9"}, {"2", "Force 4:3"}, {"3", "Stretch"}}, true),
+              {{"0", "Auto"}, {"1", "Force 16:9"}, {"2", "Force 4:3"}, {"3", "Stretch"}, {"4", "Ultrawide (21:9)"}}, true),
           opt("Anti-Aliasing", "dolphin_anti_aliasing",
               {{"0", "Off"}, {"1", "2x MSAA"}, {"2", "4x MSAA"}, {"3", "8x MSAA"}, {"4", "2x SSAA"}, {"5", "4x SSAA"},
                {"6", "8x SSAA"}},
