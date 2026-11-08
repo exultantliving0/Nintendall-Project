@@ -357,23 +357,6 @@ Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen).
 | `tests/resampler_test.cpp` | checks the audio resampler at every core's sample rate |
 | `tests/make_test_files.py` | builds a tiny NES test program plus fake headers for every system |
 
-## Licensing (important if you sell this)
-
-Not legal advice. Have a lawyer review this before selling.
-
-- All 9 bundled emulators have licenses that **allow commercial use** (GPL, MPL
-  or MIT). See `THIRD_PARTY_LICENSES.md`, which ships in the package.
-- Most of them are **GPL**. You can sell GPL software, but because the GPL cores
-  ship inside Nintendall you must make their exact source code available
-  (keep a copy of each core's source for every release). The safest reading is
-  that Nintendall itself then needs a GPL-compatible license.
-- `third_party/libretro/libretro.h` is MIT licensed.
-- Cemu (MPL-2.0) ships with a change of ours. The MPL requires that change to be
-  available to everyone who gets Nintendall, so `third_party/cemu/` (the patch and
-  the upstream commit it applies to) is installed with the program.
-- Never bundle games, BIOS files or console keys. Users must provide their own.
-- "Nintendo" is a trademark, so a commercial product shouldn't use a name or logo
-  that suggests it's affiliated with Nintendo.
 
 ## Testing
 
