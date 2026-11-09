@@ -32,7 +32,16 @@ std::string fit(Text& t, std::string s, int width) {
     return s;
 }
 
-const char* systemLabel(System s) { return s == System::Wii ? "Wii" : "GameCube"; }
+const char* systemLabel(System s) {
+    switch (s) {
+    case System::Wii: return "Wii";
+    case System::GameCube: return "GameCube";
+    case System::N64: return "N64";
+    case System::SNES: return "SNES";
+    case System::FDS: return "Famicom Disk";
+    default: return "NES";
+    }
+}
 
 void drawButton(Video& v, Text& t, const SDL_Rect& r, const std::string& label, bool enabled, int mouseX, int mouseY,
                 bool primary = false) {
@@ -116,11 +125,11 @@ void LanDialog::focusNext() { focus_ = kind_ == Kind::Join ? 1 - focus_ : 0; }
 
 void LanDialog::confirm() {
     if (selected_ < 0) {
-        error_ = "Put the game in your GameCube or Wii games folder first.";
+        error_ = "Put the game in your Games folder first.";
         return;
     }
     if (kind_ == Kind::Join && trim(target_.text).empty()) {
-        error_ = "Type the host code (or the host's address).";
+        error_ = "Type the host's address (or host code).";
         focus_ = 0;
         return;
     }
@@ -228,9 +237,9 @@ void LanDialog::draw(Video& v, Text& t, int W, int H) {
     };
 
     if (join) {
-        t.draw(x, y, "Host code (or the host's address on the same network)", kTextC);
+        t.draw(x, y, "The host's address (or host code, for GameCube and Wii)", kTextC);
         y += lh;
-        field(target_, focus_ == 0, "e.g. a1b2c3d4");
+        field(target_, focus_ == 0, "e.g. 192.168.1.20");
     }
 
     // Game list
@@ -244,7 +253,7 @@ void LanDialog::draw(Video& v, Text& t, int W, int H) {
     if (games_.empty()) {
         int ly = y + int(4 * s);
         for (const std::string& line :
-             wrapText(t, "No GameCube or Wii games yet. Put them in your Games folder (File > Open Games Folder).",
+             wrapText(t, "No NES, SNES, N64, GameCube or Wii games yet. Put them in your Games folder (File > Open Games Folder).",
                       w - int(16 * s))) {
             t.draw(x + int(8 * s), ly, line, kDim);
             ly += lh;
@@ -299,7 +308,7 @@ void LanDialog::draw(Video& v, Text& t, int W, int H) {
     const std::string hint =
         !error_.empty() ? error_
         : join          ? "Everyone needs the same game (region and version) and the same Nintendall version."
-                        : "Next, friends join with LAN > Join Game and the host code you'll see.";
+                        : "Next, friends join with LAN > Join Game (the host code or your address appears next).";
     int hy = y;
     for (const std::string& line : wrapText(t, hint, w)) {
         if (hy >= y + lh * 2) break;
@@ -363,7 +372,12 @@ void LanLobby::draw(Video& v, Text& t, const SDL_Rect& area, int mouseX, int mou
     } else if (st.state == LanState::Connecting || st.state == LanState::Off) {
         add(info.host ? "Opening the game for players..." : "Connecting to " + info.target + "...", kTextC);
     } else {
-        if (info.host) {
+        if (info.host && st.codeState == "none") {
+            std::string a;
+            for (size_t i = 0; i < info.addresses.size() && i < 3; ++i) a += (i ? ",  " : "") + info.addresses[i];
+            add(a.empty() ? "Friends join with this computer's address." : "Friends join with your address: " + a, kTextC);
+            gap();
+        } else if (info.host) {
             if (st.codeState == "ready" && !st.code.empty()) {
                 showCode = true;
                 add("Friends over the internet join with this host code:", kTextC);

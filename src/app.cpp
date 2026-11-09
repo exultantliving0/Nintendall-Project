@@ -21,6 +21,14 @@
 #include <atomic>
 #include <thread>
 
+namespace {
+// LAN games: GameCube / Wii use Dolphin's netplay; NES / SNES / N64 use Nintendall's own.
+bool usesDolphinLan(System s) { return s == System::GameCube || s == System::Wii; }
+bool usesNetplay(System s) { return s == System::NES || s == System::FDS || s == System::SNES || s == System::N64; }
+// The console folder a game is in (FDS games are in the NES folder).
+System lanFamily(System s) { return s == System::FDS ? System::NES : s; }
+}  // namespace
+
 namespace fs = std::filesystem;
 
 // Update Now: the setup being downloaded (filled in by a thread).
@@ -339,7 +347,30 @@ void App::runFrames() {
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
     fastForward_ = !lan_.active && (fastForwardToggled_ || keys[SDL_SCANCODE_TAB]);
     const int runs = fastForward_ ? 4 : 1;
-    for (int i = 0; i < runs && core_; ++i) core_->run();
+    if (lan_.net && core_) {
+        if (lan_.net->phase() == Netplay::Phase::Playing) {
+            Netplay::Callbacks cb;
+            cb.sampleLocal = [this] { return localNetInput(); };
+            cb.save = [this] { return core_->saveState(); };
+            cb.load = [this](const std::vector<uint8_t>& st) { return core_->loadState(st); };
+            cb.run = [this](const NetInputs& in, bool replay) {
+                netInputs_ = in;
+                netReplay_ = replay;
+                core_->run();
+                netReplay_ = false;
+            };
+            lan_.net->advance(cb);
+        } else if (lan_.warmup < 2) {
+            // A couple of frames after loading (some emulators can only save their state after
+            // running), then the game waits behind the lobby.
+            ++lan_.warmup;
+            netReplay_ = true;
+            core_->run();
+            netReplay_ = false;
+        }
+    } else {
+        for (int i = 0; i < runs && core_; ++i) core_->run();
+    }
     if (core_ && core_->shutdownRequested()) {
         stopGame();
         return;
@@ -448,7 +479,7 @@ bool App::startGame(const fs::path& path) {
         core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(sys.core), paths_.saves,
                                                paths_.config / (std::string(sys.core) + ".opt"));
         const bool coreLoaded = core_->load(corePath, err);
-        if (coreLoaded && lanPending_ && !lanApi(*core_).ok()) {
+        if (coreLoaded && lanPending_ && usesDolphinLan(det.system) && !lanApi(*core_).ok()) {
             core_.reset();
             system_ = System::Unknown;
             showMessage("LAN game", std::string("This copy of Nintendall's ") + sys.fullName +
@@ -499,7 +530,8 @@ bool App::startGame(const fs::path& path) {
             core_->preferDefault("dolphin_wiimote_default_device", "nunchuk");  // what most Wii games expect
             core_->preferDefault("dolphin_ir_offset", "10");  // pointer lines up with the mouse / stick
         }
-        if (coreLoaded && lanPending_) {
+        if (coreLoaded && !lanCoreOptions_.empty()) core_->setSessionOptions(lanCoreOptions_);  // joining
+        if (coreLoaded && lanPending_ && usesDolphinLan(det.system)) {
             // A LAN game: the emulator hosts / joins, and boots the game when the host starts it.
             const LanApi api = lanApi(*core_);
             api.setup(lanPending_->kind == LanDialog::Kind::Host ? 1 : 2, lanPending_->target.c_str(), kLanPort,
@@ -532,12 +564,34 @@ bool App::startGame(const fs::path& path) {
     }
 
     // 5. Running.
-    if (lanPending_) {
+    if (lanPending_ && usesDolphinLan(det.system)) {
         lan_ = Lan{};
         lan_.active = true;
         lan_.req = *lanPending_;
         lan_.api = lanApi(*core_);
         if (lan_.req.kind == LanDialog::Kind::Host) lan_.addresses = localAddresses();
+    } else if (lanPending_) {
+        // Hosting an NES / SNES / N64 game: wait for players (Nintendall's netplay).
+        Netplay::GameInfo info;
+        info.system = int(det.system);
+        info.crc = netplayGameCrc(gameFile.u8string());
+        info.title = lanPending_->game.title.empty() ? path.stem().u8string() : lanPending_->game.title;
+        for (const auto& [key, o] : core_->options())
+            if (!core_->forcedOptions().count(key)) info.options.push_back({key, o.value});
+        info.window = det.system == System::N64 ? 0 : 8;  // N64 save states are too big to take every frame
+        info.delay = lanPending_->delay;
+        auto net = std::make_unique<Netplay>();
+        std::string netError;
+        if (!net->host(lanPending_->name, info, netError)) {
+            stopGame();
+            showMessage("LAN Game", netError, true);
+            return false;
+        }
+        lan_ = Lan{};
+        lan_.active = true;
+        lan_.req = *lanPending_;
+        lan_.net = std::move(net);
+        lan_.addresses = localAddresses();
     }
     system_ = det.system;
     gamePath_ = path;
@@ -640,6 +694,8 @@ void App::loadSram() {
 
 void App::saveSram(bool force) {
     if (!core_) return;
+    // Joined an NES / SNES / N64 LAN game: the game runs on the host's save, which isn't ours to keep.
+    if (lan_.net && !lan_.net->isHost()) return;
     const Uint32 now = SDL_GetTicks();
     if (!force && now - lastSramCheck_ < 3000) return;  // check a few times a minute
     lastSramCheck_ = now;
@@ -702,6 +758,7 @@ void App::takeScreenshot() {
 // CoreHost
 
 void App::onVideo(const void* data, unsigned w, unsigned h, size_t pitch, retro_pixel_format fmt) {
+    if (netReplay_) return;  // LAN game: a frame played again (only the last one is shown)
     video_.uploadFrame(data, w, h, pitch, fmt);
     if (separateWindows()) {  // main window: top screen (bottom when swapped); second window: the other
         // Wii U: Cemu squeezes both 16:9 screens into one 16:9 picture; each window shows its
@@ -724,11 +781,33 @@ void App::onAudio(const int16_t* stereo, size_t frames) {
         for (size_t i = 0; i < frames * 2; ++i) audioPeak_ = std::max(audioPeak_, std::abs(int(stereo[i])));
         return;
     }
-    if (fastForward_) return;  // no chipmunk audio while fast-forwarding
+    if (fastForward_ || netReplay_) return;  // no chipmunk audio while fast-forwarding / replaying
     audio_.push(stereo, frames);
 }
 
 int16_t App::onInputState(unsigned port, unsigned device, unsigned index, unsigned id) {
+    if (netInputActive()) {
+        // LAN game (NES / SNES / N64): each port is a player, with their presses for this frame.
+        if (port >= unsigned(kNetplayMaxPlayers)) return 0;
+        const NetInput& in = netInputs_[port];
+        switch (device & RETRO_DEVICE_MASK) {
+        case RETRO_DEVICE_JOYPAD:
+            if (id == RETRO_DEVICE_ID_JOYPAD_MASK) return int16_t(in.buttons);
+            return id < 16 ? int16_t((in.buttons >> id) & 1) : 0;
+        case RETRO_DEVICE_ANALOG:
+            if (index <= RETRO_DEVICE_INDEX_ANALOG_RIGHT && id <= RETRO_DEVICE_ID_ANALOG_Y)
+                return in.axes[index * 2 + id];
+            if (index == RETRO_DEVICE_INDEX_ANALOG_BUTTON && id < 16) return (in.buttons >> id) & 1 ? 32767 : 0;
+            return 0;
+        default:
+            return 0;
+        }
+    }
+    return localInputState(port, device, index, id);
+}
+
+// This computer's controllers (port = player on this computer).
+int16_t App::localInputState(unsigned port, unsigned device, unsigned index, unsigned id) {
     if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_POINTER) return port == 0 && index == 0 ? pointerState(id) : 0;
     if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_JOYPAD) {
         // Some systems get their face buttons rearranged (e.g. GameCube A on the bottom button).
@@ -752,7 +831,19 @@ void App::connectPorts() {
     for (int p = 0; p < Input::kMaxPlayers; ++p) {
         // LAN game: each computer has one player (its port 1); netplay plugs in a controller for
         // every player on every computer. Unplugging ports here would unplug the other players.
-        if ((lan_.active || lanPending_) && p > 0) break;
+        if (lan_.active && !lan_.net && p > 0) break;
+        if ((lanPending_ || lan_.net) && !lan_.portsSet && p > 0) {
+            // NES / SNES / N64 LAN game, before it starts: just port 1 on every computer
+            // (the same everywhere), then every player's port from frame 0.
+            core_->setPortDevice(unsigned(p), RETRO_DEVICE_NONE);
+            continue;
+        }
+        if (lan_.net && lan_.portsSet) {
+            const auto& names = lan_.net->players();
+            const bool player = size_t(p) < names.size() && !names[size_t(p)].empty();
+            core_->setPortDevice(unsigned(p), player ? RETRO_DEVICE_JOYPAD : RETRO_DEVICE_NONE);
+            continue;
+        }
         // Real Wii Remotes: every slot stays plugged in (an unplugged slot can't take a real remote).
         const bool present = p == 0 || real || input_.controllerForPort(p) || input_.hasKeyboardKeys(p);
         // Wii U: player 1 is the GamePad; players 2-4 are Pro Controllers (Cemu's device id for one).
@@ -1130,7 +1221,7 @@ void App::handleEvent(const SDL_Event& e) {
     // LAN game lobby (waiting for players, or why it couldn't start): its buttons, Enter and Esc.
     if (lanLobbyShown()) {
         switch (lanLobby_.handleEvent(e, mouseX_, mouseY_, lan_.status, lanLobbyInfo())) {
-        case LanLobby::Click::Start: lan_.api.start(); break;
+        case LanLobby::Click::Start: lanStart(); break;
         case LanLobby::Click::Leave: leaveLan(""); break;
         case LanLobby::Click::Copy:
             SDL_SetClipboardText(lan_.status.code.c_str());
@@ -1243,11 +1334,11 @@ void App::doAction(int a) {
     case ActLanHost: openLanDialog(LanDialog::Kind::Host); break;
     case ActLanJoin: openLanDialog(LanDialog::Kind::Join); break;
     case ActLanStart:
-        if (lan_.active && lan_.req.kind == LanDialog::Kind::Host) lan_.api.start();
+        if (lan_.active && lan_.req.kind == LanDialog::Kind::Host) lanStart();
         break;
     case ActLanDelayUp:
     case ActLanDelayDown:
-        if (lan_.active && lan_.req.kind == LanDialog::Kind::Host) {
+        if (lan_.active && !lan_.net && lan_.req.kind == LanDialog::Kind::Host) {
             const int d = std::clamp(int(lan_.status.delay) + (a == ActLanDelayUp ? 1 : -1), 1, 20);
             lan_.api.setDelay(unsigned(d));
             lan_.status.delay = unsigned(d);
@@ -1257,20 +1348,18 @@ void App::doAction(int a) {
     case ActLanLeave: leaveLan(""); break;
     case ActLanHelp:
         showMessage("LAN Games",
-                    "Play GameCube and Wii games together on several computers - on the same network or over "
-                    "the internet.\n\n"
-                    "Host: LAN > Host Game, pick the game and click Host. Give your friends the host code that "
-                    "appears (on the same network, your address works too). When everyone has joined, click "
-                    "Start Game.\n\n"
-                    "Join: LAN > Join Game, type the host code (or the host's address), pick the same game and "
-                    "click Join. If you picked another game, Nintendall switches to the host's game when you have "
-                    "it.\n\n"
+                    "Play NES, SNES, N64, GameCube and Wii games together on several computers.\n\n"
+                    "Host: LAN > Host Game, pick the game and click Host. Give your friends your address (it "
+                    "appears in the window; GameCube and Wii games also show a host code, which works over the "
+                    "internet). When everyone has joined, click Start Game.\n\n"
+                    "Join: LAN > Join Game, type the host's address (or host code), pick the game and click Join. "
+                    "Nintendall finds the host's game in your Games folder.\n\n"
                     "Everyone needs the same game (same region and version) and the same version of Nintendall. "
                     "Everyone plays with the host's save data. Pausing, fast forward and save states are off "
-                    "during LAN games. Input delay: lower feels quicker; raise it (LAN > More Input Delay) if the "
-                    "game stutters.\n\n"
-                    "If a host code doesn't connect, everyone can use a virtual LAN app (such as Radmin VPN) "
-                    "and join with the host's address in it.",
+                    "during LAN games. Input delay: lower feels quicker; raise it if the game stutters.\n\n"
+                    "NES, SNES and N64 games: friends join with the host's address, on the same network or on "
+                    "one virtual LAN. GameCube and Wii: if a host code doesn't connect, computers on one virtual "
+                    "LAN can join with the host's address in it.",
                     false);
         break;
     case ActWiiUKeys: importWiiUKeys(); break;
@@ -1520,8 +1609,8 @@ void App::buildMenus() {
     lan.items.push_back({"Join Game...", "", ActLanJoin, !lan_.active});
     lan.items.push_back({});
     lan.items.push_back({"Start Game", "", ActLanStart, lanHost && lan_.status.state == LanState::Lobby});
-    lan.items.push_back({"More Input Delay", "", ActLanDelayUp, lanHost});
-    lan.items.push_back({"Less Input Delay", "", ActLanDelayDown, lanHost});
+    lan.items.push_back({"More Input Delay", "", ActLanDelayUp, lanHost && !lan_.net});
+    lan.items.push_back({"Less Input Delay", "", ActLanDelayDown, lanHost && !lan_.net});
     lan.items.push_back({"Leave LAN Game", "", ActLanLeave, lan_.active});
     lan.items.push_back({});
     lan.items.push_back({"How LAN Games Work", "", ActLanHelp});
@@ -1779,10 +1868,9 @@ void App::checkWiimotePairing() {
 std::vector<LanDialog::Game> App::lanGames() {
     std::vector<LanDialog::Game> games;
     for (const HomeConsole& c : homeConsoles()) {
-        if (c.system != System::GameCube && c.system != System::Wii) continue;
+        if (!usesDolphinLan(c.system) && !usesNetplay(c.system)) continue;
         for (const LibraryGame& g : lanLibrary_.scan(home_.gamesRoot() / fs::u8path(c.folder), c.system))
-            if (g.system == System::GameCube || g.system == System::Wii)
-                games.push_back({g.path, g.title, g.gameId, g.system});
+            if (usesDolphinLan(g.system) || usesNetplay(g.system)) games.push_back({g.path, g.title, g.gameId, g.system});
     }
     std::stable_sort(games.begin(), games.end(), [](const LanDialog::Game& a, const LanDialog::Game& b) {
         std::string x = a.title, y = b.title;
@@ -1797,7 +1885,7 @@ void App::openLanDialog(LanDialog::Kind kind) {
     menu_.close();
     std::vector<LanDialog::Game> games = lanGames();
     // The GameCube / Wii game that's running can be picked even if it isn't in the Games folder.
-    const bool gcWii = core_ && (system_ == System::GameCube || system_ == System::Wii);
+    const bool gcWii = core_ && (usesDolphinLan(system_) || usesNetplay(system_));
     if (gcWii && std::none_of(games.begin(), games.end(), [&](const LanDialog::Game& g) { return g.path == gamePath_; }))
         games.insert(games.begin(), {gamePath_, gameTitle_, "", system_});
     const std::string want = gcWii ? gamePath_.u8string() : cfg_.get("lan.game");
@@ -1812,6 +1900,25 @@ void App::openLanDialog(LanDialog::Kind kind) {
 
 bool App::startLanGame(const LanDialog::Request& request) {
     const LanDialog::Request req = request;  // startGame resets lan_ (which may hold `request`)
+    if (req.kind == LanDialog::Kind::Join && usesNetplay(req.game.system)) {
+        // NES / SNES / N64: connect first; the host says which game (and its settings), then it loads.
+        stopGame();
+        auto net = std::make_unique<Netplay>();
+        std::string error;
+        if (!net->join(req.target, req.name, error)) {
+            showMessage("LAN Game", error, true);
+            return false;
+        }
+        lan_ = Lan{};
+        lan_.active = true;
+        lan_.req = req;
+        lan_.net = std::move(net);
+        cfg_.set("lan.name", req.name);
+        cfg_.set("lan.game", req.game.path.u8string());
+        cfg_.set("lan.target", req.target);
+        saveConfig();
+        return true;
+    }
     lanPending_ = &req;
     const bool ok = startGame(req.game.path);
     lanPending_ = nullptr;
@@ -1824,13 +1931,15 @@ bool App::startLanGame(const LanDialog::Request& request) {
 }
 
 bool App::lanLobbyShown() const {
-    return lan_.active && core_ && (lan_.status.state != LanState::Playing || !lan_.errorText.empty());
+    return lan_.active && (core_ || lan_.net) &&
+           (lan_.status.state != LanState::Playing || !lan_.errorText.empty());
 }
 
 LanLobby::Info App::lanLobbyInfo() const {
     LanLobby::Info info;
     info.host = lan_.req.kind == LanDialog::Kind::Host;
     info.gameTitle = lan_.req.game.title.empty() ? gameTitle_ : lan_.req.game.title;
+    if (lan_.net && !lan_.net->isHost() && !lan_.net->game().title.empty()) info.gameTitle = lan_.net->game().title;
     info.target = lan_.req.target;
     info.addresses = lan_.addresses;
     info.errorText = lan_.errorText;
@@ -1839,6 +1948,7 @@ LanLobby::Info App::lanLobbyInfo() const {
 
 void App::leaveLan(const std::string& message) {
     stopGame();  // unloading the emulator tells the other players
+    lan_ = Lan{};  // (joining NES / SNES / N64: before the game was loaded)
     if (!message.empty()) showMessage("LAN Game", message, false);
 }
 
@@ -1850,6 +1960,10 @@ bool App::lanBlocks(const char* what) {
 
 void App::updateLan() {
     if (!lan_.active) return;
+    if (lan_.net) {
+        updateNetplay();
+        return;
+    }
     if (!core_) {
         lan_ = Lan{};
         return;
@@ -1893,5 +2007,127 @@ void App::updateLan() {
         lan_.errorText = st.error + " Everyone needs the same copy of the game (same region and version).";
     } else {
         lan_.errorText = st.error.empty() ? "The LAN game couldn't start." : st.error;
+    }
+}
+
+// ============================================================================
+// LAN games for NES / SNES / N64 (Nintendall's netplay, see netplay.hpp)
+
+void App::lanStart() {
+    if (!lan_.active || lan_.req.kind != LanDialog::Kind::Host) return;
+    if (!lan_.net) {
+        lan_.api.start();  // GameCube / Wii
+        return;
+    }
+    if (!core_ || lan_.net->phase() != Netplay::Phase::Lobby) return;
+    const std::vector<uint8_t> state = core_->saveState();
+    if (state.empty()) {
+        osd("Couldn't start - try again in a moment");
+        return;
+    }
+    lan_.net->start(state);
+}
+
+NetInput App::localNetInput() {
+    NetInput in;
+    in.buttons = uint16_t(localInputState(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK));
+    for (unsigned i = 0; i < 4; ++i)
+        in.axes[i] = localInputState(0, RETRO_DEVICE_ANALOG, i / 2, i % 2);
+    return in;
+}
+
+void App::updateNetplay() {
+    Netplay& net = *lan_.net;
+    if (net.phase() != Netplay::Phase::Playing) net.poll();  // (while playing, the frames poll)
+    for (const std::string& m : net.takeMessages()) osd(m, 4000);
+
+    // What the lobby shows.
+    LanStatus st;
+    switch (net.phase()) {
+    case Netplay::Phase::Connecting: st.state = LanState::Connecting; break;
+    case Netplay::Phase::Lobby: st.state = LanState::Lobby; break;
+    case Netplay::Phase::Syncing: st.state = LanState::Starting; break;
+    case Netplay::Phase::Playing: st.state = LanState::Playing; break;
+    case Netplay::Phase::Ended: st.state = LanState::Ended; break;
+    case Netplay::Phase::Error: st.state = LanState::Error; break;
+    }
+    st.codeState = "none";  // no host codes: friends type the host's address
+    st.delay = unsigned(net.game().delay);
+    const auto& names = net.players();
+    for (size_t p = 0; p < names.size(); ++p) {
+        if (names[p].empty()) continue;
+        if (p == 0) st.hostName = names[p];
+        else st.players.push_back(names[p]);
+    }
+    if (net.phase() == Netplay::Phase::Syncing)
+        st.progress = net.isHost() ? "Sending the game to the players..." : "Getting the game from the host...";
+    st.error = net.error();
+    lan_.status = st;
+
+    switch (net.phase()) {
+    case Netplay::Phase::Ended:
+        leaveLan(net.error().empty() ? "The LAN game ended." : net.error());
+        return;
+    case Netplay::Phase::Error:
+        if (lan_.errorText.empty()) lan_.errorText = net.error().empty() ? "The LAN game couldn't start." : net.error();
+        return;
+    case Netplay::Phase::Lobby: {
+        if (net.isHost() || lan_.netLoaded || !lan_.errorText.empty()) return;
+        // Joined: load the host's game (the same file, found by its checksum) with the host's settings.
+        const Netplay::GameInfo& g = net.game();
+        const System family = lanFamily(System(g.system));
+        auto crcOf = [&](const fs::path& path) {
+            std::error_code ec;
+            const uintmax_t size = fs::file_size(path, ec);
+            auto& cached = lanCrcs_[path.u8string()];
+            if (cached.first != size || cached.second == 0) cached = {size, netplayGameCrc(path.u8string())};
+            return cached.second;
+        };
+        fs::path found;
+        if (lanFamily(lan_.req.game.system) == family && crcOf(lan_.req.game.path) == g.crc) found = lan_.req.game.path;
+        if (found.empty())
+            for (const LanDialog::Game& game : lanGames())
+                if (lanFamily(game.system) == family && crcOf(game.path) == g.crc) {
+                    found = game.path;
+                    break;
+                }
+        if (found.empty()) {
+            lan_.errorText = "The host is playing " + g.title + ". Put the same file of that game in your " +
+                             systemInfo(family).fullName + " games folder, then join again.";
+            return;
+        }
+        Lan keep = std::move(lan_);
+        lan_ = Lan{};
+        lanCoreOptions_ = g.options;
+        const bool ok = startGame(found);
+        lanCoreOptions_.clear();
+        if (!ok) {
+            keep.net->leave();
+            return;  // (startGame said why)
+        }
+        lan_ = std::move(keep);
+        lan_.netLoaded = true;
+        lan_.req.game.path = found;
+        lan_.req.game.title = g.title;
+        connectPorts();  // just port 1 until the game starts, like the host
+        if (video_.window()) SDL_SetWindowTitle(video_.window(), ("Nintendall - " + g.title).c_str());
+        return;
+    }
+    case Netplay::Phase::Syncing: {
+        std::vector<uint8_t> state;
+        if (!net.isHost() && core_ && net.takeState(state)) {
+            if (core_->loadState(state)) net.stateLoaded();
+            else lan_.errorText = "Couldn't load the game from the host.";
+        }
+        return;
+    }
+    case Netplay::Phase::Playing:
+        if (!lan_.portsSet && core_) {
+            lan_.portsSet = true;
+            connectPorts();  // every player's port, the same on every computer, from frame 0
+        }
+        return;
+    default:
+        return;
     }
 }

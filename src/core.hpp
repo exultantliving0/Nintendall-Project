@@ -91,6 +91,15 @@ public:
     // Set an option from the app (e.g. the DS screen layout). Applies now, or as soon as
     // the core defines the option, and wins over the user's options file.
     void forceOption(const std::string& key, const std::string& value);
+    // Options the frontend forced for this PC (e.g. its renderer).
+    const std::map<std::string, std::string>& forcedOptions() const { return forced_; }
+    // LAN games: the host's option values, given to the emulator for this session only (the
+    // player's own values stay in their options file).
+    void setSessionOptions(const std::vector<std::pair<std::string, std::string>>& options) {
+        session_.clear();
+        for (const auto& [k, v] : options)
+            if (!forced_.count(k)) session_[k] = v;
+    }
     // Dolphin announces 50 <-> 60 Hz changes only as a geometry change: re-read the frame rate then.
     void setRefreshTimingOnGeometry(bool on) { refreshTimingOnGeometry_ = on; }
     // Our own default for an option: used unless the user has picked another value
@@ -145,6 +154,7 @@ private:
     std::filesystem::path optionsFile_;
     std::map<std::string, std::string> optionOverrides_;
     std::map<std::string, std::string> forced_;
+    std::map<std::string, std::string> session_;
     std::map<std::string, std::string> preferred_;
     std::map<std::string, CoreOption> options_;
     bool optionsDirty_ = false;

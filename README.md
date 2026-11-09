@@ -267,28 +267,38 @@ SUBSYSTEM=="hidraw*", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="0306", TAG+="u
 SUBSYSTEM=="hidraw*", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="0330", TAG+="uaccess"
 ```
 
-### LAN games (GameCube and Wii)
+### LAN games
 
-Play GameCube and Wii games together on several computers, on the same network
-or over the internet, with Dolphin's own netplay (Super Smash Bros. Melee,
-Mario Kart: Double Dash!!, Mario Kart Wii, ...).
+Play NES, SNES, N64, GameCube and Wii games together on several computers
+(Super Mario Kart, Mario Kart 64, Smash 64, Melee, Double Dash!!, Mario Kart
+Wii, ...).
 
-- **Host:** LAN > **Host Game**, pick the game and click **Host**. A host code
-  appears (from Dolphin's netplay server; no account, no ports to open). Give it
-  to your friends; on the same network your address (shown too) works as well.
-  When everyone has joined, click **Start Game**.
-- **Join:** LAN > **Join Game**, type the host code (or the host's address), pick
-  the same game and click **Join**. If you picked another game, Nintendall
-  switches to the host's game when it's in your Games folder.
+- **Host:** LAN > **Host Game**, pick the game and click **Host**. When everyone
+  has joined, click **Start Game**.
+- **Join:** LAN > **Join Game**, type the host's address (shown to the host;
+  GameCube / Wii games also give a host code), pick the game and click **Join**.
+
+**NES, SNES and N64** use Nintendall's own netplay, the way RetroArch does it:
+every computer runs the game and only button presses go over the network (UDP
+port 2627). When the host starts, it sends its save state so everyone starts at
+the same moment. A friend's press that arrives late is guessed, and if the guess
+was wrong the game goes back a few frames and plays them again with the right
+press (rollback). N64 save states are too big for that, so N64 games wait for
+everyone's presses instead. Friends join with the host's address: on the same
+network, or over the internet on one virtual LAN. A friend's Nintendall finds the
+same game file in their Games folder by itself.
+
+**GameCube and Wii** use Dolphin's own netplay. The host also gets a host code
+(from Dolphin's netplay server; no account, no ports to open) that works over
+the internet. If a host code won't connect (some routers block it), computers on
+one virtual LAN can join with the host's address in it.
 
 Everyone needs the same game (same region and version) and the same version of
-Nintendall. Everyone plays with the host's save data. Each player uses their own
+Nintendall, and plays with the host's save data. Each player uses their own
 first controller (or keyboard). Pausing, fast forward, save states and Console
-Settings are off during LAN games. **Input delay** (set when hosting, and LAN >
-More / Less Input Delay during the game): lower feels quicker, higher stops
-stutter on slow connections. If a host code won't connect (some routers block
-it), everyone can use a virtual LAN app (e.g. Radmin VPN) and join with the
-host's address in it.
+Settings are off during LAN games. **Input delay** (set when hosting; GameCube /
+Wii also LAN > More / Less Input Delay): lower feels quicker, higher stops
+stutter on slow connections.
 
 ### Wii U
 
@@ -379,6 +389,7 @@ Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen).
 | `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |
 | `src/consolesettings.*`, `src/settingsdialog.*` | the Console Settings list and window |
 | `src/lan.*`, `src/landialog.*` | LAN games: the Host / Join windows, the lobby, and the calls into Nintendall's Dolphin |
+| `src/netplay.*` | LAN games for NES / SNES / N64: the network, the shared presses, rollback |
 | `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |
 | `src/zip.*`, `src/png.*` | zip reading, screenshots |
 | `tools/bundle_cores.py` | build step that bundles the emulator cores |

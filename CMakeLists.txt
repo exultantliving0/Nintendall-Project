@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nintendall VERSION 0.14.0 LANGUAGES CXX)
+project(Nintendall VERSION 0.15.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,6 +39,7 @@ add_executable(nintendall
   src/landialog.cpp
   src/library.cpp
   src/menubar.cpp
+  src/netplay.cpp
   src/paths.cpp
   src/png.cpp
   src/selfupdate.cpp

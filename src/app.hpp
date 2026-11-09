@@ -3,6 +3,7 @@
 
 #include <array>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -16,6 +17,7 @@
 #include "input.hpp"
 #include "lan.hpp"
 #include "landialog.hpp"
+#include "netplay.hpp"
 #include "menubar.hpp"
 #include "paths.hpp"
 #include "settingsdialog.hpp"
@@ -144,10 +146,23 @@ private:
     LanLobby::Info lanLobbyInfo() const;
     void leaveLan(const std::string& message);
     bool lanBlocks(const char* what);  // pausing etc. during a LAN game: says why not, returns true
+    void lanStart();                   // host: Start Game
+    void updateNetplay();
+    bool netInputActive() const { return lan_.net && lan_.net->phase() == Netplay::Phase::Playing; }
+    int16_t localInputState(unsigned port, unsigned device, unsigned index, unsigned id);
+    NetInput localNetInput();
+    NetInputs netInputs_{};  // the presses for the frame being run (LAN games, NES / SNES / N64)
+    bool netReplay_ = false; // running frames again (rollback) or warming up: no picture or sound
+    std::vector<std::pair<std::string, std::string>> lanCoreOptions_;  // the host's options, while loading
+    std::map<std::string, std::pair<uintmax_t, uint32_t>> lanCrcs_;  // game file -> (size, CRC-32)
     struct Lan {
-        bool active = false;  // a LAN game is loaded (lobby or playing)
+        bool active = false;  // a LAN game is loaded (lobby or playing); joining NES/SNES/N64: also before
         LanDialog::Request req;
-        LanApi api;
+        LanApi api;                   // GameCube / Wii: Dolphin's netplay
+        std::unique_ptr<Netplay> net; // NES / SNES / N64: Nintendall's netplay
+        bool netLoaded = false;       // joining: the host's game is loaded
+        bool portsSet = false;        // the players' controller ports are plugged in (from frame 0)
+        int warmup = 0;               // frames run after loading, before the lobby holds the game
         LanStatus status;
         std::vector<std::string> addresses;
         std::string errorText;

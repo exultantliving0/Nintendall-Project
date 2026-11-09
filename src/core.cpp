@@ -415,7 +415,8 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
         if (!v->key) return false;
         auto it = options_.find(v->key);
         if (it == options_.end()) return false;
-        v->value = it->second.value.c_str();
+        const auto s = session_.find(v->key);
+        v->value = s != session_.end() ? s->second.c_str() : it->second.value.c_str();
         return true;
     }
     case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
