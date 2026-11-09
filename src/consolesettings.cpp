@@ -18,6 +18,12 @@ Setting opt(const std::string& label, const std::string& key, const Choices& cho
     return s;
 }
 
+// Adds a small note shown next to the setting's label.
+Setting withNote(Setting s, const std::string& note) {
+    s.note = note;
+    return s;
+}
+
 // A setting that lists whatever values the core offers.
 Setting raw(const std::string& label, const std::string& key, bool restart = false, const std::string& hint = "") {
     Setting s;
@@ -251,7 +257,8 @@ std::vector<SettingGroup> dolphin(bool wii) {
               {{"1", "Native (480p)"}, {"2", "2x (720p)"}, {"3", "3x (1080p)"}, {"4", "4x (1440p)"}, {"5", "5x"},
                {"6", "6x (4K)"}, {"8", "8x"}},
               true, "Renders 3D sharper than the real console"),
-          opt("Widescreen Hack", "dolphin_widescreen_hack", kOnOff, true, "Shows more of the 3D world in 16:9; some games glitch"),
+          withNote(opt("Widescreen Hack", "dolphin_widescreen_hack", kOnOff, true, "Shows more of the 3D world in 16:9"),
+                   "May have visual glitches for some games"),
           opt("Aspect Ratio", "dolphin_aspect_ratio",
               {{"0", "Auto"}, {"1", "Force 16:9"}, {"2", "Force 4:3"}, {"3", "Stretch"}}, true),
           opt("Anti-Aliasing", "dolphin_anti_aliasing",

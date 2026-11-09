@@ -1530,7 +1530,7 @@ void App::checkUpdateResult() {
     enum { Download = 1, Skip, Later };
     const SDL_MessageBoxButtonData buttons[] = {
         {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, Download, self ? "Update Now" : "Download"},
-        {0, Skip, "Skip This Version"},
+        {0, Skip, "Skip"},
         {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, Later, "Later"},
     };
     const SDL_MessageBoxData box{SDL_MESSAGEBOX_INFORMATION | SDL_MESSAGEBOX_BUTTONS_LEFT_TO_RIGHT, video_.window(),

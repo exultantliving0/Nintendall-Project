@@ -19,6 +19,7 @@ struct Setting {
     std::vector<SettingChoice> choices;  // empty = list the core's own values for keys[0]
     bool restart = false;                // only takes effect after restarting the game
     std::string hint;                    // short extra explanation (may be empty)
+    std::string note;                    // small warning always shown next to the label (may be empty)
 };
 
 struct SettingGroup {

@@ -242,10 +242,23 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
     rowH_ = lh + int(12 * s);
     const int footerH = lh + int(16 * s) + lh + int(14 * s);
 
-    int contentH = 0;
-    for (const auto& r : rows_) contentH += r.header.empty() ? rowH_ : rowH_ + int(4 * s);
-    if (rows_.empty()) contentH = rowH_ * 2;
     const int dw = std::min(W - int(16 * s), int(640 * s));
+    const int valueW = int(dw * 0.46);
+    // A row's note goes beside its label when there's room, otherwise on a second line under it.
+    const int gap = int(10 * s);
+    auto labelText = [](const Row& r) { return r.setting.label + (r.setting.restart ? " *" : ""); };
+    auto noteBelow = [&](const Row& r) {
+        return !r.setting.note.empty() &&
+               t.width(labelText(r)) + gap + t.width(r.setting.note) > dw - pad * 2 - valueW - gap;
+    };
+    auto heightOf = [&](const Row& r) {
+        if (!r.header.empty()) return rowH_ + int(4 * s);
+        return noteBelow(r) ? rowH_ + lh : rowH_;
+    };
+
+    int contentH = 0;
+    for (const auto& r : rows_) contentH += heightOf(r);
+    if (rows_.empty()) contentH = rowH_ * 2;
     const int maxListH = H - int(24 * s) - titleH - footerH - pad;
     const int listH = std::max(rowH_, std::min(contentH, maxListH));
     const int dh = titleH + pad / 2 + listH + footerH + pad / 2;
@@ -263,7 +276,6 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
     // Rows (clipped to the list area so scrolling works).
     SDL_Renderer* ren = v.renderer();
     SDL_RenderSetClipRect(ren, &list_);
-    const int valueW = int(dw * 0.46);
     const int valueX = dialog_.x + dw - pad - valueW;
     const int arrowW = int(24 * s);
     std::string hoverHint;
@@ -279,9 +291,17 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
             y += rowH_;
             continue;
         }
-        const bool rowHover = mouseY_ >= y && mouseY_ < y + rowH_ && inside(list_, mouseX_, mouseY_);
+        const int thisH = heightOf(r);
+        const bool rowHover = mouseY_ >= y && mouseY_ < y + thisH && inside(list_, mouseX_, mouseY_);
         if (rowHover && !r.setting.hint.empty()) hoverHint = r.setting.hint;
-        t.draw(dialog_.x + pad, y + (rowH_ - lh) / 2, r.setting.label + (r.setting.restart ? " *" : ""), kTextC);
+        const std::string labelStr = labelText(r);
+        t.draw(dialog_.x + pad, y + (rowH_ - lh) / 2, labelStr, kTextC);
+        if (!r.setting.note.empty()) {
+            if (noteBelow(r))
+                t.draw(dialog_.x + pad, y + (rowH_ - lh) / 2 + lh, r.setting.note, kDim);
+            else
+                t.draw(dialog_.x + pad + t.width(labelStr) + gap, y + (rowH_ - lh) / 2, r.setting.note, kDim);
+        }
 
         r.valueBox = {valueX, y + int(3 * s), valueW, rowH_ - int(6 * s)};
         r.prevBox = {r.valueBox.x, r.valueBox.y, arrowW, r.valueBox.h};
@@ -299,7 +319,7 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
         const int maxTextW = valueW - arrowW * 2;
         while (label.size() > 3 && t.width(label) > maxTextW) label = label.substr(0, label.size() - 4) + "...";
         t.draw(r.valueBox.x + (valueW - t.width(label)) / 2, ty, label, kTextC);
-        y += rowH_;
+        y += thisH;
     }
     SDL_RenderSetClipRect(ren, nullptr);
 

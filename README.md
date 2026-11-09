@@ -308,8 +308,8 @@ the game starts with OpenGL and says so. See `src/vkrender.*`.
 
 When Nintendall starts, it asks GitHub (in the background) whether a newer
 version has been released. If so, a popup shows what's new, with **Update Now**
-(**Download** on Linux / Mac, which opens the release page), **Skip This
-Version** (not asked again until an even newer one) and **Later**.
+(**Download** on Linux / Mac, which opens the release page), **Skip**
+(not asked again about this version, only an even newer one) and **Later**.
 
 **Update Now** (Windows, installed with the setup): Nintendall downloads the new
 setup with a progress bar (Esc cancels), checks it against the SHA-256
