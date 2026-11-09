@@ -238,6 +238,12 @@ Classic Controller, and Button Config follows. The Wiimote pointer is the right
 stick, or the mouse (Console Settings > Wiimote Pointer). Only players who have a
 controller (or keys) are plugged in, so Wii games don't show extra pointers.
 
+**Widescreen Hack** (Console Settings) shows more of the 3D world at the sides,
+in 16:9. Most Wii games are already 16:9 on their own. Turn it off for games that
+look cut off at the edges (many 2D games only draw their normal width). Nintendall
+ships Dolphin with a small fix so the hack really widens the view (see
+`third_party/dolphin/`).
+
 **Real Wii Remotes:** set Console Settings > Wii Controller to **Real Wii Remote**
 (the game restarts), then press a button on each remote to connect it. The remotes
 must first be connected to the PC:
