@@ -477,9 +477,7 @@ bool App::startGame(const fs::path& path) {
         }
         if (coreLoaded && (det.system == System::GameCube || det.system == System::Wii)) {
             core_->forceOption("dolphin_osd_enabled", "disabled");  // no emulator info text over the game
-            // No widescreen hack (it only stretched, and cut off 2D games). 0.13.4 had it with an
-            // Ultrawide choice that set Aspect Ratio to Custom (21:9): put that back to Stretch.
-            core_->forceOption("dolphin_widescreen_hack", "disabled");
+            // 0.13.4's Ultrawide choice set Aspect Ratio to Custom (21:9): put that back to Stretch.
             const std::string aspect = core_->optionValue("dolphin_aspect_ratio");
             if (aspect == "4" || aspect == "5") core_->forceOption("dolphin_aspect_ratio", "3");
             // Dolphin's dual-core mode keeps the game running between our frames, so games ran too fast
