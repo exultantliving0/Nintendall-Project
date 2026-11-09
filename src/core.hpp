@@ -68,6 +68,8 @@ public:
     bool usingHardwareRendering() const { return hwActive_; }
     uintptr_t hwFramebuffer() const { return hw_.framebuffer(); }
     bool shutdownRequested() const { return shutdownRequested_; }
+    // The emulator can send packets to other players' emulators (link-cable games), or nullptr.
+    const retro_netpacket_callback* netpacket() const { return hasNetpacket_ ? &netpacket_ : nullptr; }
     // A function the core exports beyond libretro's (null if it doesn't have it).
     void* symbol(const char* name) const;
     // Screen rotation the core asked for, in 90 degree counter-clockwise steps (0-3).
@@ -182,6 +184,8 @@ private:
     retro_hw_render_callback hwCallback_{};
     void resizeHwFramebuffer();
     bool shutdownRequested_ = false;
+    retro_netpacket_callback netpacket_{};
+    bool hasNetpacket_ = false;
     unsigned rotation_ = 0;
     bool refreshTimingOnGeometry_ = false;
     std::vector<int16_t> audioBuf_;

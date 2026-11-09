@@ -271,7 +271,8 @@ SUBSYSTEM=="hidraw*", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="0330", TAG+="u
 
 Play NES, SNES, N64, GameCube and Wii games together on several computers
 (Super Mario Kart, Mario Kart 64, Smash 64, Melee, Double Dash!!, Mario Kart
-Wii, ...).
+Wii, ...), and link Game Boy, Game Boy Color and Game Boy Advance games with a
+virtual link cable (Pokemon trades and battles, ...).
 
 - **Host:** LAN > **Host Game**, pick the game and click **Host**. When everyone
   has joined, click **Start Game**.
@@ -288,13 +289,25 @@ everyone's presses instead. Friends join with the host's address: on the same
 network, or over the internet on one virtual LAN. A friend's Nintendall finds the
 same game file in their Games folder by itself.
 
+**Game Boy, Game Boy Color and Game Boy Advance** games link like real
+handhelds: everyone plays their own game with their own save (it can be another
+game, such as the other version of Pokemon), and only what goes over the link
+cable is sent. For these, Nintendall runs the game on an emulator with a network
+link cable: Gambatte for Game Boy / Color (two players), gpSP for Game Boy
+Advance (up to four). gpSP's link cable works with the Pokemon games (link cable
+and wireless adapter), other wireless adapter games and Advance Wars. Friends join
+with the host's address, like NES / SNES / N64, and can also join after the game
+started. Game Boy links send every byte back and forth, so they are fastest on
+the same network.
+
 **GameCube and Wii** use Dolphin's own netplay. The host also gets a host code
 (from Dolphin's netplay server; no account, no ports to open) that works over
 the internet. If a host code won't connect (some routers block it), computers on
 one virtual LAN can join with the host's address in it.
 
-Everyone needs the same game (same region and version) and the same version of
-Nintendall, and plays with the host's save data. Each player uses their own
+Except for Game Boy links, everyone needs the same game (same region and
+version) and plays with the host's save data. Everyone needs the same version of
+Nintendall. Each player uses their own
 first controller (or keyboard). Pausing, fast forward, save states and Console
 Settings are off during LAN games. **Input delay** (set when hosting; GameCube /
 Wii also LAN > More / Less Input Delay): lower feels quicker, higher stops

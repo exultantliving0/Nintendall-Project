@@ -22,13 +22,16 @@ import zipfile
 
 BUILDBOT = "https://buildbot.libretro.com/nightly"
 
-# One core per system. All licenses allow commercial distribution.
+# One core per system, plus the link-cable cores for Game Boy LAN games (see
+# usesLinkLan in src/app.cpp). All licenses allow commercial distribution.
 CORES = [
     "mesen",             # NES, Famicom Disk System  (GPL-3.0)
     "bsnes",             # SNES                      (GPL-3.0)
     "mupen64plus_next",  # N64                       (GPL-2.0)
     "sameboy",           # Game Boy / Color          (MIT)
     "mgba",              # Game Boy Advance          (MPL-2.0)
+    "gambatte",          # GB / Color LAN games: link cable over the network (GPL-2.0)
+    "gpsp",              # GBA LAN games: link cable over the network        (GPL-2.0)
     "melondsds",         # Nintendo DS               (GPL-3.0+)
     "dolphin",           # GameCube / Wii            (GPL-2.0+)
     "azahar",            # 3DS                       (GPL-3.0+)

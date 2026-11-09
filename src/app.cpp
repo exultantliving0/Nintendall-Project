@@ -27,6 +27,13 @@ bool usesDolphinLan(System s) { return s == System::GameCube || s == System::Wii
 bool usesNetplay(System s) { return s == System::NES || s == System::FDS || s == System::SNES || s == System::N64; }
 // The console folder a game is in (FDS games are in the NES folder).
 System lanFamily(System s) { return s == System::FDS ? System::NES : s; }
+// Link-cable LAN games: everyone plays their own game, on an emulator with a network link cable
+// (Gambatte for Game Boy / Color, gpSP for GBA), instead of the usual one.
+bool usesLinkLan(System s) { return s == System::GB || s == System::GBC || s == System::GBA; }
+System linkFamily(System s) { return s == System::GBC ? System::GB : s; }
+const char* linkCore(System s) { return s == System::GBA ? "gpsp" : "gambatte"; }
+const char* linkFamilyName(System s) { return s == System::GBA ? "Game Boy Advance" : "Game Boy or Game Boy Color"; }
+constexpr const char* kGbLinkPort = "56400";  // Gambatte's own link connection (TCP)
 }  // namespace
 
 namespace fs = std::filesystem;
@@ -347,7 +354,9 @@ void App::runFrames() {
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
     fastForward_ = !lan_.active && (fastForwardToggled_ || keys[SDL_SCANCODE_TAB]);
     const int runs = fastForward_ ? 4 : 1;
-    if (lan_.net && core_) {
+    if (lan_.net && core_ && lan_.net->game().link && lan_.net->phase() == Netplay::Phase::Playing) {
+        linkFrame();  // link-cable game: our own game, with packets from the others' emulators
+    } else if (lan_.net && core_) {
         if (lan_.net->phase() == Netplay::Phase::Playing) {
             Netplay::Callbacks cb;
             cb.sampleLocal = [this] { return localNetInput(); };
@@ -433,10 +442,11 @@ bool App::startGame(const fs::path& path) {
                     true);
         return false;
     }
-    const fs::path corePath = paths_.findCore(sys.core);
+    const char* coreName = lanLinkLoad_ && usesLinkLan(det.system) ? linkCore(det.system) : sys.core;
+    const fs::path corePath = paths_.findCore(coreName);
     if (corePath.empty()) {
         showMessage("Nintendall is missing a file",
-                    std::string("The ") + sys.fullName + " emulator (" + coreFileName(sys.core) +
+                    std::string("The ") + sys.fullName + " emulator (" + coreFileName(coreName) +
                         ") is missing from the cores folder. Reinstalling Nintendall should fix this.",
                     true);
         return false;
@@ -476,8 +486,8 @@ bool App::startGame(const fs::path& path) {
     std::vector<Renderer> renderers;
     std::string startNote;
     for (size_t attempt = 0; attempt == 0 || attempt < renderers.size(); ++attempt) {
-        core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(sys.core), paths_.saves,
-                                               paths_.config / (std::string(sys.core) + ".opt"));
+        core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(coreName), paths_.saves,
+                                               paths_.config / (std::string(coreName) + ".opt"));
         const bool coreLoaded = core_->load(corePath, err);
         if (coreLoaded && lanPending_ && usesDolphinLan(det.system) && !lanApi(*core_).ok()) {
             core_.reset();
@@ -580,6 +590,11 @@ bool App::startGame(const fs::path& path) {
             if (!core_->forcedOptions().count(key)) info.options.push_back({key, o.value});
         info.window = det.system == System::N64 ? 0 : 8;  // N64 save states are too big to take every frame
         info.delay = lanPending_->delay;
+        if (usesLinkLan(det.system)) {  // everyone plays their own game, with their own settings
+            info.link = true;
+            info.options.clear();
+            info.maxPlayers = det.system == System::GBA ? 4 : 2;  // a Game Boy link cable joins two
+        }
         auto net = std::make_unique<Netplay>();
         std::string netError;
         if (!net->host(lanPending_->name, info, netError)) {
@@ -695,7 +710,7 @@ void App::loadSram() {
 void App::saveSram(bool force) {
     if (!core_) return;
     // Joined an NES / SNES / N64 LAN game: the game runs on the host's save, which isn't ours to keep.
-    if (lan_.net && !lan_.net->isHost()) return;
+    if (lan_.net && !lan_.net->isHost() && !lan_.net->game().link) return;
     const Uint32 now = SDL_GetTicks();
     if (!force && now - lastSramCheck_ < 3000) return;  // check a few times a minute
     lastSramCheck_ = now;
@@ -832,6 +847,15 @@ void App::connectPorts() {
         // LAN game: each computer has one player (its port 1); netplay plugs in a controller for
         // every player on every computer. Unplugging ports here would unplug the other players.
         if (lan_.active && !lan_.net && p > 0) break;
+        const bool link = lanLinkLoad_ || (lan_.net && lan_.net->game().link);  // everyone's own game
+        if (link && p > 0) {
+            core_->setPortDevice(unsigned(p), RETRO_DEVICE_NONE);
+            continue;
+        }
+        if (link) {
+            core_->setPortDevice(0, RETRO_DEVICE_JOYPAD);
+            continue;
+        }
         if ((lanPending_ || lan_.net) && !lan_.portsSet && p > 0) {
             // NES / SNES / N64 LAN game, before it starts: just port 1 on every computer
             // (the same everywhere), then every player's port from frame 0.
@@ -1348,17 +1372,20 @@ void App::doAction(int a) {
     case ActLanLeave: leaveLan(""); break;
     case ActLanHelp:
         showMessage("LAN Games",
-                    "Play NES, SNES, N64, GameCube and Wii games together on several computers.\n\n"
+                    "Play NES, SNES, N64, GameCube and Wii games together on several computers, and link "
+                    "Game Boy, Game Boy Color and GBA games (Pokemon trades and battles, ...).\n\n"
                     "Host: LAN > Host Game, pick the game and click Host. Give your friends your address (it "
                     "appears in the window; GameCube and Wii games also show a host code, which works over the "
                     "internet). When everyone has joined, click Start Game.\n\n"
                     "Join: LAN > Join Game, type the host's address (or host code), pick the game and click Join. "
                     "Nintendall finds the host's game in your Games folder.\n\n"
-                    "Everyone needs the same game (same region and version) and the same version of Nintendall. "
-                    "Everyone plays with the host's save data. Pausing, fast forward and save states are off "
-                    "during LAN games. Input delay: lower feels quicker; raise it if the game stutters.\n\n"
-                    "NES, SNES and N64 games: friends join with the host's address, on the same network or on "
-                    "one virtual LAN. GameCube and Wii: if a host code doesn't connect, computers on one virtual "
+                    "Everyone needs the same version of Nintendall. Except for Game Boy links, everyone needs "
+                    "the same game (same region and version) and plays with the host's save data. Pausing, "
+                    "fast forward and save states are off during LAN games. Input delay: lower feels quicker; raise it if the game stutters.\n\n"
+                    "Game Boy, Game Boy Color and GBA: everyone picks their own game and plays with their own "
+                    "save, like real link cables. Friends can join after the game started.\n\n"
+                    "NES, SNES, N64 and Game Boy games: friends join with the host's address, on the same "
+                    "network or on one virtual LAN. GameCube and Wii: if a host code doesn't connect, computers on one virtual "
                     "LAN can join with the host's address in it.",
                     false);
         break;
@@ -1868,9 +1895,10 @@ void App::checkWiimotePairing() {
 std::vector<LanDialog::Game> App::lanGames() {
     std::vector<LanDialog::Game> games;
     for (const HomeConsole& c : homeConsoles()) {
-        if (!usesDolphinLan(c.system) && !usesNetplay(c.system)) continue;
+        if (!usesDolphinLan(c.system) && !usesNetplay(c.system) && !usesLinkLan(c.system)) continue;
         for (const LibraryGame& g : lanLibrary_.scan(home_.gamesRoot() / fs::u8path(c.folder), c.system))
-            if (usesDolphinLan(g.system) || usesNetplay(g.system)) games.push_back({g.path, g.title, g.gameId, g.system});
+            if (usesDolphinLan(g.system) || usesNetplay(g.system) || usesLinkLan(g.system))
+                games.push_back({g.path, g.title, g.gameId, g.system});
     }
     std::stable_sort(games.begin(), games.end(), [](const LanDialog::Game& a, const LanDialog::Game& b) {
         std::string x = a.title, y = b.title;
@@ -1885,7 +1913,7 @@ void App::openLanDialog(LanDialog::Kind kind) {
     menu_.close();
     std::vector<LanDialog::Game> games = lanGames();
     // The GameCube / Wii game that's running can be picked even if it isn't in the Games folder.
-    const bool gcWii = core_ && (usesDolphinLan(system_) || usesNetplay(system_));
+    const bool gcWii = core_ && (usesDolphinLan(system_) || usesNetplay(system_) || usesLinkLan(system_));
     if (gcWii && std::none_of(games.begin(), games.end(), [&](const LanDialog::Game& g) { return g.path == gamePath_; }))
         games.insert(games.begin(), {gamePath_, gameTitle_, "", system_});
     const std::string want = gcWii ? gamePath_.u8string() : cfg_.get("lan.game");
@@ -1900,8 +1928,9 @@ void App::openLanDialog(LanDialog::Kind kind) {
 
 bool App::startLanGame(const LanDialog::Request& request) {
     const LanDialog::Request req = request;  // startGame resets lan_ (which may hold `request`)
-    if (req.kind == LanDialog::Kind::Join && usesNetplay(req.game.system)) {
+    if (req.kind == LanDialog::Kind::Join && (usesNetplay(req.game.system) || usesLinkLan(req.game.system))) {
         // NES / SNES / N64: connect first; the host says which game (and its settings), then it loads.
+        // Game Boy / GBA: connect first too, then our own game loads.
         stopGame();
         auto net = std::make_unique<Netplay>();
         std::string error;
@@ -1920,8 +1949,13 @@ bool App::startLanGame(const LanDialog::Request& request) {
         return true;
     }
     lanPending_ = &req;
+    lanLinkLoad_ = usesLinkLan(req.game.system);
+    if (lanLinkLoad_ && linkFamily(req.game.system) == System::GB)  // Gambatte waits for the other Game Boy
+        lanCoreOptions_ = {{"gambatte_gb_link_mode", "Network Server"}, {"gambatte_gb_link_network_port", kGbLinkPort}};
     const bool ok = startGame(req.game.path);
     lanPending_ = nullptr;
+    lanLinkLoad_ = false;
+    lanCoreOptions_.clear();
     cfg_.set("lan.name", req.name);
     cfg_.set("lan.game", req.game.path.u8string());
     if (req.kind == LanDialog::Kind::Host) cfg_.set("lan.delay", std::to_string(req.delay));
@@ -2020,6 +2054,10 @@ void App::lanStart() {
         return;
     }
     if (!core_ || lan_.net->phase() != Netplay::Phase::Lobby) return;
+    if (lan_.net->game().link) {  // everyone plays their own game: nothing to send
+        lan_.net->startLink();
+        return;
+    }
     const std::vector<uint8_t> state = core_->saveState();
     if (state.empty()) {
         osd("Couldn't start - try again in a moment");
@@ -2066,6 +2104,14 @@ void App::updateNetplay() {
 
     switch (net.phase()) {
     case Netplay::Phase::Ended:
+        if (net.game().link && core_ && (net.isHost() || lan_.netLoaded)) {
+            // Link-cable game: the others are gone, but this game is our own: keep playing.
+            const std::string why = net.error().empty() ? "The LAN game ended." : net.error();
+            if (lan_.linkStarted && core_->netpacket() && core_->netpacket()->stop) core_->netpacket()->stop();
+            lan_ = Lan{};
+            osd(why + " Your game keeps going.", 6000);
+            return;
+        }
         leaveLan(net.error().empty() ? "The LAN game ended." : net.error());
         return;
     case Netplay::Phase::Error:
@@ -2073,8 +2119,12 @@ void App::updateNetplay() {
         return;
     case Netplay::Phase::Lobby: {
         if (net.isHost() || lan_.netLoaded || !lan_.errorText.empty()) return;
-        // Joined: load the host's game (the same file, found by its checksum) with the host's settings.
         const Netplay::GameInfo& g = net.game();
+        if (g.link) {
+            joinLinkGame();
+            return;
+        }
+        // Joined: load the host's game (the same file, found by its checksum) with the host's settings.
         const System family = lanFamily(System(g.system));
         auto crcOf = [&](const fs::path& path) {
             std::error_code ec;
@@ -2122,7 +2172,7 @@ void App::updateNetplay() {
         return;
     }
     case Netplay::Phase::Playing:
-        if (!lan_.portsSet && core_) {
+        if (!lan_.portsSet && core_ && !net.game().link) {
             lan_.portsSet = true;
             connectPorts();  // every player's port, the same on every computer, from frame 0
         }
@@ -2130,4 +2180,94 @@ void App::updateNetplay() {
     default:
         return;
     }
+}
+
+// ============================================================================
+// Link-cable LAN games (Game Boy / Color / Advance): everyone plays their own game
+
+void App::joinLinkGame() {
+    Netplay& net = *lan_.net;
+    const Netplay::GameInfo& g = net.game();
+    const System family = linkFamily(System(g.system));
+    if (linkFamily(lan_.req.game.system) != family) {
+        lan_.errorText = "The host is playing " + g.title + " with the link cable. Pick one of your " +
+                         linkFamilyName(family) + " games, then join again.";
+        return;
+    }
+    std::vector<std::pair<std::string, std::string>> options;
+    if (family == System::GB) {
+        // Gambatte connects to the host's Game Boy itself; it takes the address digit by digit.
+        unsigned a = 0, b = 0, c = 0, d = 0;
+        if (std::sscanf(net.hostIp().c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
+            lan_.errorText = "Couldn't use the host's address for the link cable.";
+            return;
+        }
+        char digits[16];
+        std::snprintf(digits, sizeof digits, "%03u%03u%03u%03u", a, b, c, d);
+        options = {{"gambatte_gb_link_mode", "Network Client"}, {"gambatte_gb_link_network_port", kGbLinkPort}};
+        for (int i = 0; i < 12; ++i)
+            options.push_back({"gambatte_gb_link_network_server_ip_" + std::to_string(i + 1), std::string(1, digits[i])});
+    }
+    const fs::path game = lan_.req.game.path;
+    Lan keep = std::move(lan_);
+    lan_ = Lan{};
+    lanCoreOptions_ = options;
+    lanLinkLoad_ = true;
+    const bool ok = startGame(game);
+    lanLinkLoad_ = false;
+    lanCoreOptions_.clear();
+    if (!ok) {
+        keep.net->leave();
+        return;  // (startGame said why)
+    }
+    lan_ = std::move(keep);
+    lan_.netLoaded = true;
+    lan_.net->linkLoaded();
+    connectPorts();
+}
+
+// The emulator's packet functions (one game runs at a time).
+static App* g_linkApp = nullptr;
+
+static void RETRO_CALLCONV linkSendCb(int /*flags*/, const void* buf, size_t len, uint16_t to) {
+    if (g_linkApp && buf && len) g_linkApp->linkSend(to, buf, len);  // always reliable, sent at once
+}
+
+static void RETRO_CALLCONV linkPollCb() {
+    if (g_linkApp) g_linkApp->linkPump();
+}
+
+void App::linkSend(unsigned to, const void* data, size_t size) {
+    if (lan_.net) lan_.net->linkSend(to == RETRO_NETPACKET_BROADCAST ? Netplay::kLinkEveryone : int(to), data, size);
+}
+
+void App::linkPump() {
+    if (!lan_.net || !core_) return;
+    Netplay& net = *lan_.net;
+    net.poll();
+    const retro_netpacket_callback* np = lan_.linkStarted ? core_->netpacket() : nullptr;
+    if (!np) return;
+    for (int p : net.takeLinkJoined()) {
+        if (np->connected && !np->connected(uint16_t(p))) {
+            const auto& names = net.players();
+            osd((size_t(p) < names.size() ? names[size_t(p)] : "A player") + " can't link with this game (too many players)",
+                5000);
+        }
+    }
+    for (int p : net.takeLinkLeft())
+        if (np->disconnected) np->disconnected(uint16_t(p));
+    for (const Netplay::LinkPacket& pk : net.takeLinkPackets())
+        np->receive(pk.data.data(), pk.data.size(), uint16_t(pk.from));
+}
+
+void App::linkFrame() {
+    const retro_netpacket_callback* np = core_->netpacket();
+    if (np && !lan_.linkStarted) {
+        lan_.linkStarted = true;
+        g_linkApp = this;
+        np->start(uint16_t(lan_.net->localPlayer()), linkSendCb, linkPollCb);
+    }
+    linkPump();
+    if (np && np->poll) np->poll();
+    core_->run();
 }

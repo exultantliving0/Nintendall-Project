@@ -21,6 +21,7 @@
 #include <climits>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <random>
 
@@ -30,7 +31,7 @@
 namespace {
 
 constexpr uint8_t kMagic[4] = {'N', 'D', 'N', 'P'};
-constexpr uint8_t kProtocol = 1;
+constexpr uint8_t kProtocol = 2;
 enum Msg : uint8_t {
     MsgHello = 1,  // joining player -> host: version, name
     MsgWelcome,    // host -> player: player number, game, options, players
@@ -44,7 +45,9 @@ enum Msg : uint8_t {
     MsgCheck,      // player -> host: a checksum of the game's state at a frame
     MsgDesync,     // host -> players: someone went out of sync
     MsgBye,        // leaving
-    MsgPing,       // player -> host: keep-alive in the lobby
+    MsgPing,       // player -> host: keep-alive (in the lobby; link-cable games: always)
+    MsgLink,       // link-cable games: a packet from an emulator (players -> host -> players)
+    MsgLinkAck,    // link-cable games: packets received so far
 };
 constexpr size_t kChunkBytes = 1024;
 constexpr uint32_t kChunkWindow = 64;  // pieces in flight per player
@@ -146,6 +149,17 @@ struct Reader {
     }
 };
 
+// Link-cable packets to one computer: numbered, resent until it confirms them, handed on in order.
+struct LinkChannel {
+    uint32_t nextSeq = 0, acked = 0;
+    std::deque<std::vector<uint8_t>> unacked;  // whole messages, numbers acked .. nextSeq-1
+    uint32_t expect = 0;                        // the next number to hand on
+    std::map<uint32_t, std::vector<uint8_t>> early;  // arrived while an earlier one is missing
+    Uint32 lastResend = 0;
+};
+constexpr size_t kLinkResendCount = 64;
+constexpr Uint32 kLinkResendMs = 120;
+
 uint32_t crcOf(const std::vector<uint8_t>& d) {
     return uint32_t(crc32(crc32(0L, Z_NULL, 0), d.data(), uInt(d.size())));
 }
@@ -166,6 +180,8 @@ struct Netplay::Impl {
     uint32_t piecesGot = 0, rawSize = 0;
     bool stateComplete = false, stateTaken = false, stateLoaded = false;
     std::vector<uint8_t> state;
+    bool linkLoaded = false;
+    LinkChannel hostLink;
 
     // Hosting
     struct Peer {
@@ -179,6 +195,7 @@ struct Netplay::Impl {
         bool playing = false;  // its presses have started coming in
         int frame = 0;
         Uint32 lastGo = 0;
+        LinkChannel link;
     };
     std::vector<Peer> peers;
     std::vector<uint8_t> packed;  // the compressed save state
@@ -243,6 +260,23 @@ struct Netplay::Impl {
         }
         buf.resize(size_t(n));
         return true;
+    }
+
+    void linkSend(const Addr& to, LinkChannel& ch, int from, int dest, const std::vector<uint8_t>& data) {
+        Writer w(MsgLink, session);
+        w.u32(ch.nextSeq++);
+        w.u8(uint8_t(from));
+        w.u16(uint16_t(dest));
+        w.bytes(data.data(), data.size());
+        ch.unacked.push_back(w.b);
+        send(to, w);
+    }
+    void linkResend(const Addr& to, LinkChannel& ch, Uint32 now) {
+        if (ch.unacked.empty() || now - ch.lastResend < kLinkResendMs) return;
+        ch.lastResend = now;
+        for (size_t i = 0; i < ch.unacked.size() && i < kLinkResendCount; ++i)
+            ::sendto(sock, reinterpret_cast<const char*>(ch.unacked[i].data()), int(ch.unacked[i].size()), 0,
+                     reinterpret_cast<const sockaddr*>(&to.sa), sizeof to.sa);
     }
 
     Peer* peerAt(const Addr& a) {
@@ -367,7 +401,10 @@ void Netplay::handle(const uint8_t* data, size_t size, const void* fromPtr) {
                 if (version != NINTENDALL_VERSION)
                     return reject("The host has Nintendall " + std::string(NINTENDALL_VERSION) + " and you have " +
                                   version + ". Use the same version.");
-                if (phase_ != Phase::Lobby) return reject("The host has already started the game.");
+                if (phase_ != Phase::Lobby && !(game_.link && phase_ == Phase::Playing))
+                    return reject("The host has already started the game.");
+                if (playerCount() >= game_.maxPlayers)
+                    return reject("The game is full (" + std::to_string(game_.maxPlayers) + " players).");
                 if (peer) {  // the same computer joining again
                     names_[size_t(peer->player)].clear();
                     net_->peers.erase(net_->peers.begin() + (peer - net_->peers.data()));
@@ -395,6 +432,8 @@ void Netplay::handle(const uint8_t* data, size_t size, const void* fromPtr) {
             w.str(game_.title);
             w.u8(uint8_t(game_.window));
             w.u8(uint8_t(game_.delay));
+            w.u8(game_.link ? 1 : 0);
+            w.u8(uint8_t(game_.maxPlayers));
             w.u16(uint16_t(game_.options.size()));
             for (const auto& [k, v] : game_.options) {
                 w.str(k);
@@ -407,7 +446,22 @@ void Netplay::handle(const uint8_t* data, size_t size, const void* fromPtr) {
         if (!peer || session != net_->session) return;
         peer->lastHeard = now;
         switch (type) {
-        case MsgPing: break;
+        case MsgPing:
+            if (r.u8() && r.ok && game_.link && phase_ == Phase::Playing && !peer->playing) {
+                peer->playing = true;
+                linkJoined_.push_back(peer->player);
+            }
+            break;
+        case MsgLink:
+        case MsgLinkAck:
+            if (game_.link && phase_ == Phase::Playing) {
+                if (!peer->playing) {
+                    peer->playing = true;
+                    linkJoined_.push_back(peer->player);
+                }
+                linkReceive(int(peer - net_->peers.data()), data, size);
+            }
+            break;
         case MsgChunkAck: {
             const uint32_t got = r.u32();
             if (r.ok && got > peer->acked) {
@@ -439,12 +493,14 @@ void Netplay::handle(const uint8_t* data, size_t size, const void* fromPtr) {
             break;
         }
         case MsgBye: {
+            const int player = peer->player;
             const std::string who = names_[size_t(peer->player)];
             names_[size_t(peer->player)].clear();
             net_->peers.erase(net_->peers.begin() + (peer - net_->peers.data()));
             net_->lastPlayers = 0;
-            if (phase_ == Phase::Lobby) {
+            if (phase_ == Phase::Lobby || game_.link) {
                 messages_.push_back(who + " left");
+                if (phase_ == Phase::Playing && game_.link) linkLeft_.push_back(player);
             } else {
                 Writer w(MsgBye, net_->session);
                 for (auto& p : net_->peers) net_->send(p.addr, w);
@@ -470,6 +526,8 @@ void Netplay::handle(const uint8_t* data, size_t size, const void* fromPtr) {
         g.title = r.str();
         g.window = r.u8();
         g.delay = r.u8();
+        g.link = r.u8() != 0;
+        g.maxPlayers = r.u8();
         const int n = r.u16();
         for (int i = 0; i < n && r.ok; ++i) {
             std::string k = r.str(), v = r.str();
@@ -493,7 +551,7 @@ void Netplay::handle(const uint8_t* data, size_t size, const void* fromPtr) {
         case MsgPlayers: {
             std::vector<std::string> names(kNetplayMaxPlayers);
             for (auto& s : names) s = r.str();
-            if (!r.ok || phase_ == Phase::Playing) break;
+            if (!r.ok || (phase_ == Phase::Playing && !game_.link)) break;
             for (int p = 0; p < kNetplayMaxPlayers; ++p) {
                 const std::string& was = names_[size_t(p)];
                 if (p != local_ && was != names[size_t(p)]) {
@@ -546,6 +604,15 @@ void Netplay::handle(const uint8_t* data, size_t size, const void* fromPtr) {
             break;
         }
         case MsgGo: {
+            if (game_.link) {  // link-cable game: our own game starts
+                if (phase_ != Phase::Lobby || !net_->linkLoaded) break;
+                std::vector<std::string> names(kNetplayMaxPlayers);
+                for (auto& s : names) s = r.str();
+                if (r.ok) names_ = names;
+                phase_ = Phase::Playing;
+                net_->lastPing = 0;  // say so now
+                break;
+            }
             if (phase_ != Phase::Syncing || !net_->stateLoaded) break;
             std::vector<std::string> names(kNetplayMaxPlayers);
             for (auto& s : names) s = r.str();
@@ -573,6 +640,10 @@ void Netplay::handle(const uint8_t* data, size_t size, const void* fromPtr) {
             if (r.ok) remoteFrame_ = std::max(remoteFrame_, hostFrame);
             break;
         }
+        case MsgLink:
+        case MsgLinkAck:
+            if (game_.link && phase_ == Phase::Playing) linkReceive(-1, data, size);
+            break;
         case MsgDesync:
             if (!desyncShown_) {
                 desyncShown_ = true;
@@ -596,7 +667,8 @@ void Netplay::poll() {
     const Uint32 now = SDL_GetTicks();
     if (host_) {
         // Lobby / starting: the player list (also keeps the connection alive).
-        if ((phase_ == Phase::Lobby || phase_ == Phase::Syncing) && now - net_->lastPlayers >= 1000) {
+        if ((phase_ == Phase::Lobby || phase_ == Phase::Syncing || (phase_ == Phase::Playing && game_.link)) &&
+            now - net_->lastPlayers >= 1000) {
             net_->lastPlayers = now;
             Writer w(MsgPlayers, net_->session);
             for (const auto& n : names_) w.str(n);
@@ -605,12 +677,14 @@ void Netplay::poll() {
         // Players who went quiet left.
         for (size_t i = 0; i < net_->peers.size(); ++i) {
             if (now - net_->peers[i].lastHeard < kTimeoutMs) continue;
-            const std::string who = names_[size_t(net_->peers[i].player)];
-            names_[size_t(net_->peers[i].player)].clear();
+            const int player = net_->peers[i].player;
+            const std::string who = names_[size_t(player)];
+            names_[size_t(player)].clear();
             net_->peers.erase(net_->peers.begin() + std::ptrdiff_t(i));
             net_->lastPlayers = 0;
-            if (phase_ == Phase::Lobby) {
-                messages_.push_back(who + " left");
+            if (phase_ == Phase::Lobby || game_.link) {
+                messages_.push_back(who + (phase_ == Phase::Lobby ? " left" : " lost the connection"));
+                if (phase_ == Phase::Playing && game_.link) linkLeft_.push_back(player);
             } else if (phase_ == Phase::Syncing || phase_ == Phase::Playing) {
                 Writer w(MsgBye, net_->session);
                 for (auto& p : net_->peers) net_->send(p.addr, w);
@@ -647,7 +721,10 @@ void Netplay::poll() {
                 ringFrame_.assign(size_t(game_.window + 2), -1);
             }
         }
-        // Playing: "go" until each player's presses come in.
+        // Link-cable game: packets not confirmed yet go again.
+        if (phase_ == Phase::Playing && game_.link)
+            for (auto& p : net_->peers) net_->linkResend(p.addr, p.link, now);
+        // Playing: "go" until each player's presses come in (link-cable game: until they say they started).
         if (phase_ == Phase::Playing) {
             for (auto& p : net_->peers) {
                 if (p.playing || now - p.lastGo < 200) continue;
@@ -682,11 +759,13 @@ void Netplay::poll() {
                                        : "Lost the connection to the host. The LAN game ended.");
             return;
         }
-        if (phase_ != Phase::Playing && now - net_->lastPing >= 1000) {
+        if ((phase_ != Phase::Playing || game_.link) && now - net_->lastPing >= 1000) {
             net_->lastPing = now;
             Writer w(MsgPing, net_->session);
+            w.u8(phase_ == Phase::Playing ? 1 : 0);
             net_->send(net_->hostAddr, w);
         }
+        if (phase_ == Phase::Playing && game_.link) net_->linkResend(net_->hostAddr, net_->hostLink, now);
         if (phase_ == Phase::Syncing && net_->stateLoaded && now - net_->lastReady >= 300) {
             net_->lastReady = now;
             Writer w(MsgReady, net_->session);
@@ -712,6 +791,97 @@ void Netplay::start(const std::vector<uint8_t>& state) {
         p.lastProgress = SDL_GetTicks();
     }
     phase_ = Phase::Syncing;
+}
+
+// ---------------------------------------------------------------------------
+// Link-cable games
+
+void Netplay::startLink() {
+    if (!host_ || phase_ != Phase::Lobby || !game_.link) return;
+    phase_ = Phase::Playing;
+    for (auto& p : net_->peers) p.lastGo = 0;
+}
+
+void Netplay::linkLoaded() { net_->linkLoaded = true; }
+
+void Netplay::linkSend(int to, const void* data, size_t size) {
+    if (!game_.link || phase_ != Phase::Playing) return;
+    std::vector<uint8_t> d(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size);
+    if (host_) linkDeliver(0, to, std::move(d));
+    else net_->linkSend(net_->hostAddr, net_->hostLink, local_, to, d);
+}
+
+void Netplay::linkDeliver(int from, int to, std::vector<uint8_t> data) {
+    // Host: a packet from `from` (0 = this computer), for `to`.
+    for (auto& p : net_->peers)
+        if (p.playing && p.player != from && (to == kLinkEveryone || to == p.player))
+            net_->linkSend(p.addr, p.link, from, to, data);
+    if (from != 0 && (to == 0 || to == kLinkEveryone)) linkIn_.push_back({from, std::move(data)});
+}
+
+void Netplay::linkReceive(int peerIndex, const uint8_t* data, size_t size) {
+    LinkChannel& ch = peerIndex < 0 ? net_->hostLink : net_->peers[size_t(peerIndex)].link;
+    const Addr to = peerIndex < 0 ? net_->hostAddr : net_->peers[size_t(peerIndex)].addr;
+    const int sender = peerIndex < 0 ? 0 : net_->peers[size_t(peerIndex)].player;
+    Reader r(data + 10, size - 10);
+    if (data[5] == MsgLinkAck) {
+        const uint32_t next = r.u32();
+        while (r.ok && ch.acked < next && !ch.unacked.empty()) {
+            ch.unacked.pop_front();
+            ++ch.acked;
+        }
+        return;
+    }
+    auto take = [&](const std::vector<uint8_t>& msg) {
+        Reader m(msg.data() + 14, msg.size() - 14);
+        const int from = m.u8(), dest = m.u16();
+        if (!m.ok) return;
+        std::vector<uint8_t> payload(msg.begin() + 17, msg.end());
+        if (host_) linkDeliver(sender, dest, std::move(payload));  // (players can't speak for others)
+        else linkIn_.push_back({from, std::move(payload)});
+    };
+    const uint32_t seq = r.u32();
+    if (r.ok && size >= 17) {
+        if (seq == ch.expect) {
+            take(std::vector<uint8_t>(data, data + size));
+            ++ch.expect;
+            for (auto it = ch.early.find(ch.expect); it != ch.early.end(); it = ch.early.find(ch.expect)) {
+                take(it->second);
+                ch.early.erase(it);
+                ++ch.expect;
+            }
+        } else if (seq > ch.expect && seq - ch.expect < 4096) {
+            ch.early.emplace(seq, std::vector<uint8_t>(data, data + size));
+        }
+    }
+    Writer w(MsgLinkAck, net_->session);
+    w.u32(ch.expect);
+    net_->send(to, w);
+}
+
+std::vector<Netplay::LinkPacket> Netplay::takeLinkPackets() {
+    std::vector<LinkPacket> v;
+    v.swap(linkIn_);
+    return v;
+}
+
+std::vector<int> Netplay::takeLinkJoined() {
+    std::vector<int> v;
+    v.swap(linkJoined_);
+    return v;
+}
+
+std::vector<int> Netplay::takeLinkLeft() {
+    std::vector<int> v;
+    v.swap(linkLeft_);
+    return v;
+}
+
+std::string Netplay::hostIp() const {
+    if (host_) return "";
+    char buf[INET_ADDRSTRLEN] = {};
+    inet_ntop(AF_INET, &net_->hostAddr.sa.sin_addr, buf, sizeof buf);
+    return buf;
 }
 
 bool Netplay::takeState(std::vector<uint8_t>& state) {

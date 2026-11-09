@@ -148,7 +148,17 @@ private:
     bool lanBlocks(const char* what);  // pausing etc. during a LAN game: says why not, returns true
     void lanStart();                   // host: Start Game
     void updateNetplay();
-    bool netInputActive() const { return lan_.net && lan_.net->phase() == Netplay::Phase::Playing; }
+    bool netInputActive() const {
+        return lan_.net && lan_.net->phase() == Netplay::Phase::Playing && !lan_.net->game().link;
+    }
+    // Link-cable LAN games (Game Boy / Color / Advance)
+    void joinLinkGame();  // joining: load our own game, with the link cable to the host
+    void linkFrame();     // one frame of our own game, with the other players' link packets
+public:
+    void linkPump();      // network: packets in, players joining / leaving (also from the emulator)
+    void linkSend(unsigned to, const void* data, size_t size);
+private:
+    bool lanLinkLoad_ = false;  // startGame: load a link-cable game's emulator
     int16_t localInputState(unsigned port, unsigned device, unsigned index, unsigned id);
     NetInput localNetInput();
     NetInputs netInputs_{};  // the presses for the frame being run (LAN games, NES / SNES / N64)
@@ -168,6 +178,7 @@ private:
         std::string errorText;
         bool switchedGame = false;  // joined with another game after the host's turned out different
         bool sawHost = false;       // joining: the host has been in the player list
+        bool linkStarted = false;   // link-cable game: the emulator was told the session started
     };
     Lan lan_;
     const LanDialog::Request* lanPending_ = nullptr;  // while startGame loads a LAN game

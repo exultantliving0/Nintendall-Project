@@ -39,6 +39,9 @@ const char* systemLabel(System s) {
     case System::N64: return "N64";
     case System::SNES: return "SNES";
     case System::FDS: return "Famicom Disk";
+    case System::GB: return "Game Boy";
+    case System::GBC: return "GB Color";
+    case System::GBA: return "GBA";
     default: return "NES";
     }
 }
@@ -243,7 +246,7 @@ void LanDialog::draw(Video& v, Text& t, int W, int H) {
     }
 
     // Game list
-    t.draw(x, y, join ? "Game (the same one the host picked)" : "Game", kTextC);
+    t.draw(x, y, join ? "Game (the host's game; Game Boy and GBA: your own)" : "Game", kTextC);
     y += lh + int(4 * s);
     list_ = {x, y, w, listRows_ * rowH_};
     box(v, list_, kField, kFieldBorder);
@@ -284,7 +287,13 @@ void LanDialog::draw(Video& v, Text& t, int W, int H) {
     field(name_, join ? focus_ == 1 : true, "");
 
     delayPrev_ = delayNext_ = delayBox_ = {};
-    if (!join) {
+    const System chosen = selected_ >= 0 ? games_[size_t(selected_)].system : System::Unknown;
+    const bool link = chosen == System::GB || chosen == System::GBC || chosen == System::GBA;
+    if (!join && link) {
+        // Link-cable games have no input delay: everyone plays their own game.
+        t.draw(x, y + (fieldH - lh) / 2, "Link cable: everyone plays their own game and save", kDim);
+        y += fieldH + pad;
+    } else if (!join) {
         // Input delay: frames each button press waits so the computers stay in step.
         const std::string label = "Input delay";
         t.draw(x, y + (fieldH - lh) / 2, label, kTextC);
@@ -307,6 +316,7 @@ void LanDialog::draw(Video& v, Text& t, int W, int H) {
     v.fillRect(dialog_.x + 1, y - pad / 2, dw - 2, 1, kFieldBorder);
     const std::string hint =
         !error_.empty() ? error_
+        : join && link  ? "Pick your own game (it can be another one, e.g. the other version of Pokemon)."
         : join          ? "Everyone needs the same game (region and version) and the same Nintendall version."
                         : "Next, friends join with LAN > Join Game (the host code or your address appears next).";
     int hy = y;

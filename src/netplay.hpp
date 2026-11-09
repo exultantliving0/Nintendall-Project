@@ -21,6 +21,11 @@
 //   presses: "rollback". With a rollback window of 0 (N64, whose save states are big) the game
 //   instead waits for everyone's presses, like Dolphin's netplay.
 // - The host passes everyone's presses on to everyone else.
+//
+// Link-cable games (Game Boy, Game Boy Color, Game Boy Advance) work differently: everyone plays
+// their own game (and save) on their own emulator, and only what goes over the link cable is
+// sent: packets from the emulator (GBA), passed on by the host. Game Boy emulators connect to
+// each other themselves; this just runs the lobby. Players can join after the game started.
 
 constexpr unsigned kNetplayPort = 2627;
 constexpr int kNetplayMaxPlayers = 4;
@@ -45,7 +50,16 @@ public:
         std::vector<std::pair<std::string, std::string>> options;  // the host's emulator options
         int window = 8;       // rollback frames (0 = wait for everyone)
         int delay = 2;        // input delay frames
+        bool link = false;    // a link-cable game (see above)
+        int maxPlayers = kNetplayMaxPlayers;
     };
+
+    // Link-cable games: a packet from another player's emulator.
+    struct LinkPacket {
+        int from = 0;  // player number
+        std::vector<uint8_t> data;
+    };
+    static constexpr int kLinkEveryone = 0xFFFF;
 
     // What the frame engine needs from the app.
     struct Callbacks {
@@ -90,6 +104,20 @@ public:
     int advance(const Callbacks& cb);
     int frame() const { return frame_; }
 
+    // Link-cable games. Host: start (no save state; each player's own game starts too).
+    void startLink();
+    // Joining: our own game is loaded and can start.
+    void linkLoaded();
+    // Sends a packet to a player (or kLinkEveryone), reliably and in order (the host passes on
+    // packets between other players).
+    void linkSend(int to, const void* data, size_t size);
+    std::vector<LinkPacket> takeLinkPackets();
+    // Host: players whose game started / who left, since the last call.
+    std::vector<int> takeLinkJoined();
+    std::vector<int> takeLinkLeft();
+    // Joining: the host's address, as an IPv4 number ("" if unknown).
+    std::string hostIp() const;
+
     // Leaving: tells the others.
     void leave();
 
@@ -104,6 +132,8 @@ private:
     void checkSync(const Callbacks& cb);
     void recordCheck(int frame, uint32_t crc);
     void handle(const uint8_t* data, size_t size, const void* from);
+    void linkReceive(int peerIndex, const uint8_t* data, size_t size);
+    void linkDeliver(int from, int to, std::vector<uint8_t> data);
     void fail(const std::string& message);
     void end(const std::string& message);
 
@@ -129,6 +159,10 @@ private:
     int lastCheck_ = 0;
     int rollbacks_ = 0;  // (for the log)
     bool desyncShown_ = false;
+
+    // Link-cable games
+    std::vector<LinkPacket> linkIn_;
+    std::vector<int> linkJoined_, linkLeft_;
 };
 
 // CRC-32 of a game file (inside a .zip: of the game in it). 0 if it can't be read.

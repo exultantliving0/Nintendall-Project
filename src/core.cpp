@@ -560,6 +560,10 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
     case RETRO_ENVIRONMENT_SHUTDOWN:
         shutdownRequested_ = true;
         return true;
+    case RETRO_ENVIRONMENT_SET_NETPACKET_INTERFACE:
+        hasNetpacket_ = data != nullptr;
+        if (data) netpacket_ = *static_cast<const retro_netpacket_callback*>(data);
+        return true;
     case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME:
     case RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL:
     case RETRO_ENVIRONMENT_SET_SUBSYSTEM_INFO:
