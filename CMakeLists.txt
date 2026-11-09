@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nintendall VERSION 0.13.8 LANGUAGES CXX)
+project(Nintendall VERSION 0.14.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,6 +35,8 @@ add_executable(nintendall
   src/http.cpp
   src/hwrender.cpp
   src/input.cpp
+  src/lan.cpp
+  src/landialog.cpp
   src/library.cpp
   src/menubar.cpp
   src/paths.cpp
@@ -66,7 +68,7 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(nintendall PRIVATE SDL2_ttf::SDL2_ttf ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
 if(WIN32)
-  target_link_libraries(nintendall PRIVATE comdlg32 winhttp shell32)
+  target_link_libraries(nintendall PRIVATE comdlg32 winhttp shell32 iphlpapi ws2_32)
 endif()
 
 # UI font, next to the program (Windows uses its own Segoe UI when available).

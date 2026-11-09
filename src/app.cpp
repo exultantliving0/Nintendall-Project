@@ -273,6 +273,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
             connectPorts();
         }
         checkWiimotePairing();
+        updateLan();
         checkUpdateResult();
         checkUpdateDownload();
         if (settings_.takeRestartRequest() && core_) {
@@ -293,8 +294,9 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         }
         settingsWasOpen_ = settings_.isOpen();
 
-        const bool modal = menu_.isOpen() || buttonConfig_.isOpen() || settings_.isOpen();
-        const bool running = core_ && !paused_ && !focusLost_ && !modal;
+        const bool modal = menu_.isOpen() || buttonConfig_.isOpen() || settings_.isOpen() || lanDialog_.isOpen();
+        // A LAN game never stops: the other players' games wait for this one.
+        const bool running = core_ && (lan_.active || (!paused_ && !focusLost_ && !modal));
         input_.setKeyboardEnabled(!modal);
         if (wasRunning_ && !running) audio_.clear();  // silence while paused / in menus
         if (running && !wasRunning_) nextFrame_ = nowSeconds();
@@ -335,7 +337,7 @@ void App::pace(double frameSeconds) {
 
 void App::runFrames() {
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
-    fastForward_ = fastForwardToggled_ || keys[SDL_SCANCODE_TAB];
+    fastForward_ = !lan_.active && (fastForwardToggled_ || keys[SDL_SCANCODE_TAB]);
     const int runs = fastForward_ ? 4 : 1;
     for (int i = 0; i < runs && core_; ++i) core_->run();
     if (core_ && core_->shutdownRequested()) {
@@ -446,6 +448,14 @@ bool App::startGame(const fs::path& path) {
         core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(sys.core), paths_.saves,
                                                paths_.config / (std::string(sys.core) + ".opt"));
         const bool coreLoaded = core_->load(corePath, err);
+        if (coreLoaded && lanPending_ && !lanApi(*core_).ok()) {
+            core_.reset();
+            system_ = System::Unknown;
+            showMessage("LAN game", std::string("This copy of Nintendall's ") + sys.fullName +
+                                        " emulator can't play LAN games. Reinstalling Nintendall should fix this.",
+                        true);
+            return false;
+        }
         if (coreLoaded && hasTwoScreens(det.system)) {
             system_ = det.system;
             gameTitle_ = path.stem().u8string();
@@ -489,6 +499,12 @@ bool App::startGame(const fs::path& path) {
             core_->preferDefault("dolphin_wiimote_default_device", "nunchuk");  // what most Wii games expect
             core_->preferDefault("dolphin_ir_offset", "10");  // pointer lines up with the mouse / stick
         }
+        if (coreLoaded && lanPending_) {
+            // A LAN game: the emulator hosts / joins, and boots the game when the host starts it.
+            const LanApi api = lanApi(*core_);
+            api.setup(lanPending_->kind == LanDialog::Kind::Host ? 1 : 2, lanPending_->target.c_str(), kLanPort,
+                      lanPending_->name.c_str(), unsigned(lanPending_->delay));
+        }
         if (coreLoaded && core_->loadGame(gameFile, err)) {
             if (attempt > 0 && renderers[0] == Renderer::Vulkan)
                 startNote = renderers[attempt] == Renderer::OpenGL ? "Vulkan couldn't start on this PC - using OpenGL"
@@ -516,6 +532,13 @@ bool App::startGame(const fs::path& path) {
     }
 
     // 5. Running.
+    if (lanPending_) {
+        lan_ = Lan{};
+        lan_.active = true;
+        lan_.req = *lanPending_;
+        lan_.api = lanApi(*core_);
+        if (lan_.req.kind == LanDialog::Kind::Host) lan_.addresses = localAddresses();
+    }
     system_ = det.system;
     gamePath_ = path;
     gameTitle_ = path.stem().u8string();
@@ -575,6 +598,7 @@ void App::stopGame() {
         sdlWiiDriverOff_ = false;
     }
     paused_ = false;
+    lan_ = Lan{};  // unloading the emulator ended the LAN game (it told the other players)
     if (video_.window()) SDL_SetWindowTitle(video_.window(), "Nintendall");
 }
 
@@ -726,6 +750,9 @@ void App::connectPorts() {
     if (!core_) return;
     const bool real = realWiimotes();
     for (int p = 0; p < Input::kMaxPlayers; ++p) {
+        // LAN game: each computer has one player (its port 1); netplay plugs in a controller for
+        // every player on every computer. Unplugging ports here would unplug the other players.
+        if ((lan_.active || lanPending_) && p > 0) break;
         // Real Wii Remotes: every slot stays plugged in (an unplugged slot can't take a real remote).
         const bool present = p == 0 || real || input_.controllerForPort(p) || input_.hasKeyboardKeys(p);
         // Wii U: player 1 is the GamePad; players 2-4 are Pro Controllers (Cemu's device id for one).
@@ -1057,6 +1084,7 @@ void App::handleEvent(const SDL_Event& e) {
         menu_.close();
         buttonConfig_.close();
         settings_.close();
+        lanDialog_.close();
         startGame(p);
         return;
     }
@@ -1072,6 +1100,12 @@ void App::handleEvent(const SDL_Event& e) {
     }
     if (buttonConfig_.isOpen()) {
         buttonConfig_.handleEvent(e, mouseX_, mouseY_, input_);
+        return;
+    }
+    if (lanDialog_.isOpen()) {
+        lanDialog_.handleEvent(e, mouseX_, mouseY_);
+        LanDialog::Request req;
+        if (lanDialog_.takeRequest(req)) startLanGame(req);
         return;
     }
 
@@ -1091,6 +1125,20 @@ void App::handleEvent(const SDL_Event& e) {
             if (action) doAction(action);
             return;
         }
+    }
+
+    // LAN game lobby (waiting for players, or why it couldn't start): its buttons, Enter and Esc.
+    if (lanLobbyShown()) {
+        switch (lanLobby_.handleEvent(e, mouseX_, mouseY_, lan_.status, lanLobbyInfo())) {
+        case LanLobby::Click::Start: lan_.api.start(); break;
+        case LanLobby::Click::Leave: leaveLan(""); break;
+        case LanLobby::Click::Copy:
+            SDL_SetClipboardText(lan_.status.code.c_str());
+            osd("Host code copied - paste it to your friends");
+            break;
+        default: break;
+        }
+        if (e.type == SDL_KEYDOWN || e.type == SDL_MOUSEBUTTONDOWN) return;
     }
 
     // Home screen (no game running): pick a console and a game.
@@ -1170,21 +1218,60 @@ void App::doAction(int a) {
     case ActCloseGame: stopGame(); break;
     case ActExit: quit_ = true; break;
     case ActPause:
-        if (core_) paused_ = !paused_;
+        if (core_ && !lanBlocks("Pausing")) paused_ = !paused_;
         break;
     case ActReset:
-        if (core_) {
+        if (core_ && !lanBlocks("Reset")) {
             core_->reset();
             paused_ = false;
             osd("Reset");
         }
         break;
-    case ActFastForward: fastForwardToggled_ = !fastForwardToggled_; break;
-    case ActSaveState: saveState(); break;
-    case ActLoadState: loadState(); break;
+    case ActFastForward:
+        if (!lanBlocks("Fast forward")) fastForwardToggled_ = !fastForwardToggled_;
+        break;
+    case ActSaveState:
+        if (!lanBlocks("Save states")) saveState();
+        break;
+    case ActLoadState:
+        if (!lanBlocks("Save states")) loadState();
+        break;
     case ActButtonConfig: buttonConfig_.open(system_, core_ ? buttonRows_ : systemButtons(System::Unknown)); break;
     case ActConsoleSettings:
-        if (core_) settings_.open(system_, *core_);
+        if (core_ && !lanBlocks("Console Settings")) settings_.open(system_, *core_);
+        break;
+    case ActLanHost: openLanDialog(LanDialog::Kind::Host); break;
+    case ActLanJoin: openLanDialog(LanDialog::Kind::Join); break;
+    case ActLanStart:
+        if (lan_.active && lan_.req.kind == LanDialog::Kind::Host) lan_.api.start();
+        break;
+    case ActLanDelayUp:
+    case ActLanDelayDown:
+        if (lan_.active && lan_.req.kind == LanDialog::Kind::Host) {
+            const int d = std::clamp(int(lan_.status.delay) + (a == ActLanDelayUp ? 1 : -1), 1, 20);
+            lan_.api.setDelay(unsigned(d));
+            lan_.status.delay = unsigned(d);
+            osd("Input delay: " + std::to_string(d) + (d == 1 ? " frame" : " frames"));
+        }
+        break;
+    case ActLanLeave: leaveLan(""); break;
+    case ActLanHelp:
+        showMessage("LAN Games",
+                    "Play GameCube and Wii games together on several computers - on the same network or over "
+                    "the internet.\n\n"
+                    "Host: LAN > Host Game, pick the game and click Host. Give your friends the host code that "
+                    "appears (on the same network, your address works too). When everyone has joined, click "
+                    "Start Game.\n\n"
+                    "Join: LAN > Join Game, type the host code (or the host's address), pick the same game and "
+                    "click Join. If you picked another game, Nintendall switches to the host's game when you have "
+                    "it.\n\n"
+                    "Everyone needs the same game (same region and version) and the same version of Nintendall. "
+                    "Everyone plays with the host's save data. Pausing, fast forward and save states are off "
+                    "during LAN games. Input delay: lower feels quicker; raise it (LAN > More Input Delay) if the "
+                    "game stutters.\n\n"
+                    "If a host code doesn't connect, everyone can use a virtual LAN app (such as Radmin VPN) "
+                    "and join with the host's address in it.",
+                    false);
         break;
     case ActWiiUKeys: importWiiUKeys(); break;
     case ActPairWiimotes: startWiimotePairing(); break;
@@ -1419,12 +1506,26 @@ void App::buildMenus() {
 
     Menu options{"Options", {}};
     options.items.push_back({"Button Config...", "", ActButtonConfig});
-    options.items.push_back({"Console Settings...", "", ActConsoleSettings, game});
+    options.items.push_back({"Console Settings...", "", ActConsoleSettings, game && !lan_.active});
     options.items.push_back({"Wii U Keys...", "", ActWiiUKeys});
     options.items.push_back({pairJob_ ? "Pairing Wii Remotes..." : "Pair Wii Remotes", "", ActPairWiimotes, !pairJob_});
     options.items.push_back({});
     options.items.push_back({"Fullscreen", "F11", ActFullscreen, true, video_.isFullscreen()});
     menus.push_back(options);
+
+    // LAN: GameCube and Wii games with friends (Dolphin's netplay).
+    const bool lanHost = lan_.active && lan_.req.kind == LanDialog::Kind::Host;
+    Menu lan{"LAN", {}};
+    lan.items.push_back({"Host Game...", "", ActLanHost, !lan_.active});
+    lan.items.push_back({"Join Game...", "", ActLanJoin, !lan_.active});
+    lan.items.push_back({});
+    lan.items.push_back({"Start Game", "", ActLanStart, lanHost && lan_.status.state == LanState::Lobby});
+    lan.items.push_back({"More Input Delay", "", ActLanDelayUp, lanHost});
+    lan.items.push_back({"Less Input Delay", "", ActLanDelayDown, lanHost});
+    lan.items.push_back({"Leave LAN Game", "", ActLanLeave, lan_.active});
+    lan.items.push_back({});
+    lan.items.push_back({"How LAN Games Work", "", ActLanHelp});
+    menus.push_back(lan);
 
     Menu help{"Help", {}};
     help.items.push_back({"Controls", "", ActControls});
@@ -1453,6 +1554,7 @@ void App::draw() {
         text_.draw(bx + int(16 * s), by + int(8 * s), t, kWhite, Text::Large);
     }
     if (fastForward_ && core_ && !paused_) text_.draw(area.x + int(10 * s), area.y + int(8 * s), "Fast Forward", kWhite);
+    if (lanLobbyShown()) lanLobby_.draw(video_, text_, area, mouseX_, mouseY_, lan_.status, lanLobbyInfo());
 
     // On-screen message (bottom left).
     if (!osdText_.empty() && !SDL_TICKS_PASSED(SDL_GetTicks(), osdUntil_)) {
@@ -1469,6 +1571,7 @@ void App::draw() {
     buttonConfig_.draw(video_, text_, input_, W, H);
     drawUpdateDownload();
     if (core_) settings_.draw(video_, text_, *core_, W, H);
+    lanDialog_.draw(video_, text_, W, H);
     video_.present();
 
     if (screen2_.window()) {
@@ -1667,5 +1770,128 @@ void App::checkWiimotePairing() {
         const std::string n = r.paired == 1 ? "1 Wii Remote" : std::to_string(r.paired) + " Wii Remotes";
         osd("Paired " + n + (realWiimotes() ? "" : " - for Wii games, set Console Settings > Wii Controller to Real Wii Remote"),
             8000);
+    }
+}
+
+// ============================================================================
+// LAN games (GameCube / Wii through Dolphin's netplay)
+
+std::vector<LanDialog::Game> App::lanGames() {
+    std::vector<LanDialog::Game> games;
+    for (const HomeConsole& c : homeConsoles()) {
+        if (c.system != System::GameCube && c.system != System::Wii) continue;
+        for (const LibraryGame& g : lanLibrary_.scan(home_.gamesRoot() / fs::u8path(c.folder), c.system))
+            if (g.system == System::GameCube || g.system == System::Wii)
+                games.push_back({g.path, g.title, g.gameId, g.system});
+    }
+    std::stable_sort(games.begin(), games.end(), [](const LanDialog::Game& a, const LanDialog::Game& b) {
+        std::string x = a.title, y = b.title;
+        for (auto& ch : x) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+        for (auto& ch : y) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+        return x < y;
+    });
+    return games;
+}
+
+void App::openLanDialog(LanDialog::Kind kind) {
+    menu_.close();
+    std::vector<LanDialog::Game> games = lanGames();
+    // The GameCube / Wii game that's running can be picked even if it isn't in the Games folder.
+    const bool gcWii = core_ && (system_ == System::GameCube || system_ == System::Wii);
+    if (gcWii && std::none_of(games.begin(), games.end(), [&](const LanDialog::Game& g) { return g.path == gamePath_; }))
+        games.insert(games.begin(), {gamePath_, gameTitle_, "", system_});
+    const std::string want = gcWii ? gamePath_.u8string() : cfg_.get("lan.game");
+    int selected = 0;
+    for (size_t i = 0; i < games.size(); ++i)
+        if (games[i].path.u8string() == want) selected = int(i);
+    std::string name = cfg_.get("lan.name");
+    if (name.empty()) name = defaultPlayerName();
+    const int delay = std::atoi(cfg_.get("lan.delay").c_str());
+    lanDialog_.open(kind, std::move(games), selected, name, cfg_.get("lan.target"), delay > 0 ? delay : 4);
+}
+
+bool App::startLanGame(const LanDialog::Request& request) {
+    const LanDialog::Request req = request;  // startGame resets lan_ (which may hold `request`)
+    lanPending_ = &req;
+    const bool ok = startGame(req.game.path);
+    lanPending_ = nullptr;
+    cfg_.set("lan.name", req.name);
+    cfg_.set("lan.game", req.game.path.u8string());
+    if (req.kind == LanDialog::Kind::Host) cfg_.set("lan.delay", std::to_string(req.delay));
+    else cfg_.set("lan.target", req.target);
+    saveConfig();
+    return ok;
+}
+
+bool App::lanLobbyShown() const {
+    return lan_.active && core_ && (lan_.status.state != LanState::Playing || !lan_.errorText.empty());
+}
+
+LanLobby::Info App::lanLobbyInfo() const {
+    LanLobby::Info info;
+    info.host = lan_.req.kind == LanDialog::Kind::Host;
+    info.gameTitle = lan_.req.game.title.empty() ? gameTitle_ : lan_.req.game.title;
+    info.target = lan_.req.target;
+    info.addresses = lan_.addresses;
+    info.errorText = lan_.errorText;
+    return info;
+}
+
+void App::leaveLan(const std::string& message) {
+    stopGame();  // unloading the emulator tells the other players
+    if (!message.empty()) showMessage("LAN Game", message, false);
+}
+
+bool App::lanBlocks(const char* what) {
+    if (!lan_.active) return false;
+    osd(std::string(what) + " is off during LAN games");
+    return true;
+}
+
+void App::updateLan() {
+    if (!lan_.active) return;
+    if (!core_) {
+        lan_ = Lan{};
+        return;
+    }
+    lan_.status = readLanStatus(lan_.api);
+    for (const std::string& m : lan_.status.messages) osd(m, 4000);
+    const LanStatus& st = lan_.status;
+
+    if (st.state == LanState::Ended) {
+        leaveLan(st.error.empty() ? "The LAN game ended." : st.error);
+        return;
+    }
+    // Joining: the host left the lobby (Dolphin itself would only notice after 30 seconds).
+    const bool waiting = st.state == LanState::Lobby || st.state == LanState::Starting;
+    if (lan_.req.kind == LanDialog::Kind::Join && waiting) {
+        if (!st.hostName.empty()) lan_.sawHost = true;
+        else if (lan_.sawHost) {
+            leaveLan("The host closed the LAN game.");
+            return;
+        }
+    }
+    if (st.state != LanState::Error || !lan_.errorText.empty()) return;
+
+    // Couldn't join: say why. If the host picked another game that's in our Games folder, join with it.
+    const bool joining = lan_.req.kind == LanDialog::Kind::Join;
+    if (joining && st.errorKind == "wronggame" && !lan_.switchedGame && !st.hostGameId.empty()) {
+        for (const LanDialog::Game& g : lanGames()) {
+            if (g.gameId != st.hostGameId || g.path == lan_.req.game.path) continue;
+            LanDialog::Request req = lan_.req;
+            req.game = g;
+            osd("The host is playing " + g.title + " - joining with it", 5000);
+            if (startLanGame(req)) lan_.switchedGame = true;
+            return;
+        }
+    }
+    if (joining && st.errorKind == "wronggame") {
+        const std::string game = st.hostGame.empty() ? "another game" : st.hostGame;
+        lan_.errorText = "The host is playing " + game + (st.hostGameId.empty() ? "" : " (" + st.hostGameId + ")") +
+                         ". Put that game in your GameCube or Wii games folder, then join again.";
+    } else if (st.errorKind == "gamecopy") {
+        lan_.errorText = st.error + " Everyone needs the same copy of the game (same region and version).";
+    } else {
+        lan_.errorText = st.error.empty() ? "The LAN game couldn't start." : st.error;
     }
 }

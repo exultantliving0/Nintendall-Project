@@ -59,6 +59,8 @@ static bool sym(void* lib, const char* name, T& out) {
     return out != nullptr;
 }
 
+void* LibretroCore::symbol(const char* name) const { return lib_ ? SDL_LoadFunction(lib_, name) : nullptr; }
+
 bool LibretroCore::load(const fs::path& corePath, std::string& error) {
     if (g_core && g_core != this) {
         error = "Another core is already running";

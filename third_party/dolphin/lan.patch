@@ -1,0 +1,999 @@
+diff --git a/Source/Core/DolphinLibretro/Boot.cpp b/Source/Core/DolphinLibretro/Boot.cpp
+index 383bd0d..1a2612f 100644
+--- a/Source/Core/DolphinLibretro/Boot.cpp
++++ b/Source/Core/DolphinLibretro/Boot.cpp
+@@ -27,6 +27,7 @@
+ #include "Core/System.h"
+ #include "DolphinLibretro/Audio.h"
+ #include "DolphinLibretro/Input.h"
++#include "DolphinLibretro/Lan.h"
+ #include "DolphinLibretro/Log.h"
+ #include "DolphinLibretro/Common/VFile.h"
+ #include "DolphinLibretro/Common/Globals.h"
+@@ -64,6 +65,9 @@ static void ResetDiskControlState()
+   disk_paths.clear();
+ }
+ 
++// The game's file name, for its cheats file, when a LAN game boots later
++static std::string s_lan_cheats_name;
++
+ // GBPlayer
+ static std::string GBPlayer_rom_path;
+ static bool GBPlayer_active;
+@@ -774,6 +778,13 @@ bool retro_load_game(const struct retro_game_info* game)
+       Libretro::GetOption<bool>(sysconf::WII_LOGI_MICROPHONE_ENABLE, /*def=*/false));
+   }
+ 
++  // Nintendall LAN game: it boots when the host starts it (see Lan.h and BootLanGame below).
++  if (Libretro::Lan::Requested())
++  {
++    Libretro::s_lan_cheats_name = filename_str;
++    return Libretro::Lan::Begin(normalized_game_paths.front());
++  }
++
+   const bool disc_based_games_boot_to_wii_menu = Libretro::GetOption<bool>(Libretro::Options::core::DISC_BASED_GAMES_BOOT_TO_WII_MENU, false);
+   std::unique_ptr<BootParameters> boot_params = BootParameters::GenerateFromFile(normalized_game_paths);
+ 
+@@ -823,6 +834,42 @@ bool retro_load_game(const struct retro_game_info* game)
+   return true;
+ }
+ 
++// Nintendall LAN game: boots it once the host has started it (from retro_run).
++bool Libretro::BootLanGame()
++{
++  std::string path;
++  std::unique_ptr<BootSessionData> session;
++  if (!Lan::TakeBoot(path, session))
++    return false;
++
++  std::unique_ptr<BootParameters> boot_params =
++      BootParameters::GenerateFromFile(path, std::move(*session));
++  if (!boot_params)
++  {
++    ERROR_LOG_FMT(BOOT, "LAN: could not read {}", path);
++    Lan::Fail("Couldn't start the game.");
++    return false;
++  }
++  SetRegionFreeFallback(*boot_params);
++
++  WindowSystemInfo wsi(WindowSystemType::Libretro, nullptr, nullptr, nullptr);
++  if (!BootManager::BootCore(Core::System::GetInstance(), std::move(boot_params), wsi))
++  {
++    ERROR_LOG_FMT(BOOT, "LAN: could not boot {}", path);
++    Lan::Fail("Couldn't start the game.");
++    return false;
++  }
++
++  Input::InitStage2();
++  if (Libretro::GetOption<bool>(Options::retroarch_core::CHEATS_IMPORT, true))
++  {
++    reload_cheats_from_ini();
++    generate_cht_from_ini(s_lan_cheats_name);
++  }
++  Lan::SetPlaying();
++  return true;
++}
++
+ bool retro_load_game_special(unsigned game_type, const struct retro_game_info* info, size_t num_info)
+ {
+   if (game_type != Libretro::g_gbplayer_subsystem_id)
+@@ -867,6 +914,9 @@ void retro_unload_game(void)
+ {
+   auto& system = Core::System::GetInstance();
+ 
++  // A LAN game: tell the other players it stopped, and stop waiting for their input.
++  Libretro::Lan::StopGame();
++
+   if (Core::IsRunning(system))
+   {
+     Core::Stop(system);
+@@ -877,6 +927,8 @@ void retro_unload_game(void)
+     Core::Shutdown(system);
+   }
+ 
++  Libretro::Lan::End();
++
+   if (!g_context_status.IsDestroyed() && g_video_backend)
+     g_video_backend->Shutdown();
+ 
+diff --git a/Source/Core/DolphinLibretro/CMakeLists.txt b/Source/Core/DolphinLibretro/CMakeLists.txt
+index 2023b8b..6e6ce0d 100644
+--- a/Source/Core/DolphinLibretro/CMakeLists.txt
++++ b/Source/Core/DolphinLibretro/CMakeLists.txt
+@@ -4,6 +4,7 @@ add_library(dolphin_libretro SHARED
+   Boot.cpp
+   Host.cpp
+   Input.cpp
++  Lan.cpp
+   Log.cpp
+   Main.cpp
+   Video.cpp
+diff --git a/Source/Core/DolphinLibretro/Input.cpp b/Source/Core/DolphinLibretro/Input.cpp
+index 4ced7bf..d7efb1a 100644
+--- a/Source/Core/DolphinLibretro/Input.cpp
++++ b/Source/Core/DolphinLibretro/Input.cpp
+@@ -33,6 +33,7 @@
+ #include "Core/Host.h"
+ #include "Core/System.h"
+ #include "Core/WiiUtils.h"
++#include "DolphinLibretro/Lan.h"
+ #include "DolphinLibretro/Input.h"
+ #include "DolphinLibretro/Common/Globals.h"
+ #include "DolphinLibretro/Common/Options.h"
+@@ -1250,6 +1251,16 @@ static unsigned wii_port_device(unsigned device, bool altGCPorts)
+   return device;
+ }
+ 
++// Plugs a Wii Remote into a port - except in a Nintendall LAN game, where netplay has already
++// plugged in one for every player, the same on every computer.
++static void SetWiimoteSourceUnlessLan(unsigned port, WiimoteSource source)
++{
++  if (Libretro::Lan::Active())
++    return;
++  Config::SetBaseOrCurrent(Config::GetInfoForWiimoteSource(port), source);
++  WiimoteCommon::OnSourceChanged(port, source);
++}
++
+ void retro_set_controller_port_device(unsigned port, unsigned device)
+ {
+   auto& system = Core::System::GetInstance();
+@@ -1259,6 +1270,16 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
+     return;
+ 
+   Libretro::Input::frontend_types[port] = device;
++
++  // Nintendall LAN game: netplay plugs in a controller (and Wii Remote) for every player, on
++  // every computer. This computer only has a player for its first port, so the frontend leaves
++  // the others empty: don't unplug them, or the other players' controllers disappear.
++  if (device == RETRO_DEVICE_NONE && Libretro::Lan::Active())
++  {
++    Libretro::Input::input_types[port] = device;
++    return;
++  }
++
+   if (system.IsWii() && port < 4 && device != RETRO_DEVICE_NONE &&
+       !Config::Get(Config::MAIN_BLUETOOTH_PASSTHROUGH_ENABLED))
+     device = wii_port_device(device, altGCPorts);
+@@ -1474,14 +1495,17 @@ void retro_set_controller_port_device_gc(unsigned port, unsigned device)
+ #endif
+   auto& si = Core::System::GetInstance().GetSerialInterface();
+ 
+-  if (device == RETRO_DEVICE_GC_ON_WII) // Disconnect Wii device if we're using GC controller as device type to avoid conflict
++  if (device == RETRO_DEVICE_GC_ON_WII && !Libretro::Lan::Active()) // Disconnect Wii device if we're using GC controller as device type to avoid conflict
+     WiimoteCommon::OnSourceChanged(port, WiimoteSource::None);
+ 
+   Core::System& system = Core::System::GetInstance();
+ 
+-  Config::SetBaseOrCurrent(Config::GetInfoForSIDevice(port > 3 ? port - 4 : port),
+-    system.IsTriforce() ? SerialInterface::SIDEVICE_AM_BASEBOARD : SerialInterface::SIDEVICE_GC_CONTROLLER);
+-  si.ChangeDevice(Config::Get(Config::GetInfoForSIDevice(port > 3 ? port - 4 : port)), port > 3 ? port - 4 : port);
++  if (!Libretro::Lan::Active())  // (in a LAN game, netplay has set up the ports)
++  {
++    Config::SetBaseOrCurrent(Config::GetInfoForSIDevice(port > 3 ? port - 4 : port),
++      system.IsTriforce() ? SerialInterface::SIDEVICE_AM_BASEBOARD : SerialInterface::SIDEVICE_GC_CONTROLLER);
++    si.ChangeDevice(Config::Get(Config::GetInfoForSIDevice(port > 3 ? port - 4 : port)), port > 3 ? port - 4 : port);
++  }
+ 
+   GCPad* gcPad = (GCPad*)Pad::GetConfig()->GetController(port > 3 ? port - 4 : port);
+   // load an empty inifile section, clears everything
+@@ -1575,7 +1599,9 @@ void retro_set_controller_port_device_wii(unsigned port, unsigned device)
+     Libretro::Input::RefreshSensors(port);
+ 
+   bool altGCPorts = Libretro::Options::GetCached<bool>(Libretro::Options::sysconf::ALT_GC_PORTS_ON_WII);
+-  if (!altGCPorts) // Disconnect GC controller to avoid conflict with Wii device
++  // (Not in a LAN game: netplay's ports are the same on every computer, and Dolphin's netplay
++  // only sends this computer's input when the game reads the first player's GC port.)
++  if (!altGCPorts && !Libretro::Lan::Active()) // Disconnect GC controller to avoid conflict with Wii device
+   {
+     Config::SetBaseOrCurrent(Config::GetInfoForSIDevice(port), SerialInterface::SIDEVICE_NONE);
+     si.ChangeDevice(Config::Get(Config::GetInfoForSIDevice(port)), port);
+@@ -1911,34 +1937,29 @@ void retro_set_controller_port_device_wii(unsigned port, unsigned device)
+   {
+   case RETRO_DEVICE_WIIMOTE:
+     wmExtension->SetSelectedAttachment(ExtensionNumber::NONE);
+-    Config::SetBaseOrCurrent(Config::GetInfoForWiimoteSource(port), WiimoteSource::Emulated);
+-    WiimoteCommon::OnSourceChanged(port, WiimoteSource::Emulated);
++    SetWiimoteSourceUnlessLan(port, WiimoteSource::Emulated);
+     break;
+ 
+   case RETRO_DEVICE_WIIMOTE_SW:
+     wmExtension->SetSelectedAttachment(ExtensionNumber::NONE);
+     static_cast<ControllerEmu::NumericSetting<bool>*>(wmOptions->numeric_settings[3].get())
+       ->SetValue(true);  // Sideways Wiimote
+-    Config::SetBaseOrCurrent(Config::GetInfoForWiimoteSource(port), WiimoteSource::Emulated);
+-    WiimoteCommon::OnSourceChanged(port, WiimoteSource::Emulated);
++    SetWiimoteSourceUnlessLan(port, WiimoteSource::Emulated);
+     break;
+ 
+   case RETRO_DEVICE_WIIMOTE_NC:
+     wmExtension->SetSelectedAttachment(ExtensionNumber::NUNCHUK);
+-    Config::SetBaseOrCurrent(Config::GetInfoForWiimoteSource(port), WiimoteSource::Emulated);
+-    WiimoteCommon::OnSourceChanged(port, WiimoteSource::Emulated);
++    SetWiimoteSourceUnlessLan(port, WiimoteSource::Emulated);
+     break;
+ 
+   case RETRO_DEVICE_WIIMOTE_CC:
+   case RETRO_DEVICE_WIIMOTE_CC_PRO:
+     wmExtension->SetSelectedAttachment(ExtensionNumber::CLASSIC);
+-    Config::SetBaseOrCurrent(Config::GetInfoForWiimoteSource(port), WiimoteSource::Emulated);
+-    WiimoteCommon::OnSourceChanged(port, WiimoteSource::Emulated);
++    SetWiimoteSourceUnlessLan(port, WiimoteSource::Emulated);
+     break;
+ 
+   case RETRO_DEVICE_REAL_WIIMOTE:
+-    Config::SetBaseOrCurrent(Config::GetInfoForWiimoteSource(port), WiimoteSource::Real);
+-    WiimoteCommon::OnSourceChanged(port, WiimoteSource::Real);
++    SetWiimoteSourceUnlessLan(port, WiimoteSource::Real);
+     break;
+   }
+ 
+diff --git a/Source/Core/DolphinLibretro/Lan.cpp b/Source/Core/DolphinLibretro/Lan.cpp
+new file mode 100644
+index 0000000..40bb0bc
+--- /dev/null
++++ b/Source/Core/DolphinLibretro/Lan.cpp
+@@ -0,0 +1,669 @@
++// Nintendall: LAN / online play through Dolphin's own netplay (see Lan.h).
++
++#include "DolphinLibretro/Lan.h"
++
++#include <algorithm>
++#include <atomic>
++#include <cstring>
++#include <mutex>
++#include <span>
++#include <thread>
++#include <vector>
++
++#include "Common/FileUtil.h"
++#include "Common/Logging/Log.h"
++#include "Common/StringUtil.h"
++#include "Common/TraversalClient.h"
++#include "Core/Boot/Boot.h"
++#include "Core/Config/NetplaySettings.h"
++#include "Core/IOS/FS/FileSystem.h"
++#include "Core/NetPlayClient.h"
++#include "Core/NetPlayProto.h"
++#include "Core/NetPlayServer.h"
++#include "Core/SyncIdentifier.h"
++#include "UICommon/GameFile.h"
++
++namespace Libretro::Lan
++{
++namespace
++{
++enum class Mode
++{
++  Off = 0,
++  Host = 1,
++  Join = 2,
++};
++
++enum class State
++{
++  Off = 0,
++  Connecting = 1,
++  Lobby = 2,
++  Starting = 3,
++  Playing = 4,
++  Ended = 5,
++  Error = 6,
++};
++
++struct Setup
++{
++  Mode mode = Mode::Off;
++  std::string target;
++  u16 port = 2626;
++  std::string name = "Player";
++  u32 delay = 4;
++};
++
++// What Nintendall asked for (set before retro_load_game, used by Begin).
++Setup s_setup;
++// The session in progress.
++Setup s_session;
++
++std::mutex s_mutex;  // guards everything below that the netplay threads touch
++State s_state = State::Off;
++std::string s_error;
++std::string s_error_kind;
++std::string s_host_game_id;
++std::string s_host_game_name;
++std::string s_progress;
++std::vector<std::string> s_messages;
++std::string s_boot_path;
++std::unique_ptr<BootSessionData> s_boot_data;
++bool s_have_boot = false;
++bool s_start_received = false;  // the host started: boot on the main thread (see TakeBoot)
++u32 s_delay = 4;
++
++std::shared_ptr<const UICommon::GameFile> s_game;
++std::unique_ptr<NetPlay::NetPlayServer> s_server;
++std::unique_ptr<NetPlay::NetPlayClient> s_client;
++std::thread s_connect_thread;
++std::atomic<bool> s_connecting{false};
++
++void SetState(State state)
++{
++  std::lock_guard lk(s_mutex);
++  s_state = state;
++}
++
++void SetError(const std::string& message, const std::string& kind = "")
++{
++  std::lock_guard lk(s_mutex);
++  // The first error explains what went wrong; later ones are usually its consequences.
++  if (s_state == State::Error)
++    return;
++  s_state = State::Error;
++  s_error = message;
++  s_error_kind = kind;
++}
++
++void AddMessage(const std::string& message)
++{
++  std::lock_guard lk(s_mutex);
++  s_messages.push_back(message);
++}
++
++bool IsHosting()
++{
++  return s_session.mode == Mode::Host;
++}
++
++std::string GameName(const UICommon::GameFile& game)
++{
++  std::string name = game.GetInternalName();
++  if (name.empty())
++  {
++    std::string file;
++    SplitPath(game.GetFilePath(), nullptr, &file, nullptr);
++    name = file;
++  }
++  return name;
++}
++
++// The game the session ended or failed with, as Nintendall should show it.
++std::string ConnectionErrorText(const std::string& dolphin_message)
++{
++  if (dolphin_message.find("communicate with host") != std::string::npos)
++    return "Couldn't reach the host. Check the address, and that the host is waiting for players.";
++  if (dolphin_message.find("version") != std::string::npos ||
++      dolphin_message.find("Version") != std::string::npos)
++    return "The host has a different version of Nintendall. Update Nintendall on both computers.";
++  if (dolphin_message.find("game is currently running") != std::string::npos ||
++      dolphin_message.find("in progress") != std::string::npos)
++    return "The host has already started the game.";
++  if (dolphin_message.find("full") != std::string::npos)
++    return "The host's game is full.";
++  return dolphin_message;
++}
++
++class UI final : public NetPlay::NetPlayUI
++{
++public:
++  void BootGame(const std::string& filename,
++                std::unique_ptr<BootSessionData> boot_session_data) override
++  {
++    std::lock_guard lk(s_mutex);
++    s_boot_path = filename;
++    s_boot_data = std::move(boot_session_data);
++    s_have_boot = true;
++    s_state = State::Starting;
++    s_progress.clear();
++  }
++
++  void StopGame() override
++  {
++    std::lock_guard lk(s_mutex);
++    if (s_state == State::Playing || s_state == State::Starting)
++    {
++      s_state = State::Ended;
++      if (s_error.empty())
++        s_error = "The LAN game ended.";
++    }
++  }
++
++  bool IsHosting() const override { return Lan::IsHosting(); }
++  void Update() override {}
++  void AppendChat(const std::string& msg) override { INFO_LOG_FMT(NETPLAY, "{}", msg); }
++
++  void OnMsgChangeGame(const NetPlay::SyncIdentifier& sync_identifier,
++                       const std::string& netplay_name) override
++  {
++    std::lock_guard lk(s_mutex);
++    s_host_game_id = sync_identifier.game_id;
++    s_host_game_name = netplay_name;
++  }
++
++  void OnMsgChangeGBARom(int pad, const NetPlay::GBAConfig& config) override {}
++
++  // The host started the game. Like Dolphin's netplay window, answer with StartGame (which calls
++  // BootGame) - on the main thread, from TakeBoot.
++  void OnMsgStartGame() override
++  {
++    std::lock_guard lk(s_mutex);
++    if (s_state == State::Lobby)
++      s_state = State::Starting;
++    s_start_received = true;
++  }
++
++  void OnMsgStopGame() override {}
++  void OnMsgPowerButton() override {}
++
++  void OnPlayerConnect(const std::string& player) override { AddMessage(player + " joined"); }
++  void OnPlayerDisconnect(const std::string& player) override { AddMessage(player + " left"); }
++
++  void OnPadBufferChanged(u32 buffer) override
++  {
++    std::lock_guard lk(s_mutex);
++    if (buffer != s_delay && s_state == State::Playing)
++      s_messages.push_back("Input delay: " + std::to_string(buffer) + " frames");
++    s_delay = buffer;
++  }
++
++  void OnHostInputAuthorityChanged(bool enabled) override {}
++
++  void OnDesync(u32 frame, const std::string& player) override
++  {
++    AddMessage("The game went out of sync with " + player +
++               ". Close it and start the LAN game again.");
++  }
++
++  void OnConnectionLost() override
++  {
++    std::lock_guard lk(s_mutex);
++    if (s_state == State::Playing || s_state == State::Starting)
++    {
++      s_state = State::Ended;
++      s_error = "Lost the connection to the other players.";
++    }
++    else if (s_state != State::Error && s_state != State::Ended)
++    {
++      s_state = State::Error;
++      s_error = "Lost the connection to the host.";
++    }
++  }
++
++  void OnConnectionError(const std::string& message) override
++  {
++    SetError(ConnectionErrorText(message), "connect");
++  }
++
++  void OnTraversalError(Common::TraversalClient::FailureReason error) override
++  {
++    // Hosting still works on the same network without a host code.
++    if (Lan::IsHosting())
++      return;
++    SetError("Couldn't connect with that host code. Check the code, or join with the host's "
++             "address instead.",
++             "connect");
++  }
++
++  void OnTraversalStateChanged(Common::TraversalClient::State state) override {}
++
++  void OnGameStartAborted() override
++  {
++    std::lock_guard lk(s_mutex);
++    if (s_state == State::Starting)
++      s_state = State::Lobby;
++    s_progress.clear();
++    s_messages.push_back("Starting the game was cancelled");
++  }
++
++  void OnGolferChanged(bool is_golfer, const std::string& golfer_name) override {}
++  void OnTtlDetermined(u8 ttl) override {}
++  bool IsRecording() override { return false; }
++
++  std::shared_ptr<const UICommon::GameFile>
++  FindGameFile(const NetPlay::SyncIdentifier& sync_identifier,
++               NetPlay::SyncIdentifierComparison* found) override
++  {
++    const auto comparison = s_game ? s_game->CompareSyncIdentifier(sync_identifier) :
++                                     NetPlay::SyncIdentifierComparison::DifferentGame;
++    if (found)
++      *found = comparison;
++    if (comparison == NetPlay::SyncIdentifierComparison::SameGame)
++      return s_game;
++
++    if (!Lan::IsHosting())
++    {
++      std::string why;
++      switch (comparison)
++      {
++      case NetPlay::SyncIdentifierComparison::DifferentRegion:
++        why = "The host's game is from a different region than yours.";
++        break;
++      case NetPlay::SyncIdentifierComparison::DifferentRevision:
++        why = "The host's game is a different revision (version) than yours.";
++        break;
++      case NetPlay::SyncIdentifierComparison::DifferentDiscNumber:
++        why = "The host is using a different disc of the game.";
++        break;
++      case NetPlay::SyncIdentifierComparison::DifferentHash:
++        why = "Your copy of the game is different from the host's.";
++        break;
++      default:
++        why = "The host is playing a different game.";
++        break;
++      }
++      SetError(why, comparison == NetPlay::SyncIdentifierComparison::DifferentGame ? "wronggame" :
++                                                                                    "gamecopy");
++    }
++    return nullptr;
++  }
++
++  std::string FindGBARomPath(const std::array<u8, 20>& hash, std::string_view title,
++                             int device_number) override
++  {
++    return "";
++  }
++
++  void ShowGameDigestDialog(const std::string& title) override {}
++  void SetGameDigestProgress(int pid, int progress) override {}
++  void SetGameDigestResult(int pid, const std::string& result) override {}
++  void AbortGameDigest() override {}
++  void OnIndexAdded(bool success, std::string error) override {}
++  void OnIndexRefreshFailed(std::string error) override {}
++
++  void ShowChunkedProgressDialog(const std::string& title, u64 data_size,
++                                 std::span<const int> players) override
++  {
++    std::lock_guard lk(s_mutex);
++    s_progress = "Sharing save data...";
++  }
++
++  void HideChunkedProgressDialog() override
++  {
++    std::lock_guard lk(s_mutex);
++    s_progress.clear();
++  }
++
++  void SetChunkedProgress(int pid, u64 progress) override {}
++
++  void SetHostWiiSyncData(std::vector<u64> titles, std::string redirect_folder) override
++  {
++    // Called by the server from nintendall_lan_start (the main thread), while s_client exists.
++    if (s_client)
++      s_client->SetWiiSyncData(nullptr, std::move(titles), std::move(redirect_folder));
++  }
++};
++
++UI s_ui;
++
++bool IsHostCode(const std::string& target)
++{
++  if (target.empty() || target.size() > Common::NETPLAY_CODE_SIZE)
++    return false;
++  return std::all_of(target.begin(), target.end(), [](char c) {
++    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
++  });
++}
++
++void ConnectThread()
++{
++  const Setup setup = s_session;
++  const std::string traversal_host = Config::Get(Config::NETPLAY_TRAVERSAL_SERVER);
++  const u16 traversal_port = Config::Get(Config::NETPLAY_TRAVERSAL_PORT);
++  const u16 traversal_port_alt = Config::Get(Config::NETPLAY_TRAVERSAL_PORT_ALT);
++
++  std::unique_ptr<NetPlay::NetPlayServer> server;
++  std::unique_ptr<NetPlay::NetPlayClient> client;
++
++  if (setup.mode == Mode::Host)
++  {
++    // With a host code (Dolphin's traversal server) friends can join over the internet without
++    // opening ports; the same port takes direct connections on the local network.
++    server = std::make_unique<NetPlay::NetPlayServer>(
++        setup.port, false, &s_ui,
++        NetPlay::NetTraversalConfig{true, traversal_host, traversal_port, traversal_port_alt});
++    if (!server->is_connected)
++    {
++      server.reset();
++      Common::ReleaseTraversalClient();
++      server = std::make_unique<NetPlay::NetPlayServer>(setup.port, false, &s_ui,
++                                                        NetPlay::NetTraversalConfig{});
++    }
++    if (!server->is_connected)
++    {
++      server.reset();
++      SetError("Couldn't use port " + std::to_string(setup.port) +
++                   ". Is another LAN game already running on this computer?",
++               "port");
++      s_connecting = false;
++      return;
++    }
++    server->ChangeGame(s_game->GetSyncIdentifier(), GameName(*s_game));
++    server->SetHostInputAuthority(false);
++    server->AdjustPadBufferSize(setup.delay);
++
++    client = std::make_unique<NetPlay::NetPlayClient>("127.0.0.1", server->GetPort(), &s_ui,
++                                                      setup.name, NetPlay::NetTraversalConfig{});
++  }
++  else
++  {
++    std::string address = setup.target;
++    u16 port = setup.port;
++    if (IsHostCode(address))
++    {
++      std::transform(address.begin(), address.end(), address.begin(),
++                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
++      client = std::make_unique<NetPlay::NetPlayClient>(
++          address, port, &s_ui, setup.name,
++          NetPlay::NetTraversalConfig{true, traversal_host, traversal_port});
++    }
++    else
++    {
++      // "address" or "address:port" (an IPv6 address would have several ':', so leave it alone)
++      const size_t colon = address.rfind(':');
++      if (colon != std::string::npos && address.find(':') == colon)
++      {
++        const int p = std::atoi(address.c_str() + colon + 1);
++        if (p > 0 && p < 65536)
++          port = static_cast<u16>(p);
++        address = address.substr(0, colon);
++      }
++      client = std::make_unique<NetPlay::NetPlayClient>(address, port, &s_ui, setup.name,
++                                                        NetPlay::NetTraversalConfig{});
++    }
++  }
++
++  if (!client->IsConnected())
++    SetError("Couldn't reach the host. Check the address or host code, and that the host is "
++             "waiting for players.",
++             "connect");
++
++  {
++    std::lock_guard lk(s_mutex);
++    if (s_state == State::Connecting)
++      s_state = State::Lobby;
++  }
++  s_server = std::move(server);
++  s_client = std::move(client);
++  s_connecting = false;
++}
++
++void AppendLine(std::string& out, const char* key, const std::string& value)
++{
++  out += key;
++  out += '=';
++  for (char c : value)
++    out += (c == '\n' || c == '\r') ? ' ' : c;
++  out += '\n';
++}
++}  // namespace
++
++bool Requested()
++{
++  return s_setup.mode != Mode::Off;
++}
++
++bool Active()
++{
++  return s_session.mode != Mode::Off;
++}
++
++bool Begin(const std::string& path)
++{
++  const Setup requested = s_setup;
++  End();
++  s_session = requested;
++
++  {
++    std::lock_guard lk(s_mutex);
++    s_state = State::Connecting;
++    s_error.clear();
++    s_error_kind.clear();
++    s_host_game_id.clear();
++    s_host_game_name.clear();
++    s_progress.clear();
++    s_messages.clear();
++    s_have_boot = false;
++    s_start_received = false;
++    s_boot_data.reset();
++    s_delay = s_session.delay;
++  }
++
++  s_game = std::make_shared<UICommon::GameFile>(path);
++  if (!s_game->IsValid())
++  {
++    ERROR_LOG_FMT(NETPLAY, "LAN: can't read {}", path);
++    SetError("This game can't be used for a LAN game.");
++    return true;  // the lobby shows the error
++  }
++
++  INFO_LOG_FMT(NETPLAY, "LAN: {} {} as {}", IsHosting() ? "hosting" : "joining",
++               IsHosting() ? GameName(*s_game) : s_session.target, s_session.name);
++
++  // Match Dolphin's defaults: everyone gets the host's saves (and cheat codes) for the session.
++  Config::SetBase(Config::NETPLAY_SAVEDATA_LOAD, true);
++  Config::SetBase(Config::NETPLAY_SYNC_CODES, true);
++  Config::SetBase(Config::NETPLAY_NETWORK_MODE, std::string("fixeddelay"));
++  Config::SetBase(Config::NETPLAY_BUFFER_SIZE, s_session.delay);
++
++  s_connecting = true;
++  s_connect_thread = std::thread(ConnectThread);
++  return true;
++}
++
++bool Waiting()
++{
++  if (s_session.mode == Mode::Off)
++    return false;
++  std::lock_guard lk(s_mutex);
++  return s_state != State::Playing && s_state != State::Ended;
++}
++
++bool TakeBoot(std::string& path, std::unique_ptr<BootSessionData>& data)
++{
++  bool start;
++  {
++    std::lock_guard lk(s_mutex);
++    start = s_start_received;
++    s_start_received = false;
++  }
++  // Not under s_mutex: StartGame calls BootGame, which takes it.
++  if (start && !s_connecting && s_client && s_game)
++    s_client->StartGame(s_game->GetFilePath());
++
++  std::lock_guard lk(s_mutex);
++  if (!s_have_boot)
++    return false;
++  s_have_boot = false;
++  path = s_boot_path;
++  data = std::move(s_boot_data);
++  return data != nullptr;
++}
++
++void SetPlaying()
++{
++  SetState(State::Playing);
++}
++
++void Fail(const std::string& message)
++{
++  SetError(message);
++}
++
++void StopGame()
++{
++  if (s_session.mode == Mode::Off || s_connecting)
++    return;
++  if (s_client)
++    s_client->Stop();
++}
++
++void End()
++{
++  if (s_connect_thread.joinable())
++    s_connect_thread.join();
++  // StopGame also turns netplay off for the emulator (Stop alone leaves it pointing at the client).
++  if (s_client)
++    s_client->StopGame();
++  s_client.reset();
++  s_server.reset();
++  s_game.reset();
++  s_session = Setup{};
++  s_setup = Setup{};
++  std::lock_guard lk(s_mutex);
++  s_state = State::Off;
++  s_have_boot = false;
++  s_start_received = false;
++  s_boot_data.reset();
++}
++
++}  // namespace Libretro::Lan
++
++using namespace Libretro::Lan;
++
++void nintendall_lan_setup(int mode, const char* target, unsigned port, const char* name,
++                          unsigned delay)
++{
++  Setup setup;
++  setup.mode = mode == 1 ? Mode::Host : mode == 2 ? Mode::Join : Mode::Off;
++  setup.target = target ? target : "";
++  setup.port = port > 0 && port < 65536 ? static_cast<u16>(port) : 2626;
++  if (name && *name)
++    setup.name = name;
++  setup.delay = std::clamp(delay, 1u, 20u);
++  s_setup = setup;
++}
++
++void nintendall_lan_start(void)
++{
++  if (!IsHosting() || s_connecting || !s_server || !s_client)
++    return;
++  {
++    std::lock_guard lk(s_mutex);
++    if (s_state != State::Lobby)
++      return;
++  }
++  if (!s_client->DoAllPlayersHaveGame())
++  {
++    AddMessage("Someone doesn't have the game yet");
++    return;
++  }
++  SetState(State::Starting);
++  if (!s_server->RequestStartGame())
++  {
++    std::lock_guard lk(s_mutex);
++    if (s_state == State::Starting)
++      s_state = State::Lobby;
++    s_messages.push_back("Couldn't start the game");
++  }
++}
++
++void nintendall_lan_set_delay(unsigned frames)
++{
++  if (!IsHosting() || s_connecting || !s_server)
++    return;
++  frames = std::clamp(frames, 1u, 20u);
++  s_server->AdjustPadBufferSize(frames);
++  std::lock_guard lk(s_mutex);
++  s_delay = frames;
++}
++
++int nintendall_lan_status(char* text, unsigned size)
++{
++  std::string out;
++  State state;
++  {
++    std::lock_guard lk(s_mutex);
++    state = s_state;
++    AppendLine(out, "mode", s_session.mode == Mode::Host ? "host" :
++                            s_session.mode == Mode::Join ? "join" : "off");
++    AppendLine(out, "port", std::to_string(s_session.port));
++    AppendLine(out, "delay", std::to_string(s_delay));
++    if (!s_error.empty())
++      AppendLine(out, "error", s_error);
++    if (!s_error_kind.empty())
++      AppendLine(out, "errorkind", s_error_kind);
++    if (!s_host_game_id.empty())
++      AppendLine(out, "hostgameid", s_host_game_id);
++    if (!s_host_game_name.empty())
++      AppendLine(out, "hostgame", s_host_game_name);
++    if (!s_progress.empty())
++      AppendLine(out, "progress", s_progress);
++    for (const auto& m : s_messages)
++      AppendLine(out, "message", m);
++    s_messages.clear();
++  }
++
++  // Not under s_mutex: the netplay threads hold their own locks while calling into the UI.
++  if (!s_connecting && s_client && s_client->IsConnected())
++  {
++    for (const NetPlay::Player* p : s_client->GetPlayers())
++      AppendLine(out, p->IsHost() ? "host" : "player", p->name);
++  }
++  if (IsHosting() && !s_connecting && s_server)
++  {
++    if (Common::g_TraversalClient)
++    {
++      switch (Common::g_TraversalClient->GetState())
++      {
++      case Common::TraversalClient::State::Connecting:
++        AppendLine(out, "code", "");
++        AppendLine(out, "codestate", "connecting");
++        break;
++      case Common::TraversalClient::State::Connected:
++      {
++        const auto id = Common::g_TraversalClient->GetHostID();
++        AppendLine(out, "code", std::string(id.begin(), id.end()));
++        AppendLine(out, "codestate", "ready");
++        break;
++      }
++      case Common::TraversalClient::State::Failure:
++        AppendLine(out, "codestate", "failed");
++        break;
++      }
++    }
++    else
++    {
++      AppendLine(out, "codestate", "failed");
++    }
++  }
++
++  if (text && size > 0)
++  {
++    const size_t n = std::min<size_t>(out.size(), size - 1);
++    std::memcpy(text, out.data(), n);
++    text[n] = '\0';
++  }
++  return static_cast<int>(state);
++}
+diff --git a/Source/Core/DolphinLibretro/Lan.h b/Source/Core/DolphinLibretro/Lan.h
+new file mode 100644
+index 0000000..ca704f6
+--- /dev/null
++++ b/Source/Core/DolphinLibretro/Lan.h
+@@ -0,0 +1,55 @@
++// Nintendall: LAN / online play through Dolphin's own netplay.
++//
++// Nintendall calls nintendall_lan_setup() (exported below) before retro_load_game. The game then
++// doesn't boot right away: we host (or join) a netplay session, wait in a lobby until the host
++// starts, and boot the game with the session's settings and save data, like Dolphin's own
++// netplay window does. Nintendall reads the lobby's state with nintendall_lan_status().
++#pragma once
++
++#include <memory>
++#include <string>
++
++#include <libretro.h>
++
++class BootSessionData;
++
++namespace Libretro::Lan
++{
++// Nintendall asked for a LAN game for this load.
++bool Requested();
++// A LAN game is loaded (waiting, playing or failed).
++bool Active();
++// Starts hosting or joining (in the background) for the game at `path`. False: couldn't start.
++bool Begin(const std::string& path);
++// True until the game boots (or forever, if the session failed before it could).
++bool Waiting();
++// The game to boot, once the host has started it.
++bool TakeBoot(std::string& path, std::unique_ptr<BootSessionData>& data);
++// The game booted / couldn't boot.
++void SetPlaying();
++void Fail(const std::string& message);
++// Unloading: tell the other players the game stopped, before the emulation stops...
++void StopGame();
++// ...and disconnect after it has.
++void End();
++}  // namespace Libretro::Lan
++
++namespace Libretro
++{
++// Boots the LAN game once the host has started it (Boot.cpp). False: not yet, or it failed.
++bool BootLanGame();
++}
++
++extern "C" {
++// mode: 0 = off, 1 = host, 2 = join. target: (join) a host code or "address[:port]".
++// port: the host's port (2626). delay: input delay in frames (host).
++RETRO_API void nintendall_lan_setup(int mode, const char* target, unsigned port, const char* name,
++                                    unsigned delay);
++// Host: start the game with the players who have joined.
++RETRO_API void nintendall_lan_start(void);
++// Host: change the input delay (frames).
++RETRO_API void nintendall_lan_set_delay(unsigned frames);
++// The session's state (0 off, 1 connecting, 2 lobby, 3 starting, 4 playing, 5 ended, 6 error),
++// with details as "key=value" lines in `text` (see Lan.cpp). Messages are returned once.
++RETRO_API int nintendall_lan_status(char* text, unsigned size);
++}
+diff --git a/Source/Core/DolphinLibretro/Main.cpp b/Source/Core/DolphinLibretro/Main.cpp
+index 97ba667..3b06ffe 100644
+--- a/Source/Core/DolphinLibretro/Main.cpp
++++ b/Source/Core/DolphinLibretro/Main.cpp
+@@ -36,6 +36,7 @@
+ #include "Core/PatchEngine.h"
+ #include "Core/State.h"
+ #include "Core/System.h"
++#include "DolphinLibretro/Lan.h"
+ #include "DolphinLibretro/Audio.h"
+ #include "DolphinLibretro/Input.h"
+ #include "DolphinLibretro/Common/Options.h"
+@@ -244,6 +245,10 @@ void retro_reset(void)
+ 
+ void retro_run(void)
+ {
++  // Nintendall LAN game: nothing runs until the host starts the game.
++  if (Libretro::Lan::Waiting() && !Libretro::BootLanGame())
++    return;
++
+   Libretro::Input::InitSensors();
+   Libretro::Options::CheckForUpdatedVariables();
+   Libretro::FrameTiming::CheckForFastForwarding();
+@@ -259,7 +264,9 @@ void retro_run(void)
+ #endif
+   }
+ 
+-  if (Libretro::Options::IsUpdated(Libretro::Options::core::CPU_CLOCK_RATE))
++  // (In a LAN game everyone runs at the host's CPU speed, from the netplay settings.)
++  if (Libretro::Options::IsUpdated(Libretro::Options::core::CPU_CLOCK_RATE) &&
++      !Libretro::Lan::Active())
+   {
+     double cpuClock = Libretro::Options::GetCached<double>(
+       Libretro::Options::core::CPU_CLOCK_RATE);

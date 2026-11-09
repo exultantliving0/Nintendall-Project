@@ -14,14 +14,17 @@ available from the projects below.
 | Game Boy / Game Boy Color | SameBoy (`sameboy_libretro`) | MIT | https://github.com/libretro/SameBoy |
 | Game Boy Advance | mGBA (`mgba_libretro`) | MPL-2.0 | https://github.com/libretro/mgba |
 | Nintendo DS | melonDS DS (`melondsds_libretro`) | GPL-3.0-or-later | https://github.com/JesseTG/melonds-ds |
-| GameCube / Wii | Dolphin (`dolphin_libretro`), with a fix by Nintendall | GPL-2.0-or-later | https://github.com/libretro/dolphin + `third_party/dolphin/` |
+| GameCube / Wii | Dolphin (`dolphin_libretro`), with changes by Nintendall | GPL-2.0-or-later | https://github.com/libretro/dolphin + `third_party/dolphin/` |
 | Nintendo 3DS | Azahar (`azahar_libretro`) | GPL-3.0-or-later | https://github.com/azahar-emu/azahar |
 | Wii U | Cemu (`cemu_libretro`), with a fix by Nintendall | MPL-2.0 | https://github.com/WizzardSK/cemu-libretro + `third_party/cemu/` |
 
-Dolphin is shipped with one small fix so its widescreen hack widens the
-picture. The change is in `third_party/dolphin/` (installed next to
-Nintendall). It holds the patch and the exact upstream commit it applies to,
-which together are the full source of the shipped Dolphin core.
+Dolphin is shipped with two changes: a fix so its widescreen hack widens the
+picture, and LAN games (Nintendall's Host / Join windows use Dolphin's own
+netplay). The changes are in `third_party/dolphin/` (installed next to
+Nintendall). It holds the patches and the exact upstream commit they apply to,
+which together are the full source of the shipped Dolphin core. LAN games get
+host codes from Dolphin's public netplay server (stun.dolphin-emu.org), as the
+Dolphin emulator itself does.
 
 Cemu is shipped with one small fix to its GamePad input, so that games see
 button presses. The change is in `third_party/cemu/` (installed next to

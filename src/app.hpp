@@ -14,6 +14,8 @@
 #include "detect.hpp"
 #include "home.hpp"
 #include "input.hpp"
+#include "lan.hpp"
+#include "landialog.hpp"
 #include "menubar.hpp"
 #include "paths.hpp"
 #include "settingsdialog.hpp"
@@ -58,6 +60,7 @@ private:
         ActControls = 90, ActAbout,
         ActLayout = 100,  // + layout index
         ActLayoutSwap = 120,
+        ActLanHost = 130, ActLanJoin, ActLanStart, ActLanDelayUp, ActLanDelayDown, ActLanLeave, ActLanHelp,
     };
     static constexpr int kSlots = 5;
     static constexpr int kRecent = 8;
@@ -131,6 +134,31 @@ private:
     std::filesystem::path wiiUShaderCache() const;
     void clearWiiUShaderCache();
     bool sdlWiiDriverOff_ = false;
+
+    // LAN games (GameCube / Wii, through Dolphin's netplay): LAN > Host Game / Join Game.
+    void openLanDialog(LanDialog::Kind kind);
+    std::vector<LanDialog::Game> lanGames();
+    bool startLanGame(const LanDialog::Request& req);
+    void updateLan();       // every frame: the session's state, messages, and its end
+    bool lanLobbyShown() const;
+    LanLobby::Info lanLobbyInfo() const;
+    void leaveLan(const std::string& message);
+    bool lanBlocks(const char* what);  // pausing etc. during a LAN game: says why not, returns true
+    struct Lan {
+        bool active = false;  // a LAN game is loaded (lobby or playing)
+        LanDialog::Request req;
+        LanApi api;
+        LanStatus status;
+        std::vector<std::string> addresses;
+        std::string errorText;
+        bool switchedGame = false;  // joined with another game after the host's turned out different
+        bool sawHost = false;       // joining: the host has been in the player list
+    };
+    Lan lan_;
+    const LanDialog::Request* lanPending_ = nullptr;  // while startGame loads a LAN game
+    LanDialog lanDialog_;
+    LanLobby lanLobby_;
+    Library lanLibrary_;
 
     // Subsystems
     Paths paths_;

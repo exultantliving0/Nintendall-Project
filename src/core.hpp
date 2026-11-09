@@ -68,6 +68,8 @@ public:
     bool usingHardwareRendering() const { return hwActive_; }
     uintptr_t hwFramebuffer() const { return hw_.framebuffer(); }
     bool shutdownRequested() const { return shutdownRequested_; }
+    // A function the core exports beyond libretro's (null if it doesn't have it).
+    void* symbol(const char* name) const;
     // Screen rotation the core asked for, in 90 degree counter-clockwise steps (0-3).
     unsigned rotation() const { return rotation_; }
 

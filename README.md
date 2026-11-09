@@ -267,6 +267,29 @@ SUBSYSTEM=="hidraw*", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="0306", TAG+="u
 SUBSYSTEM=="hidraw*", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="0330", TAG+="uaccess"
 ```
 
+### LAN games (GameCube and Wii)
+
+Play GameCube and Wii games together on several computers, on the same network
+or over the internet, with Dolphin's own netplay (Super Smash Bros. Melee,
+Mario Kart: Double Dash!!, Mario Kart Wii, ...).
+
+- **Host:** LAN > **Host Game**, pick the game and click **Host**. A host code
+  appears (from Dolphin's netplay server; no account, no ports to open). Give it
+  to your friends; on the same network your address (shown too) works as well.
+  When everyone has joined, click **Start Game**.
+- **Join:** LAN > **Join Game**, type the host code (or the host's address), pick
+  the same game and click **Join**. If you picked another game, Nintendall
+  switches to the host's game when it's in your Games folder.
+
+Everyone needs the same game (same region and version) and the same version of
+Nintendall. Everyone plays with the host's save data. Each player uses their own
+first controller (or keyboard). Pausing, fast forward, save states and Console
+Settings are off during LAN games. **Input delay** (set when hosting, and LAN >
+More / Less Input Delay during the game): lower feels quicker, higher stops
+stutter on slow connections. If a host code won't connect (some routers block
+it), everyone can use a virtual LAN app (e.g. Radmin VPN) and join with the
+host's address in it.
+
 ### Wii U
 
 Wii U games run on Cemu (OpenGL 4.5). The Layout menu shows the TV picture
@@ -355,6 +378,7 @@ Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen).
 | `src/update.*`, `src/selfupdate.*`, `src/sha256.*` | checks GitHub for a new version at startup; Update Now (download, check, install, restart) |
 | `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |
 | `src/consolesettings.*`, `src/settingsdialog.*` | the Console Settings list and window |
+| `src/lan.*`, `src/landialog.*` | LAN games: the Host / Join windows, the lobby, and the calls into Nintendall's Dolphin |
 | `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |
 | `src/zip.*`, `src/png.*` | zip reading, screenshots |
 | `tools/bundle_cores.py` | build step that bundles the emulator cores |
