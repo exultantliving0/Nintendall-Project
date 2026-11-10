@@ -12,6 +12,18 @@ struct Color {
     uint8_t r, g, b, a = 255;
 };
 
+// Shaders menu: how the game picture is drawn. The CRT looks are made from a pattern drawn over
+// the picture (scanlines, phosphor mask), a soft glow and a curved grid, so they work with every
+// graphics card and renderer (Direct3D, OpenGL, ...).
+enum class Shader { Off, Smooth, Scanlines, ApertureGrille, ShadowMask, CurvedTV, LcdGrid };
+struct ShaderInfo {
+    Shader shader;
+    const char* key;    // in the config file
+    const char* label;  // in the menu
+};
+const std::vector<ShaderInfo>& shaderList();
+Shader shaderFromKey(const std::string& key);  // Off if unknown
+
 // Window, game picture and simple 2D drawing for the menus.
 // In headless mode (tests/benchmarks) no window is created; frames are just kept in memory.
 // A second Video is used for the extra window of the "Separate Windows" DS / 3DS layout.
@@ -35,6 +47,8 @@ public:
         crop_ = r;
         cropAspect_ = shownAspect;
     }
+    void setShader(Shader s) { shader_ = s; }
+    Shader shader() const { return shader_; }
     void drawGame(const SDL_Rect& area);  // letterboxed into `area`
     const SDL_Rect& gameRect() const { return gameRect_; }  // where the game was last drawn
     // A point in this window (renderer pixels) as a position across the whole frame, 0..1.
@@ -64,6 +78,10 @@ public:
 
 private:
     void ensureTexture(unsigned w, unsigned h, Uint32 format);
+    // Shaders (see video.cpp)
+    void drawFiltered(const SDL_Rect& src, const SDL_Rect& box);
+    bool updateOverlay(int w, int h, const SDL_Rect& src);
+    bool updateGlow(const SDL_Rect& src);
 
     bool headless_ = false;
     bool vsync_ = false;
@@ -84,4 +102,11 @@ private:
     SDL_Rect crop_{0, 0, 0, 0};
     double cropAspect_ = 0;  // shape to show the cropped part at (0 = the frame's own pixel shape)
     unsigned rotation_ = 0;
+
+    Shader shader_ = Shader::Off;
+    SDL_Texture* overlayTex_ = nullptr;  // scanlines / mask / LCD grid, multiplied over the picture
+    int overlayW_ = 0, overlayH_ = 0, overlayLines_ = 0, overlayCols_ = 0;
+    Shader overlayShader_ = Shader::Off;
+    SDL_Texture* glowTex_ = nullptr;  // small copy of the picture, stretched smooth: the glow
+    int glowW_ = 0, glowH_ = 0;
 };

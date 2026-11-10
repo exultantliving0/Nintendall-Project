@@ -1,6 +1,7 @@
 #include "video.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include "png.hpp"
@@ -32,6 +33,10 @@ bool Video::init(bool headless, bool fullscreen, int width, int height, std::str
 }
 
 void Video::shutdown() {
+    if (overlayTex_) SDL_DestroyTexture(overlayTex_);
+    if (glowTex_) SDL_DestroyTexture(glowTex_);
+    overlayTex_ = glowTex_ = nullptr;
+    overlayW_ = overlayH_ = glowW_ = glowH_ = 0;
     if (frameTex_) SDL_DestroyTexture(frameTex_);
     if (renderer_) SDL_DestroyRenderer(renderer_);
     if (window_) SDL_DestroyWindow(window_);
@@ -144,6 +149,13 @@ void Video::drawGame(const SDL_Rect& area) {
     }
     SDL_Rect box{area.x + (area.w - w) / 2, area.y + (area.h - h) / 2, w, h};
     gameRect_ = box;
+    // Sharp pixels, or smoothed for Smooth and the CRT looks (a TV's picture is soft side to side).
+    const bool smooth = shader_ != Shader::Off && shader_ != Shader::LcdGrid;
+    SDL_SetTextureScaleMode(frameTex_, smooth ? SDL_ScaleModeLinear : SDL_ScaleModeNearest);
+    if (shader_ != Shader::Off && shader_ != Shader::Smooth) {
+        drawFiltered(src, box);
+        return;
+    }
     if (rotation_ == 0) {
         SDL_RenderCopy(renderer_, frameTex_, &src, &box);
         return;
@@ -152,6 +164,221 @@ void Video::drawGame(const SDL_Rect& area) {
     SDL_Rect dst = box;
     if (sideways) dst = {box.x + (w - h) / 2, box.y + (h - w) / 2, h, w};
     SDL_RenderCopyEx(renderer_, frameTex_, &src, &dst, -90.0 * rotation_, nullptr, SDL_FLIP_NONE);
+}
+
+// --- shaders --------------------------------------------------------------------
+
+const std::vector<ShaderInfo>& shaderList() {
+    static const std::vector<ShaderInfo> list = {
+        {Shader::Off, "off", "Off (sharp pixels)"},
+        {Shader::Smooth, "smooth", "Smooth"},
+        {Shader::Scanlines, "crt-scanlines", "CRT: Scanlines"},
+        {Shader::ApertureGrille, "crt-aperture", "CRT: Aperture Grille (PVM)"},
+        {Shader::ShadowMask, "crt-shadowmask", "CRT: Shadow Mask (TV)"},
+        {Shader::CurvedTV, "crt-curved", "CRT: Curved TV"},
+        {Shader::LcdGrid, "lcd-grid", "LCD Grid (handhelds)"},
+    };
+    return list;
+}
+
+Shader shaderFromKey(const std::string& key) {
+    for (const ShaderInfo& i : shaderList())
+        if (key == i.key) return i.shader;
+    return Shader::Off;
+}
+
+namespace {
+
+bool isCrt(Shader s) {
+    return s == Shader::Scanlines || s == Shader::ApertureGrille || s == Shader::ShadowMask || s == Shader::CurvedTV;
+}
+
+// The console's own line count: scanlines follow it even when the emulator draws the picture
+// bigger (GameCube at 1080p still gets ~240 lines, like on a TV).
+int nativeLines(int rows) {
+    if (rows <= 300) return std::max(1, rows);
+    return std::max(1, int(std::lround(rows / std::max(1.0, std::round(rows / 240.0)))));
+}
+
+uint32_t gray(float r, float g, float b) {
+    auto c = [](float v) { return uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
+    return 0xFF000000u | (c(r) << 16) | (c(g) << 8) | c(b);
+}
+
+}  // namespace
+
+// The pattern multiplied over the picture, one texel per screen pixel (in the picture's own
+// orientation: a sideways game's scanlines turn with it, like a rotated arcade monitor).
+bool Video::updateOverlay(int w, int h, const SDL_Rect& src) {
+    const int lines = isCrt(shader_) ? nativeLines(src.h) : src.h;
+    const int cols = src.w;
+    if (overlayTex_ && w == overlayW_ && h == overlayH_ && lines == overlayLines_ && cols == overlayCols_ &&
+        shader_ == overlayShader_)
+        return true;
+    if (overlayTex_ && (w != overlayW_ || h != overlayH_)) {
+        SDL_DestroyTexture(overlayTex_);
+        overlayTex_ = nullptr;
+    }
+    if (!overlayTex_) {
+        overlayTex_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, w, h);
+        if (!overlayTex_) return false;
+        SDL_SetTextureBlendMode(overlayTex_, SDL_BLENDMODE_MOD);
+        SDL_SetTextureScaleMode(overlayTex_, SDL_ScaleModeNearest);
+    }
+    overlayW_ = w;
+    overlayH_ = h;
+    overlayLines_ = lines;
+    overlayCols_ = cols;
+    overlayShader_ = shader_;
+
+    // Each row: how bright it is between two scanlines (a beam's soft edge). Fainter when the
+    // window is too small to show them cleanly (under 3 screen pixels per line).
+    const float perLine = float(h) / lines;
+    std::vector<float> row(size_t(h), 1.0f);
+    if (isCrt(shader_)) {
+        const float depth = (shader_ == Shader::Scanlines ? 0.6f : 0.45f) * std::clamp((perLine - 1.5f) / 1.5f, 0.0f, 1.0f);
+        for (int y = 0; y < h; ++y) {
+            const float pos = (y + 0.5f) / perLine;
+            const float d = pos - std::floor(pos) - 0.5f;  // distance from the line's centre, -0.5..0.5
+            const float beam = std::exp(-d * d / (2 * 0.26f * 0.26f));
+            row[size_t(y)] = 1.0f - depth * (1.0f - beam);
+        }
+    }
+    std::vector<uint32_t> px(size_t(w) * h);
+    for (int y = 0; y < h; ++y) {
+        uint32_t* out = &px[size_t(y) * w];
+        const float sl = row[size_t(y)];
+        for (int x = 0; x < w; ++x) {
+            float r = sl, g = sl, b = sl;
+            switch (shader_) {
+            case Shader::ApertureGrille: {  // red, green and blue phosphor stripes
+                const int p = x % 3;
+                const float off = 0.72f;
+                r *= p == 0 ? 1.0f : off;
+                g *= p == 1 ? 1.0f : off;
+                b *= p == 2 ? 1.0f : off;
+                break;
+            }
+            case Shader::ShadowMask:
+            case Shader::CurvedTV: {  // slot mask: stripes, broken into staggered slots
+                const int p = x % 3;
+                const float off = 0.78f;
+                r *= p == 0 ? 1.0f : off;
+                g *= p == 1 ? 1.0f : off;
+                b *= p == 2 ? 1.0f : off;
+                if (y % 4 == ((x / 3) % 2) * 2) r *= 0.8f, g *= 0.8f, b *= 0.8f;
+                break;
+            }
+            case Shader::LcdGrid: {  // thin dark lines between the screen's pixels
+                const float cw = float(w) / cols, ch = float(h) / lines;
+                const float fx = (x + 0.5f) / cw, fy = (y + 0.5f) / ch;
+                const float dx = std::min(fx - std::floor(fx), std::ceil(fx) - fx) * cw;  // screen pixels to the edge
+                const float dy = std::min(fy - std::floor(fy), std::ceil(fy) - fy) * ch;
+                const float gx = std::clamp((cw - 2.0f) / 2.0f, 0.0f, 1.0f) * 0.3f;  // only with room for it
+                const float gy = std::clamp((ch - 2.0f) / 2.0f, 0.0f, 1.0f) * 0.3f;
+                const float f = (dx < 0.5f ? 1.0f - gx : 1.0f) * (dy < 0.5f ? 1.0f - gy : 1.0f);
+                r = g = b = f;
+                break;
+            }
+            default: break;
+            }
+            out[x] = gray(r, g, b);
+        }
+    }
+    SDL_UpdateTexture(overlayTex_, nullptr, px.data(), w * 4);
+    return true;
+}
+
+// A quarter-size copy of the picture, drawn back stretched (and so blurred) on top: the glow of
+// a CRT's bright phosphors. It also brings back the light the scanlines and mask take away.
+bool Video::updateGlow(const SDL_Rect& src) {
+    if (!SDL_RenderTargetSupported(renderer_)) return false;
+    const int w = std::max(8, src.w / 4), h = std::max(8, src.h / 4);
+    if (glowTex_ && (w != glowW_ || h != glowH_)) {
+        SDL_DestroyTexture(glowTex_);
+        glowTex_ = nullptr;
+    }
+    if (!glowTex_) {
+        glowTex_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, w, h);
+        if (!glowTex_) return false;
+        SDL_SetTextureScaleMode(glowTex_, SDL_ScaleModeLinear);
+        SDL_SetTextureBlendMode(glowTex_, SDL_BLENDMODE_ADD);
+        glowW_ = w;
+        glowH_ = h;
+    }
+    SDL_Texture* previous = SDL_GetRenderTarget(renderer_);
+    if (SDL_SetRenderTarget(renderer_, glowTex_) != 0) return false;
+    SDL_RenderCopy(renderer_, frameTex_, &src, nullptr);
+    SDL_SetRenderTarget(renderer_, previous);
+    return true;
+}
+
+// The picture as a grid of points: flat, or bulged like a TV's glass (Curved TV). Every layer
+// (picture, pattern, glow) is drawn through the same grid, so they stay lined up.
+void Video::drawFiltered(const SDL_Rect& src, const SDL_Rect& box) {
+    const bool sideways = rotation_ % 2 == 1;
+    const bool curved = shader_ == Shader::CurvedTV;
+    const int nx = curved ? 32 : 1, ny = curved ? 24 : 1;
+
+    struct Point {
+        float x, y;  // on screen
+        float u, v;  // in the picture (0..1, its own orientation)
+        float shade;
+    };
+    std::vector<Point> pts;
+    pts.reserve(size_t(nx + 1) * (ny + 1));
+    for (int j = 0; j <= ny; ++j)
+        for (int i = 0; i <= nx; ++i) {
+            const float a = float(i) / nx, b = float(j) / ny;  // across the box
+            float cx = a * 2 - 1, cy = b * 2 - 1;
+            float shade = 1.0f;
+            if (curved) {  // edges bow out, corners pull in; darker towards the corners
+                const float k = 0.045f;
+                const float px = cx * (1 - k * cy * cy), py = cy * (1 - k * 1.3f * cx * cx);
+                shade = 1.0f - 0.22f * (std::pow(cx, 4.0f) + std::pow(cy, 4.0f)) / 2;
+                cx = px;
+                cy = py;
+            }
+            // Where this point of the box is in the picture, for a picture turned rotation_ * 90 degrees.
+            float u = a, v = b;
+            switch (rotation_ % 4) {
+            case 1: u = 1 - b, v = a; break;
+            case 2: u = 1 - a, v = 1 - b; break;
+            case 3: u = b, v = 1 - a; break;
+            default: break;
+            }
+            pts.push_back({box.x + (cx + 1) / 2 * box.w, box.y + (cy + 1) / 2 * box.h, u, v, shade});
+        }
+    std::vector<int> idx;
+    idx.reserve(size_t(nx) * ny * 6);
+    for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+            const int p = j * (nx + 1) + i;
+            idx.insert(idx.end(), {p, p + 1, p + nx + 1, p + 1, p + nx + 2, p + nx + 1});
+        }
+
+    const bool glow = isCrt(shader_) && updateGlow(src);  // before drawing: it switches the render target
+    std::vector<SDL_Vertex> verts(pts.size());
+    auto draw = [&](SDL_Texture* tex, float u0, float v0, float du, float dv, float alpha, bool shaded) {
+        for (size_t i = 0; i < pts.size(); ++i) {
+            const Point& p = pts[i];
+            const Uint8 c = Uint8(255 * (shaded ? p.shade : 1.0f));
+            verts[i] = {{p.x, p.y}, {c, c, c, Uint8(255 * alpha)}, {u0 + p.u * du, v0 + p.v * dv}};
+        }
+        SDL_RenderGeometry(renderer_, tex, verts.data(), int(verts.size()), idx.data(), int(idx.size()));
+    };
+
+    // 1. The picture.
+    SDL_SetTextureBlendMode(frameTex_, SDL_BLENDMODE_NONE);
+    draw(frameTex_, float(src.x) / texW_, float(src.y) / texH_, float(src.w) / texW_, float(src.h) / texH_, 1.0f, true);
+    // 2. Scanlines / mask / grid, at one texel per screen pixel.
+    const int ow = sideways ? box.h : box.w, oh = sideways ? box.w : box.h;
+    if (ow > 0 && oh > 0 && updateOverlay(ow, oh, src)) draw(overlayTex_, 0, 0, 1, 1, 1.0f, false);
+    // 3. Glow (CRT looks).
+    if (glow) {
+        const float strength = shader_ == Shader::Scanlines ? 0.3f : 0.4f;
+        draw(glowTex_, 0, 0, 1, 1, strength, true);
+    }
 }
 
 bool Video::toFrame(int x, int y, double& fx, double& fy) const {

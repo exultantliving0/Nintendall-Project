@@ -175,7 +175,9 @@ The game pauses automatically when the window loses focus or a menu is open.
 
 **Options > Console Settings** shows hand-picked settings from the emulator of
 the game that's running, with friendly names. Settings marked * apply after
-**Restart Game** (in the same window); the rest change right away. Highlights:
+**Restart Game** (in the same window); the rest change right away. On the home
+screen it shows the settings of the console you're looking at, for its next game.
+Highlights:
 
 | System | Settings |
 |---|---|
@@ -191,6 +193,27 @@ the game that's running, with friendly names. Settings marked * apply after
 
 The list lives in `src/consolesettings.cpp`; values are saved per emulator in
 the `config/` folder.
+
+### Shaders
+
+The **Shaders** menu changes how the picture looks, chosen per console (the
+running game's, or on the home screen the console you're looking at), so NES can
+look like an old TV while Game Boy keeps its LCD:
+
+| Shader | Look |
+|---|---|
+| Off | Sharp pixels (the default) |
+| Smooth | Softened pixels |
+| CRT: Scanlines | The dark lines between a TV's rows, with a soft glow |
+| CRT: Aperture Grille (PVM) | Scanlines plus red / green / blue phosphor stripes, like a Sony PVM / Trinitron |
+| CRT: Shadow Mask (TV) | Scanlines plus a slot mask, like a home TV |
+| CRT: Curved TV | The shadow mask on curved glass, darker towards the corners |
+| LCD Grid | Thin lines between the pixels, like a Game Boy screen |
+
+They are drawn with the same renderer as the rest of Nintendall (Direct3D,
+OpenGL, ...), so they work on any graphics card. Scanlines follow the console's
+own line count, also for games the emulator draws at a higher resolution, and
+fade out when the window is too small to show them cleanly.
 
 ### Nintendo DS screens
 
@@ -415,7 +438,7 @@ Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen).
 | `src/consolesettings.*`, `src/settingsdialog.*` | the Console Settings list and window |
 | `src/lan.*`, `src/landialog.*` | LAN games: the Host / Join windows, the lobby, and the calls into Nintendall's Dolphin |
 | `src/netplay.*` | LAN games for NES / SNES / N64: the network, the shared presses, rollback |
-| `src/video.*`, `src/audio.*`, `src/input.*` | SDL window, sound (with rate control) and controllers |
+| `src/video.*`, `src/audio.*`, `src/input.*` | SDL window and the Shaders (CRT looks), sound (with rate control) and controllers |
 | `src/zip.*`, `src/png.*` | zip reading, screenshots |
 | `tools/bundle_cores.py` | build step that bundles the emulator cores |
 | `tools/build_windows.sh`, `installer/nintendall.nsi`, `cmake/toolchain-mingw64.cmake` | Windows build and setup.exe |

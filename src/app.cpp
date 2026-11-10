@@ -1319,6 +1319,14 @@ void App::doAction(int a) {
         osd("State slot " + std::to_string(slot_));
         return;
     }
+    if (a >= ActShader && a < ActShader + int(shaderList().size())) {
+        const ShaderInfo& info = shaderList()[size_t(a - ActShader)];
+        const SystemInfo& sys = systemInfo(shaderSystem());
+        cfg_.set(std::string("shader.") + sys.key, info.key);
+        saveConfig();
+        osd(std::string(sys.fullName) + ": " + info.label);
+        return;
+    }
     if ((a >= ActLayout && a < ActLayout + kDsLayoutCount) || a == ActLayoutSwap) {
         if (!core_ || !hasTwoScreens(system_)) return;
         if (a != ActLayoutSwap && !layoutAvailable(system_, a - ActLayout)) return;
@@ -1628,6 +1636,18 @@ void App::buildMenus() {
                             twoScreens && layoutSwap_});
     menus.push_back(layout);
 
+    // Shaders, for the running game's console (or the console shown on the home screen).
+    Menu shaders{"Shaders", {}};
+    const System shaderSys = shaderSystem();
+    shaders.items.push_back({std::string(systemInfo(shaderSys).fullName) + " games:", "", 0, false});
+    const Shader current = shaderFor(shaderSys);
+    for (size_t i = 0; i < shaderList().size(); ++i) {
+        const ShaderInfo& info = shaderList()[i];
+        if (info.shader == Shader::Scanlines || info.shader == Shader::LcdGrid) shaders.items.push_back({});
+        shaders.items.push_back({info.label, "", int(ActShader + i), true, info.shader == current});
+    }
+    menus.push_back(shaders);
+
     Menu options{"Options", {}};
     options.items.push_back({"Button Config...", "", ActButtonConfig});
     options.items.push_back({"Console Settings...", "", ActConsoleSettings, !lan_.active});
@@ -1666,6 +1686,7 @@ void App::draw() {
     const SDL_Rect area = gameArea();
 
     if (core_ && video_.hasFrame()) {
+        video_.setShader(shaderFor(system_));
         video_.drawGame(area);
     }
     if (!core_) home_.draw(video_, text_, homeArea(), mouseX_, mouseY_);
@@ -1700,7 +1721,10 @@ void App::draw() {
 
     if (screen2_.window()) {
         screen2_.clear(kBlack);
-        if (core_ && screen2_.hasFrame()) screen2_.drawGame({0, 0, screen2_.width(), screen2_.height()});
+        if (core_ && screen2_.hasFrame()) {
+            screen2_.setShader(shaderFor(system_));
+            screen2_.drawGame({0, 0, screen2_.width(), screen2_.height()});
+        }
         screen2_.present();
     }
 }
@@ -1709,6 +1733,10 @@ void App::draw() {
 // Wii U shader cache
 
 fs::path App::wiiUShaderCache() const { return paths_.systemDirFor("cemu") / "Cemu" / "shaderCache"; }
+
+Shader App::shaderFor(System s) const {
+    return shaderFromKey(cfg_.get(std::string("shader.") + systemInfo(s).key, "off"));
+}
 
 // Console Settings without a game: load the console's emulator on its own, just for its settings.
 void App::openHomeSettings(System system) {

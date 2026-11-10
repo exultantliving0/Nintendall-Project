@@ -63,6 +63,7 @@ private:
         ActLayout = 100,  // + layout index
         ActLayoutSwap = 120,
         ActLanHost = 130, ActLanJoin, ActLanStart, ActLanDelayUp, ActLanDelayDown, ActLanLeave, ActLanHelp,
+        ActShader = 150,  // + index in shaderList()
     };
     static constexpr int kSlots = 5;
     static constexpr int kRecent = 8;
@@ -136,6 +137,9 @@ private:
     std::filesystem::path wiiUShaderCache() const;
     void clearWiiUShaderCache();
     bool sdlWiiDriverOff_ = false;
+    // Shaders menu: chosen per console (the running game's, or the one shown on the home screen).
+    System shaderSystem() const { return core_ ? system_ : home_.consoleSystem(); }
+    Shader shaderFor(System s) const;
 
     // LAN games (GameCube / Wii, through Dolphin's netplay): LAN > Host Game / Join Game.
     void openLanDialog(LanDialog::Kind kind);
