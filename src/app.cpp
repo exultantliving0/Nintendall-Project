@@ -297,16 +297,20 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
             osd(realWiimotes() ? "Game restarted - press a button on each Wii Remote to connect it"
                                : "Game restarted with the new settings",
                 realWiimotes() ? 6000 : 2500);
-        } else if (settings_.takeClearCacheRequest() && core_) {
+        } else if (core_ && settings_.takeClearCacheRequest()) {
             // The running game has the cache open: close it, clear, start it again.
             const fs::path game = gamePath_;
             stopGame();
             clearWiiUShaderCache();
             startGame(game);
             osd("Shader cache cleared - the game rebuilds its shaders as you play", 6000);
+        } else if (settings_.takeClearCacheRequest()) {  // from the home screen: no game has it open
+            clearWiiUShaderCache();
+            osd("Shader cache cleared - games rebuild their shaders as you play", 6000);
         } else if (settingsWasOpen_ && !settings_.isOpen() && settings_.restartPending()) {
             osd("Some settings apply the next time the game starts", 4000);
         }
+        if (settingsCore_ && !settings_.isOpen()) settingsCore_.reset();  // saves its settings
         settingsWasOpen_ = settings_.isOpen();
 
         const bool modal = menu_.isOpen() || buttonConfig_.isOpen() || settings_.isOpen() || lanDialog_.isOpen();
@@ -453,6 +457,8 @@ bool App::startGame(const fs::path& path) {
     }
 
     // 2. Checks passed: close whatever is running.
+    settings_.close();
+    settingsCore_.reset();  // only one emulator can be loaded at a time
     stopGame();
 
     // 3. If the game is inside a zip, pull it out to a temporary file.
@@ -1209,7 +1215,7 @@ void App::handleEvent(const SDL_Event& e) {
 
     // Dialog windows are modal: they get everything.
     if (settings_.isOpen()) {
-        if (core_) settings_.handleEvent(e, mouseX_, mouseY_, *core_);
+        if (LibretroCore* c = settingsCore()) settings_.handleEvent(e, mouseX_, mouseY_, *c);
         else settings_.close();
         return;
     }
@@ -1353,7 +1359,9 @@ void App::doAction(int a) {
         break;
     case ActButtonConfig: buttonConfig_.open(system_, core_ ? buttonRows_ : systemButtons(System::Unknown)); break;
     case ActConsoleSettings:
-        if (core_ && !lanBlocks("Console Settings")) settings_.open(system_, *core_);
+        if (lanBlocks("Console Settings")) break;
+        if (core_) settings_.open(system_, *core_);
+        else openHomeSettings(home_.consoleSystem());  // the console shown on the home screen
         break;
     case ActLanHost: openLanDialog(LanDialog::Kind::Host); break;
     case ActLanJoin: openLanDialog(LanDialog::Kind::Join); break;
@@ -1622,7 +1630,7 @@ void App::buildMenus() {
 
     Menu options{"Options", {}};
     options.items.push_back({"Button Config...", "", ActButtonConfig});
-    options.items.push_back({"Console Settings...", "", ActConsoleSettings, game && !lan_.active});
+    options.items.push_back({"Console Settings...", "", ActConsoleSettings, !lan_.active});
     options.items.push_back({"Wii U Keys...", "", ActWiiUKeys});
     options.items.push_back({pairJob_ ? "Pairing Wii Remotes..." : "Pair Wii Remotes", "", ActPairWiimotes, !pairJob_});
     options.items.push_back({});
@@ -1686,7 +1694,7 @@ void App::draw() {
     }
     buttonConfig_.draw(video_, text_, input_, W, H);
     drawUpdateDownload();
-    if (core_) settings_.draw(video_, text_, *core_, W, H);
+    if (LibretroCore* c = settingsCore()) settings_.draw(video_, text_, *c, W, H);
     lanDialog_.draw(video_, text_, W, H);
     video_.present();
 
@@ -1701,6 +1709,40 @@ void App::draw() {
 // Wii U shader cache
 
 fs::path App::wiiUShaderCache() const { return paths_.systemDirFor("cemu") / "Cemu" / "shaderCache"; }
+
+// Console Settings without a game: load the console's emulator on its own, just for its settings.
+void App::openHomeSettings(System system) {
+    const SystemInfo& sys = systemInfo(system);
+    const fs::path corePath = paths_.findCore(sys.core);
+    if (corePath.empty()) {
+        showMessage("Console Settings", std::string("The ") + sys.fullName +
+                                            " emulator is missing from the cores folder. Reinstalling Nintendall should fix this.",
+                    true);
+        return;
+    }
+    settingsCore_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(sys.core), paths_.saves,
+                                                   paths_.config / (std::string(sys.core) + ".opt"));
+    std::string err;
+    if (!settingsCore_->load(corePath, err)) {
+        settingsCore_.reset();
+        showMessage("Console Settings", err, true);
+        return;
+    }
+    if (settingsCore_->options().empty())  // lists them only with a game loaded
+        settingsCore_->loadSavedOptionList(paths_.base / "settings" / (std::string(sys.core) + ".optlist"));
+    // The same options of Nintendall's own as when a game starts.
+    if (canUseVulkan(system))
+        settingsCore_->addAppOption(kGraphicsApiOption, "Graphics API", "vulkan", {"vulkan", "opengl"}, {"Vulkan", "OpenGL"});
+    if (system == System::GameCube || system == System::Wii) {  // 0.13.4's Ultrawide: back to Stretch
+        const std::string aspect = settingsCore_->optionValue("dolphin_aspect_ratio");
+        if (aspect == "4" || aspect == "5") settingsCore_->setOption("dolphin_aspect_ratio", "3");
+    }
+    if (system == System::Wii) {
+        settingsCore_->preferDefault("dolphin_wiimote_default_device", "nunchuk");
+        settingsCore_->preferDefault("dolphin_ir_offset", "10");
+    }
+    settings_.open(system, *settingsCore_, false);
+}
 
 void App::clearWiiUShaderCache() {
     std::error_code ec;

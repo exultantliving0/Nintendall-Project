@@ -77,6 +77,11 @@ public:
 
     // Core options (persisted to the options file on unload).
     std::map<std::string, CoreOption>& options() { return options_; }
+    // Some emulators (melonDS DS) only list their options once a game is loaded. Those are saved
+    // next to the options file whenever a game ran, so the options can be shown without a game
+    // (Console Settings on the home screen). Call after load(); false if there's no saved list.
+    // `bundled`: the list shipped with Nintendall, for before the first game.
+    bool loadSavedOptionList(const std::filesystem::path& bundled = {});
     // An option of Nintendall's own, kept in the core's options file with the core's options
     // (e.g. the graphics API). Call after load().
     void addAppOption(const char* key, const char* desc, const char* def, std::vector<std::string> values,
@@ -145,6 +150,8 @@ private:
                       std::vector<std::string> labels = {});
     void loadOptionOverrides();
     void saveOptions() const;
+    std::filesystem::path optionListFile() const;
+    void saveOptionList() const;
 
     CoreHost& host_;
     void* lib_ = nullptr;
@@ -160,6 +167,7 @@ private:
     std::map<std::string, std::string> preferred_;
     std::map<std::string, CoreOption> options_;
     bool optionsDirty_ = false;
+    bool optionsBeforeGame_ = false;  // the core listed its options before a game was loaded
 
     std::string libraryName_, libraryVersion_;
     bool needFullpath_ = false;

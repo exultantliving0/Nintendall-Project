@@ -118,6 +118,7 @@ bool LibretroCore::load(const fs::path& corePath, std::string& error) {
     libraryName_ = info.library_name ? info.library_name : "Unknown core";
     libraryVersion_ = info.library_version ? info.library_version : "";
     needFullpath_ = info.need_fullpath;
+    optionsBeforeGame_ = !options_.empty();
     return true;
 }
 
@@ -185,6 +186,7 @@ void LibretroCore::unload() {
         if (gameLoaded_) api_.unload_game();
         if (initialized_) api_.deinit();
         if (initialized_) saveOptions();
+        if (initialized_ && gameLoaded_ && !optionsBeforeGame_) saveOptionList();
         vk_.destroy();  // while the core's code is still loaded (it frees its own device resources)
         SDL_UnloadObject(lib_);
     }
@@ -318,6 +320,58 @@ void LibretroCore::saveOptions() const {
         }
         f << "\n" << key << " = \"" << o.value << "\"\n";
     }
+    // Values the emulator didn't list this time (options it only has with a game loaded, when
+    // Console Settings was opened from the home screen): kept as they were.
+    bool first = true;
+    for (const auto& [key, value] : optionOverrides_) {
+        if (options_.count(key)) continue;
+        if (first) f << "\n# Kept from earlier (not listed by the emulator this time)\n";
+        first = false;
+        f << key << " = \"" << value << "\"\n";
+    }
+}
+
+// One option per line: key, default, description, then value + 0x1f + label for each value (tab-separated).
+fs::path LibretroCore::optionListFile() const {
+    fs::path p = optionsFile_;
+    return p.replace_extension(".optlist");
+}
+
+void LibretroCore::saveOptionList() const {
+    if (options_.empty() || optionsFile_.empty()) return;
+    std::ofstream f(optionListFile());
+    for (const auto& [key, o] : options_) {
+        f << key << '\t' << o.defaultValue << '\t' << o.description;
+        for (size_t i = 0; i < o.values.size(); ++i)
+            f << '\t' << o.values[i] << '\x1f' << (i < o.labels.size() ? o.labels[i] : o.values[i]);
+        f << '\n';
+    }
+}
+
+bool LibretroCore::loadSavedOptionList(const fs::path& bundled) {
+    std::error_code ec;
+    std::ifstream f(fs::exists(optionListFile(), ec) || bundled.empty() ? optionListFile() : bundled);
+    bool any = false;
+    for (std::string line; std::getline(f, line);) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        std::vector<std::string> parts;
+        for (size_t a = 0;;) {
+            const size_t b = line.find('\t', a);
+            parts.push_back(line.substr(a, b == std::string::npos ? std::string::npos : b - a));
+            if (b == std::string::npos) break;
+            a = b + 1;
+        }
+        if (parts.size() < 3 || parts[0].empty()) continue;
+        std::vector<std::string> values, labels;
+        for (size_t i = 3; i < parts.size(); ++i) {
+            const size_t sep = parts[i].find('\x1f');
+            values.push_back(parts[i].substr(0, sep));
+            labels.push_back(sep == std::string::npos ? values.back() : parts[i].substr(sep + 1));
+        }
+        defineOption(parts[0].c_str(), parts[2].c_str(), parts[1].c_str(), std::move(values), std::move(labels));
+        any = true;
+    }
+    return any;
 }
 
 // ---------------------------------------------------------------------------

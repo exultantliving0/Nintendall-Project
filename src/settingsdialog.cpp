@@ -78,8 +78,10 @@ void SettingsDialog::findResolutionPack(std::map<std::string, CoreOption>& optio
     }
 }
 
-void SettingsDialog::open(System system, LibretroCore& core) {
+void SettingsDialog::open(System system, LibretroCore& core, bool gameRunning) {
     system_ = system;
+    gameRunning_ = gameRunning;
+    if (!gameRunning) pendingRestart_ = false;
     rows_.clear();
     scroll_ = 0;
     auto& options = core.options();
@@ -165,7 +167,7 @@ void SettingsDialog::apply(Row& r, int choice, LibretroCore& core) {
     const int n = int(r.choices.size());
     choice = ((choice % n) + n) % n;
     for (const auto& [k, v] : r.choices[size_t(choice)].set) core.setOption(k, v);
-    if (r.setting.restart) pendingRestart_ = true;
+    if (r.setting.restart && gameRunning_) pendingRestart_ = true;
 }
 
 void SettingsDialog::handleEvent(const SDL_Event& e, int mx, int my, LibretroCore& core) {
@@ -210,7 +212,7 @@ void SettingsDialog::handleEvent(const SDL_Event& e, int mx, int my, LibretroCor
                     auto& o = core.options()[k];
                     if (o.value != o.defaultValue) {
                         core.setOption(k, o.defaultValue);
-                        if (r.setting.restart) pendingRestart_ = true;
+                        if (r.setting.restart && gameRunning_) pendingRestart_ = true;
                     }
                 }
             }
@@ -246,7 +248,7 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
     const int valueW = int(dw * 0.46);
     // A row's note goes beside its label when there's room, otherwise on a second line under it.
     const int gap = int(10 * s);
-    auto labelText = [](const Row& r) { return r.setting.label + (r.setting.restart ? " *" : ""); };
+    auto labelText = [&](const Row& r) { return r.setting.label + (r.setting.restart && gameRunning_ ? " *" : ""); };
     auto noteBelow = [&](const Row& r) {
         return !r.setting.note.empty() &&
                t.width(labelText(r)) + gap + t.width(r.setting.note) > dw - pad * 2 - valueW - gap;
@@ -281,7 +283,11 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
     std::string hoverHint;
     int y = list_.y - scroll_;
     if (rows_.empty())
-        t.draw(dialog_.x + pad, y + (rowH_ - lh) / 2, "This console has no extra settings.", kDim);
+        t.draw(dialog_.x + pad, y + (rowH_ - lh) / 2,
+               core.options().empty() ? std::string("Start a ") + systemInfo(system_).fullName +
+                                            " game once, then its settings show here too."
+                                      : std::string("This console has no extra settings."),
+               kDim);
     for (auto& r : rows_) {
         if (!r.header.empty()) {
             y += int(4 * s);
@@ -334,6 +340,8 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
     int fy = list_.y + listH + int(8 * s);
     v.fillRect(dialog_.x + 1, fy - int(4 * s), dw - 2, 1, kFieldBorder);
     std::string hint = !hoverHint.empty() ? hoverHint
+                       : !gameRunning_    ? std::string("Click to change. Applies when you start a ") +
+                                             systemInfo(system_).fullName + " game"
                        : pendingRestart_  ? "Click Restart Game to apply settings marked *"
                                           : "Click to change. * = applies after a restart";
     while (hint.size() > 4 && t.width(hint) > dw - pad * 2) hint = hint.substr(0, hint.size() - 4) + "...";
@@ -352,6 +360,9 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
     if (system_ == System::WiiU) button(cacheBtn_, resetBtn_.x + resetBtn_.w + int(8 * s), "Clear Shader Cache", true);
     const int closeW = std::max(int(80 * s), t.width("Close") + int(28 * s));
     button(closeBtn_, dialog_.x + dw - pad - closeW, "Close", true);
-    const int restartW = std::max(int(80 * s), t.width("Restart Game") + int(28 * s));
-    button(restartBtn_, closeBtn_.x - int(8 * s) - restartW, "Restart Game", pendingRestart_);
+    restartBtn_ = {};
+    if (gameRunning_) {
+        const int restartW = std::max(int(80 * s), t.width("Restart Game") + int(28 * s));
+        button(restartBtn_, closeBtn_.x - int(8 * s) - restartW, "Restart Game", pendingRestart_);
+    }
 }

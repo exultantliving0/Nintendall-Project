@@ -12,9 +12,11 @@
 
 // Options > Console Settings: picture, console and sound settings for the
 // system that's running, taken from its emulator and given friendly names.
+// Also opens from the home screen (gameRunning false): the emulator is loaded without a game,
+// and the settings apply the next time one of that console's games starts.
 class SettingsDialog {
 public:
-    void open(System system, LibretroCore& core);
+    void open(System system, LibretroCore& core, bool gameRunning = true);
     // Wii U: Cemu's graphic pack folders (system/Cemu/graphicPacks and customGraphicPacks), to
     // find the loaded game's Resolution pack.
     void setWiiUPackFolders(const std::filesystem::path& bundled, const std::filesystem::path& custom) {
@@ -57,6 +59,7 @@ private:
     std::filesystem::path bundledPacks_, customPacks_;
     std::vector<Row> rows_;
     bool open_ = false;
+    bool gameRunning_ = true;
     bool pendingRestart_ = false;
     bool restartRequested_ = false;
     bool clearCacheRequested_ = false;

@@ -92,6 +92,8 @@ void Home::shutdown() { covers_.clear(); }
 
 std::string Home::consoleKey() const { return systemInfo(homeConsoles()[size_t(console_)].system).key; }
 
+System Home::consoleSystem() const { return homeConsoles()[size_t(console_)].system; }
+
 fs::path Home::consoleFolder() const { return root_ / fs::u8path(homeConsoles()[size_t(console_)].folder); }
 
 void Home::refresh() {

@@ -199,6 +199,11 @@ private:
     ButtonConfig buttonConfig_;
     SettingsDialog settings_;
     bool settingsWasOpen_ = false;
+    // Console Settings from the home screen: the console's emulator, loaded without a game while
+    // the window is open (closing it saves the settings).
+    std::unique_ptr<LibretroCore> settingsCore_;
+    void openHomeSettings(System system);
+    LibretroCore* settingsCore() { return core_ ? core_.get() : settingsCore_.get(); }
     LaunchOptions opt_;
     std::unique_ptr<LibretroCore> core_;
 

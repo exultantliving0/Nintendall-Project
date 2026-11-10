@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nintendall VERSION 1.0.0 LANGUAGES CXX)
+project(Nintendall VERSION 1.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -76,6 +76,12 @@ endif()
 add_custom_command(TARGET nintendall POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/fonts $<TARGET_FILE_DIR:nintendall>/fonts)
 install(DIRECTORY assets/fonts/ DESTINATION fonts)
+
+# Settings lists of emulators that only list their settings with a game loaded (melonDS DS), so
+# Console Settings works from the home screen before the first game.
+add_custom_command(TARGET nintendall POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/settings $<TARGET_FILE_DIR:nintendall>/settings)
+install(DIRECTORY assets/settings/ DESTINATION settings)
 
 if(WIN32)
   # A normal windowed app (no console), with the compiler runtime built in so

@@ -23,6 +23,7 @@ public:
     void shutdown();  // frees the cover textures (before the renderer goes away)
 
     std::string consoleKey() const;  // the console being shown, e.g. "gba"
+    System consoleSystem() const;
     const std::filesystem::path& gamesRoot() const { return root_; }
     const std::filesystem::path& coversRoot() const { return coversRoot_; }
     std::filesystem::path consoleFolder() const;
