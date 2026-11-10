@@ -43,7 +43,8 @@ CORES = [
 # and attached to a release there. The changed source travels with Nintendall (see
 # third_party/), as the MPL-2.0 requires.
 #   cemu: VPADRead didn't report fresh button presses (trig), so most game menus ignored buttons.
-#   dolphin: the widescreen hack didn't widen anything (see third_party/dolphin/).
+#   dolphin: the widescreen hack didn't widen anything, and LAN games (starting Dolphin's
+#            netplay) were added (see third_party/dolphin/).
 PATCHED_CORES = {
     "cemu": {"repo": "exultantliving0/cemu-libretro-nintendall", "tag": "nintendall-1",
              "platforms": {"linux/x86_64", "windows/x86_64"}},

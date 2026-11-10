@@ -72,7 +72,7 @@ controller support (via SDL), saves and save states.
 | Game Boy Advance | mGBA | runs (tested with test files only) |
 | Nintendo DS | melonDS DS | runs (tested with homebrew) |
 | Nintendo 64 | Mupen64Plus-Next | runs, drawn on the GPU (tested with homebrew test ROMs) |
-| GameCube / Wii | Dolphin | runs, drawn on the GPU (tested with homebrew) |
+| GameCube / Wii | Dolphin (with a widescreen fix and LAN games added, see `third_party/dolphin/`) | runs, drawn on the GPU (tested with homebrew) |
 | 3DS | Azahar | runs, drawn on the GPU (tested with homebrew; needs decrypted games) |
 | Wii U | Cemu (with a GamePad input fix, see `third_party/cemu/`) | runs, drawn on the GPU (tested with homebrew; disc images need your own keys) |
 
@@ -240,9 +240,20 @@ controller (or keys) are plugged in, so Wii games don't show extra pointers.
 
 **Widescreen Hack** (Console Settings) shows more of the 3D world at the sides,
 in 16:9. Most Wii games are already 16:9 on their own. Turn it off for games that
-look cut off at the edges (many 2D games only draw their normal width). Nintendall
-ships Dolphin with a small fix so the hack really widens the view (see
-`third_party/dolphin/`).
+look cut off at the edges (many 2D games only draw their normal width).
+
+Dolphin is shipped with two changes:
+
+- **Widescreen fix:** the libretro Dolphin's widescreen hack didn't widen anything
+  (its picture stayed 4:3 wide). Now it really shows more at the sides.
+- **LAN games:** the libretro Dolphin contains Dolphin's netplay code but had no
+  way to start it. Nintendall's change lets it host or join a netplay session, so
+  LAN > Host Game / Join Game work for GameCube and Wii (see LAN games below).
+
+The patches and the exact Dolphin commit they apply to are in `third_party/dolphin/`;
+`tools/bundle_cores.py` fetches the patched core from
+`exultantliving0/dolphin-libretro-nintendall` (built by GitHub Actions there)
+instead of the libretro buildbot.
 
 **Real Wii Remotes:** set Console Settings > Wii Controller to **Real Wii Remote**
 (the game restarts), then press a button on each remote to connect it. The remotes
@@ -300,7 +311,8 @@ with the host's address, like NES / SNES / N64, and can also join after the game
 started. Game Boy links send every byte back and forth, so they are fastest on
 the same network.
 
-**GameCube and Wii** use Dolphin's own netplay. The host also gets a host code
+**GameCube and Wii** use Dolphin's own netplay (started through Nintendall's
+change to Dolphin, see `third_party/dolphin/`). The host also gets a host code
 (from Dolphin's netplay server; no account, no ports to open) that works over
 the internet. If a host code won't connect (some routers block it), computers on
 one virtual LAN can join with the host's address in it.
