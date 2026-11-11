@@ -201,7 +201,7 @@ void ButtonConfig::draw(Video& v, Text& t, const Input& input, int W, int H) {
             std::string label = listening ? (c == 0 ? "Press a key..."
                                              : input.controllerForPort(player_) ? "Press a controller button..."
                                                                                 : "Pick a controller above first")
-                              : (c == 0 ? Input::keyName(input.key(player_, b)) : Input::padName(input.pad(player_, b)));
+                              : (c == 0 ? Input::keyName(input.key(player_, b)) : input.padName(player_, input.pad(player_, b)));
             t.draw(cell.x + int(6 * s), cell.y + (cell.h - lh) / 2, label,
                    listening ? kAccent : kTextC);
         }
