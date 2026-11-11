@@ -17,7 +17,10 @@ join a game with Dolphin's own netplay code, which the libretro core already
 contains but had no way to start. After `nintendall_lan_setup`, loading a game
 opens a netplay session instead of booting it, and the game boots with the
 session's settings and save data when the host starts it, as in Dolphin's own
-netplay window.
+netplay window. Netplay only sends emulated Wii Remotes, so with Real Wii Remote
+chosen, a LAN game hands the real remotes to Dolphin's controller interface
+(Dolphin's "Connect Wii Remotes for Emulated Controllers") and maps the player's
+emulated Wii Remote to the real one (`UseRealWiimoteInLan` in `Input.cpp`).
 
 **Widescreen hack** (`widescreen-hack.patch`, `Source/Core/DolphinLibretro/Video.cpp`).
 What it fixes: the widescreen hack didn't widen anything. The hack widens

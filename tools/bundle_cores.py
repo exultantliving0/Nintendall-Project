@@ -48,7 +48,7 @@ CORES = [
 PATCHED_CORES = {
     "cemu": {"repo": "exultantliving0/cemu-libretro-nintendall", "tag": "nintendall-1",
              "platforms": {"linux/x86_64", "windows/x86_64"}},
-    "dolphin": {"repo": "exultantliving0/dolphin-libretro-nintendall", "tag": "nintendall-2",
+    "dolphin": {"repo": "exultantliving0/dolphin-libretro-nintendall", "tag": "nintendall-3",
                 "platforms": {"linux/x86_64", "windows/x86_64"}},
 }
 

@@ -109,7 +109,7 @@ index 2023b8b..6e6ce0d 100644
    Main.cpp
    Video.cpp
 diff --git a/Source/Core/DolphinLibretro/Input.cpp b/Source/Core/DolphinLibretro/Input.cpp
-index 4ced7bf..d7efb1a 100644
+index 4ced7bf..fc42e06 100644
 --- a/Source/Core/DolphinLibretro/Input.cpp
 +++ b/Source/Core/DolphinLibretro/Input.cpp
 @@ -33,6 +33,7 @@
@@ -120,7 +120,7 @@ index 4ced7bf..d7efb1a 100644
  #include "DolphinLibretro/Input.h"
  #include "DolphinLibretro/Common/Globals.h"
  #include "DolphinLibretro/Common/Options.h"
-@@ -1250,6 +1251,16 @@ static unsigned wii_port_device(unsigned device, bool altGCPorts)
+@@ -1250,6 +1251,122 @@ static unsigned wii_port_device(unsigned device, bool altGCPorts)
    return device;
  }
  
@@ -134,10 +134,116 @@ index 4ced7bf..d7efb1a 100644
 +  WiimoteCommon::OnSourceChanged(port, source);
 +}
 +
++// Nintendall LAN game with "Real Wii Remote": Dolphin's netplay only sends emulated Wii Remotes
++// (it plugs in an emulated one for every player), so a real remote had nothing to connect to.
++// Instead, hand the real remotes to Dolphin's controller interface (Dolphin's "Connect Wii
++// Remotes for Emulated Controllers") and map this computer's emulated Wii Remote to the first
++// one, like Dolphin's own Wii Remote profile: buttons, the sensor bar pointer (the remote's
++// camera data, passed straight through), motion, rumble and the Nunchuk / Classic Controller.
++static void UseRealWiimoteInLan(WiimoteEmu::Wiimote* wm)
++{
++  static const char* const mapping[][2] = {
++      {"Device", "Bluetooth/0/Wii Remote"},
++      {"Buttons/A", "`A`"},
++      {"Buttons/B", "`B`"},
++      {"Buttons/1", "`1`"},
++      {"Buttons/2", "`2`"},
++      {"Buttons/-", "`-`"},
++      {"Buttons/+", "`+`"},
++      {"Buttons/Home", "`HOME`"},
++      {"D-Pad/Up", "`Up`"},
++      {"D-Pad/Down", "`Down`"},
++      {"D-Pad/Left", "`Left`"},
++      {"D-Pad/Right", "`Right`"},
++      {"IRPassthrough/Enabled", "True"},
++      {"IRPassthrough/Object 1 X", "`IR Object 1 X`"},
++      {"IRPassthrough/Object 1 Y", "`IR Object 1 Y`"},
++      {"IRPassthrough/Object 1 Size", "`IR Object 1 Size`"},
++      {"IRPassthrough/Object 2 X", "`IR Object 2 X`"},
++      {"IRPassthrough/Object 2 Y", "`IR Object 2 Y`"},
++      {"IRPassthrough/Object 2 Size", "`IR Object 2 Size`"},
++      {"IRPassthrough/Object 3 X", "`IR Object 3 X`"},
++      {"IRPassthrough/Object 3 Y", "`IR Object 3 Y`"},
++      {"IRPassthrough/Object 3 Size", "`IR Object 3 Size`"},
++      {"IRPassthrough/Object 4 X", "`IR Object 4 X`"},
++      {"IRPassthrough/Object 4 Y", "`IR Object 4 Y`"},
++      {"IRPassthrough/Object 4 Size", "`IR Object 4 Size`"},
++      {"IMUAccelerometer/Up", "`Accel Up`"},
++      {"IMUAccelerometer/Down", "`Accel Down`"},
++      {"IMUAccelerometer/Left", "`Accel Left`"},
++      {"IMUAccelerometer/Right", "`Accel Right`"},
++      {"IMUAccelerometer/Forward", "`Accel Forward`"},
++      {"IMUAccelerometer/Backward", "`Accel Backward`"},
++      {"IMUGyroscope/Dead Zone", "3"},
++      {"IMUGyroscope/Pitch Up", "`Gyro Pitch Up`"},
++      {"IMUGyroscope/Pitch Down", "`Gyro Pitch Down`"},
++      {"IMUGyroscope/Roll Left", "`Gyro Roll Left`"},
++      {"IMUGyroscope/Roll Right", "`Gyro Roll Right`"},
++      {"IMUGyroscope/Yaw Left", "`Gyro Yaw Left`"},
++      {"IMUGyroscope/Yaw Right", "`Gyro Yaw Right`"},
++      {"IMUIR/Enabled", "False"},
++      {"Extension/Attach MotionPlus", "`Attached MotionPlus`"},
++      {"Extension", "`Attached Extension`"},
++      {"Nunchuk/Buttons/C", "`Nunchuk C`"},
++      {"Nunchuk/Buttons/Z", "`Nunchuk Z`"},
++      {"Nunchuk/Stick/Up", "`Nunchuk Y+`"},
++      {"Nunchuk/Stick/Down", "`Nunchuk Y-`"},
++      {"Nunchuk/Stick/Left", "`Nunchuk X-`"},
++      {"Nunchuk/Stick/Right", "`Nunchuk X+`"},
++      {"Nunchuk/Stick/Calibration", "100 100 100 100 100 100 100 100"},
++      {"Nunchuk/IMUAccelerometer/Up", "`Nunchuk Accel Up`"},
++      {"Nunchuk/IMUAccelerometer/Down", "`Nunchuk Accel Down`"},
++      {"Nunchuk/IMUAccelerometer/Left", "`Nunchuk Accel Left`"},
++      {"Nunchuk/IMUAccelerometer/Right", "`Nunchuk Accel Right`"},
++      {"Nunchuk/IMUAccelerometer/Forward", "`Nunchuk Accel Forward`"},
++      {"Nunchuk/IMUAccelerometer/Backward", "`Nunchuk Accel Backward`"},
++      {"Classic/Buttons/A", "`Classic A`"},
++      {"Classic/Buttons/B", "`Classic B`"},
++      {"Classic/Buttons/X", "`Classic X`"},
++      {"Classic/Buttons/Y", "`Classic Y`"},
++      {"Classic/Buttons/ZL", "`Classic ZL`"},
++      {"Classic/Buttons/ZR", "`Classic ZR`"},
++      {"Classic/Buttons/-", "`Classic -`"},
++      {"Classic/Buttons/+", "`Classic +`"},
++      {"Classic/Buttons/Home", "`Classic HOME`"},
++      {"Classic/Left Stick/Up", "`Classic Left Y+`"},
++      {"Classic/Left Stick/Down", "`Classic Left Y-`"},
++      {"Classic/Left Stick/Left", "`Classic Left X-`"},
++      {"Classic/Left Stick/Right", "`Classic Left X+`"},
++      {"Classic/Left Stick/Calibration", "100 100 100 100 100 100 100 100"},
++      {"Classic/Right Stick/Up", "`Classic Right Y+`"},
++      {"Classic/Right Stick/Down", "`Classic Right Y-`"},
++      {"Classic/Right Stick/Left", "`Classic Right X-`"},
++      {"Classic/Right Stick/Right", "`Classic Right X+`"},
++      {"Classic/Right Stick/Calibration", "100 100 100 100 100 100 100 100"},
++      {"Classic/Triggers/L", "`Classic L`"},
++      {"Classic/Triggers/R", "`Classic R`"},
++      {"Classic/Triggers/L-Analog", "`Classic L-Analog`"},
++      {"Classic/Triggers/R-Analog", "`Classic R-Analog`"},
++      {"Classic/D-Pad/Up", "`Classic Up`"},
++      {"Classic/D-Pad/Down", "`Classic Down`"},
++      {"Classic/D-Pad/Left", "`Classic Left`"},
++      {"Classic/D-Pad/Right", "`Classic Right`"},
++      {"Rumble/Motor", "`Motor`"},
++      {"Options/Battery", "`Battery`"},
++  };
++
++  Common::IniFile::Section sec;
++  for (const auto& [key, value] : mapping)
++    sec.Set(key, std::string(value));
++  wm->LoadConfig(&sec);
++
++  // Real remotes (connected now or later) go to the controller interface instead of a Wii
++  // Remote slot, including any Dolphin connected before netplay took the slots over.
++  Config::SetCurrent(Config::MAIN_CONNECT_WIIMOTES_FOR_CONTROLLER_INTERFACE, true);
++  WiimoteReal::HandleWiimotesInControllerInterfaceSettingChange();
++  WiimoteReal::Refresh();  // and look for remotes once more
++}
++
  void retro_set_controller_port_device(unsigned port, unsigned device)
  {
    auto& system = Core::System::GetInstance();
-@@ -1259,6 +1270,16 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
+@@ -1259,6 +1376,16 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
      return;
  
    Libretro::Input::frontend_types[port] = device;
@@ -154,7 +260,7 @@ index 4ced7bf..d7efb1a 100644
    if (system.IsWii() && port < 4 && device != RETRO_DEVICE_NONE &&
        !Config::Get(Config::MAIN_BLUETOOTH_PASSTHROUGH_ENABLED))
      device = wii_port_device(device, altGCPorts);
-@@ -1474,14 +1495,17 @@ void retro_set_controller_port_device_gc(unsigned port, unsigned device)
+@@ -1474,14 +1601,17 @@ void retro_set_controller_port_device_gc(unsigned port, unsigned device)
  #endif
    auto& si = Core::System::GetInstance().GetSerialInterface();
  
@@ -176,7 +282,7 @@ index 4ced7bf..d7efb1a 100644
  
    GCPad* gcPad = (GCPad*)Pad::GetConfig()->GetController(port > 3 ? port - 4 : port);
    // load an empty inifile section, clears everything
-@@ -1575,7 +1599,9 @@ void retro_set_controller_port_device_wii(unsigned port, unsigned device)
+@@ -1575,7 +1705,9 @@ void retro_set_controller_port_device_wii(unsigned port, unsigned device)
      Libretro::Input::RefreshSensors(port);
  
    bool altGCPorts = Libretro::Options::GetCached<bool>(Libretro::Options::sysconf::ALT_GC_PORTS_ON_WII);
@@ -187,7 +293,7 @@ index 4ced7bf..d7efb1a 100644
    {
      Config::SetBaseOrCurrent(Config::GetInfoForSIDevice(port), SerialInterface::SIDEVICE_NONE);
      si.ChangeDevice(Config::Get(Config::GetInfoForSIDevice(port)), port);
-@@ -1911,34 +1937,29 @@ void retro_set_controller_port_device_wii(unsigned port, unsigned device)
+@@ -1911,34 +2043,32 @@ void retro_set_controller_port_device_wii(unsigned port, unsigned device)
    {
    case RETRO_DEVICE_WIIMOTE:
      wmExtension->SetSelectedAttachment(ExtensionNumber::NONE);
@@ -223,16 +329,19 @@ index 4ced7bf..d7efb1a 100644
    case RETRO_DEVICE_REAL_WIIMOTE:
 -    Config::SetBaseOrCurrent(Config::GetInfoForWiimoteSource(port), WiimoteSource::Real);
 -    WiimoteCommon::OnSourceChanged(port, WiimoteSource::Real);
-+    SetWiimoteSourceUnlessLan(port, WiimoteSource::Real);
++    if (Libretro::Lan::Active())
++      UseRealWiimoteInLan(wm);
++    else
++      SetWiimoteSourceUnlessLan(port, WiimoteSource::Real);
      break;
    }
  
 diff --git a/Source/Core/DolphinLibretro/Lan.cpp b/Source/Core/DolphinLibretro/Lan.cpp
 new file mode 100644
-index 0000000..40bb0bc
+index 0000000..6f03687
 --- /dev/null
 +++ b/Source/Core/DolphinLibretro/Lan.cpp
-@@ -0,0 +1,669 @@
+@@ -0,0 +1,673 @@
 +// Nintendall: LAN / online play through Dolphin's own netplay (see Lan.h).
 +
 +#include "DolphinLibretro/Lan.h"
@@ -250,6 +359,7 @@ index 0000000..40bb0bc
 +#include "Common/StringUtil.h"
 +#include "Common/TraversalClient.h"
 +#include "Core/Boot/Boot.h"
++#include "Core/Config/MainSettings.h"
 +#include "Core/Config/NetplaySettings.h"
 +#include "Core/IOS/FS/FileSystem.h"
 +#include "Core/NetPlayClient.h"
@@ -781,6 +891,9 @@ index 0000000..40bb0bc
 +  s_have_boot = false;
 +  s_start_received = false;
 +  s_boot_data.reset();
++  // Real Wii Remotes go back to Wii Remote slots (see UseRealWiimoteInLan in Input.cpp).
++  Config::DeleteKey(Config::LayerType::CurrentRun,
++                    Config::MAIN_CONNECT_WIIMOTES_FOR_CONTROLLER_INTERFACE);
 +}
 +
 +}  // namespace Libretro::Lan

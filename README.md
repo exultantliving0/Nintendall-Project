@@ -338,7 +338,12 @@ the same network.
 change to Dolphin, see `third_party/dolphin/`). The host also gets a host code
 (from Dolphin's netplay server; no account, no ports to open) that works over
 the internet. If a host code won't connect (some routers block it), computers on
-one virtual LAN can join with the host's address in it.
+one virtual LAN can join with the host's address in it. Real Wii Remotes work
+in Wii LAN games too (set Console Settings > Wii Controller to **Real Wii
+Remote** before joining or hosting, then press a button on the remote). Dolphin's
+netplay only sends emulated Wii Remotes, so the real remote drives the player's
+emulated one: buttons, pointer, motion, rumble, Nunchuk and Classic Controller
+all work, but the game's speaker sounds play from the PC instead of the remote.
 
 Except for Game Boy links, everyone needs the same game (same region and
 version) and plays with the host's save data. Everyone needs the same version of
