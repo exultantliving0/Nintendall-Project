@@ -149,9 +149,7 @@ for a player from the **Controller** drop-down in **Options > Button Config**
 keyboard-only). All keys and controller buttons can be changed there too (per
 player), including the analog stick directions: map them to another stick, a
 trigger or a button (by default they're the real sticks). Only the player's own
-controller can set its buttons. Controller buttons are shown by the controller's
-own numbers (Button 3, Axis 2+, D-pad Up), like Mesen and Windows' game controller
-settings, so they match what you press on any controller. Extra
+controller can set its buttons. Extra
 controller mappings can go in `gamecontrollerdb.txt` next to the program.
 
 Default keyboard (player 1): arrows = D-pad, X / Z = A / B, S / A = X / Y,

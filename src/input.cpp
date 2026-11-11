@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <map>
 
 namespace {
 
@@ -200,60 +199,6 @@ std::string Input::padName(PadBind b) {
         }
     }
     return "";
-}
-
-std::string Input::padName(int player, PadBind b) const {
-    SDL_GameController* gc = controllerForPort(player);
-    if (!gc || b.kind == PadBind::None) return padName(b);
-    // The controller's own input behind the standard button / axis, from its SDL mapping
-    // ("a:b0,dpup:h0.1,leftx:a0,dpleft:-a0,lefttrigger:a2~,..."), numbered from 1.
-    const bool button = b.kind == PadBind::Button;
-    const char* std_ = button ? SDL_GameControllerGetStringForButton(SDL_GameControllerButton(b.index))
-                              : SDL_GameControllerGetStringForAxis(SDL_GameControllerAxis(b.index));
-    char* mapping = SDL_GameControllerMapping(gc);
-    std::string raw;
-    if (mapping && std_) {
-        std::map<std::string, std::string> fields;
-        std::string list = mapping;
-        SDL_free(mapping);
-        size_t at = 0;
-        while (at <= list.size()) {
-            const size_t comma = std::min(list.find(',', at), list.size());
-            const std::string field = list.substr(at, comma - at);
-            const size_t colon = field.find(':');
-            if (colon != std::string::npos) fields[field.substr(0, colon)] = field.substr(colon + 1);
-            at = comma + 1;
-        }
-        // An axis can be mapped in halves ("+leftx:b4,-leftx:b5").
-        const std::string name = std_;
-        const std::string half = b.kind == PadBind::AxisPos ? "+" + name : b.kind == PadBind::AxisNeg ? "-" + name : "";
-        if (!half.empty() && fields.count(half)) raw = fields[half];
-        else if (fields.count(name)) raw = fields[name];
-    } else if (mapping) {
-        SDL_free(mapping);
-    }
-    if (raw.empty()) return "None";  // this controller has nothing there
-
-    if (raw[0] == 'b') return "Button " + std::to_string(std::atoi(raw.c_str() + 1) + 1);
-    if (raw[0] == 'h') {
-        const int hat = std::atoi(raw.c_str() + 1);
-        const size_t dot = raw.find('.');
-        const int m = dot == std::string::npos ? 0 : std::atoi(raw.c_str() + dot + 1);
-        const char* dir = m & SDL_HAT_UP ? "Up" : m & SDL_HAT_DOWN ? "Down" : m & SDL_HAT_LEFT ? "Left" : "Right";
-        return (hat == 0 ? std::string("D-pad ") : "D-pad " + std::to_string(hat + 1) + " ") + dir;
-    }
-    // An axis: "a2", "+a2" / "-a2" (one half), "a2~" (inverted).
-    size_t i = 0;
-    char sign = 0;
-    if (raw[0] == '+' || raw[0] == '-') sign = raw[i++];
-    if (i >= raw.size() || raw[i] != 'a') return "None";
-    const int axis = std::atoi(raw.c_str() + i + 1);
-    if (!sign) {
-        // The whole axis: which way this binding pushes it.
-        sign = b.kind == PadBind::AxisNeg ? '-' : '+';
-        if (raw.back() == '~') sign = sign == '+' ? '-' : '+';
-    }
-    return "Axis " + std::to_string(axis + 1) + sign;
 }
 
 // ---------------------------------------------------------------------------

@@ -76,10 +76,7 @@ public:
     static const char* buttonLabel(int button);  // "Up", "A", "Start"...
     static bool isStickDirection(int button) { return button >= kStickUp && button <= kRStickRight; }
     static std::string keyName(SDL_Scancode key);
-    static std::string padName(PadBind bind);  // by position ("Bottom button"), with no controller
-    // As the player's controller numbers it ("Button 3", "Axis 2+", "D-pad Up"), like Mesen and
-    // Windows' game controller settings; by position when the player has no controller.
-    std::string padName(int player, PadBind bind) const;
+    static std::string padName(PadBind bind);
     static uint16_t parseButtons(const std::string& list);
 
 private:
