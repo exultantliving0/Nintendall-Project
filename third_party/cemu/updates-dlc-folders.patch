@@ -1,0 +1,59 @@
+diff --git a/src/libretro/CemuLibretro.cpp b/src/libretro/CemuLibretro.cpp
+index 14fb3917..1277b2fb 100644
+--- a/src/libretro/CemuLibretro.cpp
++++ b/src/libretro/CemuLibretro.cpp
+@@ -4055,6 +4055,38 @@ RETRO_API void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb) { aud
+ RETRO_API void retro_set_input_poll(retro_input_poll_t cb) { input_poll_cb = cb; }
+ RETRO_API void retro_set_input_state(retro_input_state_t cb) { input_state_cb = cb; }
+ 
++// More folders to look for updates and DLC in, from the frontend (Nintendall):
++// system/Cemu/game_paths.txt, one folder per line ("#" starts a comment). A
++// frontend with a games folder of its own lists it there, so an update or DLC
++// put next to the game is found the way Cemu's own game paths find it - the
++// file is read again before every title starts, so it can change while the
++// core stays loaded.
++static void libretro_add_frontend_game_paths()
++{
++	std::ifstream file(ActiveSettings::GetUserDataPath("game_paths.txt"));
++	std::string line;
++	auto& gamePaths = GetConfig().game_paths;
++	while (std::getline(file, line))
++	{
++		while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
++			line.pop_back();
++		size_t start = 0;
++		while (start < line.size() && (line[start] == ' ' || line[start] == '\t'))
++			start++;
++		line.erase(0, start);
++		if (line.empty() || line[0] == '#')
++			continue;
++		std::error_code ec;
++		if (!fs::is_directory(_utf8ToPath(line), ec))
++			continue;
++		if (std::find(gamePaths.begin(), gamePaths.end(), line) == gamePaths.end())
++		{
++			gamePaths.emplace_back(line);
++			cemuLog_log(LogType::Force, "updates and DLC (from the frontend): {}", line);
++		}
++	}
++}
++
+ RETRO_API void retro_init()
+ {
+ 	if (s_initialized)
+@@ -4113,6 +4145,7 @@ RETRO_API void retro_init()
+ 			gamePaths.emplace_back(extraTitlesUtf8);
+ 		cemuLog_log(LogType::Force, "updates and DLC: {}", extraTitlesUtf8);
+ 	}
++	libretro_add_frontend_game_paths();
+ 
+ 	libretro_log(RETRO_LOG_INFO, "retro_init: choosing the graphics API\n");
+ 
+@@ -5488,6 +5521,7 @@ static void libretro_launch_game()
+ 	// and then the frontend's, or the system's, to report: the process is not
+ 	// the core's to end.
+ 	ExceptionHandler_HandCrashesToPrevious();
++	libretro_add_frontend_game_paths();  // (CemuCommonInit scans the game paths)
+ 	CemuCommonInit();
+ 	s_cafe_system_initialized = true;
+ 

@@ -112,6 +112,7 @@ private:
     struct DownloadJob;
     std::shared_ptr<DownloadJob> download_;
     std::filesystem::path wiiUKeysFile() const;
+    void writeWiiUGamePaths() const;  // tells Cemu where to look for updates and DLC
     bool needsWiiUKeys(const std::filesystem::path& game) const;
     void showMessage(const std::string& title, const std::string& text, bool error);
     void osd(const std::string& msg, unsigned ms = 2500);

@@ -280,6 +280,18 @@ bool isWiiUFolder(const fs::path& dir) {
     return false;
 }
 
+// An update or DLC folder (meta/meta.xml's title ID starts 0005000E / 0005000C): not a game of its
+// own. Cemu finds it in the Wii U games folder and uses it with the game.
+bool isWiiUUpdateOrDlc(const fs::path& dir) {
+    std::ifstream f(dir / "meta" / "meta.xml", std::ios::binary);
+    if (!f) return false;
+    std::string xml(65536, '\0');
+    f.read(xml.data(), std::streamsize(xml.size()));
+    xml.resize(size_t(std::max<std::streamsize>(0, f.gcount())));
+    const std::string id = lower(xmlTag(xml, "title_id"));
+    return id.rfind("0005000e", 0) == 0 || id.rfind("0005000c", 0) == 0;
+}
+
 LibraryGame readGame(const fs::path& path, System console, bool folder) {
     LibraryGame g;
     g.path = path;
@@ -352,6 +364,7 @@ std::vector<LibraryGame> Library::scan(const fs::path& folder, System console) {
             if (p.filename().u8string().rfind('.', 0) == 0) continue;  // hidden
             std::error_code ec2;
             if (e.is_directory(ec2)) {
+                if (console == System::WiiU && isWiiUUpdateOrDlc(p)) continue;  // used with its game
                 if (console == System::WiiU && isWiiUFolder(p)) add(p, true);
                 else if (depth < 3) walk(p, depth + 1);
             } else if (e.is_regular_file(ec2)) {

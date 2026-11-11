@@ -519,6 +519,7 @@ bool App::startGame(const fs::path& path) {
     }
 
     if (det.system == System::Wii) enableWiimoteSpeaker(paths_.saves / "User" / "Config" / "Dolphin.ini");
+    if (det.system == System::WiiU) writeWiiUGamePaths();
 
     // 4. Start the emulator with the game. GPU systems try the chosen renderer first, then fall
     //    back: Vulkan -> OpenGL -> software (3DS / N64), if this PC can't do the first.
@@ -1507,6 +1508,23 @@ std::vector<std::string> readLines(const fs::path& p) {
     return lines;
 }
 }  // namespace
+
+// Updates and DLC: Cemu takes them from folders it scans, by title ID. Its list gets our Wii U
+// games folder, so an update or DLC folder put next to the game is found (Breath of the Wild
+// without its update stops with "A system update is required").
+void App::writeWiiUGamePaths() const {
+    if (home_.gamesRoot().empty()) return;  // (test runs without the home screen)
+    fs::path folder;
+    for (const HomeConsole& c : homeConsoles())
+        if (c.system == System::WiiU) folder = home_.gamesRoot() / fs::u8path(c.folder);
+    if (folder.empty()) return;
+    const fs::path dir = paths_.systemDirFor("cemu") / "Cemu";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    std::ofstream f(dir / "game_paths.txt", std::ios::binary | std::ios::trunc);
+    f << "# Written by Nintendall: folders Cemu searches for Wii U updates and DLC.\n"
+      << fs::absolute(folder, ec).u8string() << "\n";
+}
 
 fs::path App::wiiUKeysFile() const { return paths_.systemDirFor("cemu") / "Cemu" / "keys.txt"; }
 

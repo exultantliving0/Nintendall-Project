@@ -42,11 +42,12 @@ CORES = [
 # Cores Nintendall ships with fixes of its own, built by GitHub Actions in the repo below
 # and attached to a release there. The changed source travels with Nintendall (see
 # third_party/), as the MPL-2.0 requires.
-#   cemu: VPADRead didn't report fresh button presses (trig), so most game menus ignored buttons.
+#   cemu: VPADRead didn't report fresh button presses (trig), so most game menus ignored buttons;
+#         updates and DLC are also found in the folders Nintendall lists (its Wii U games folder).
 #   dolphin: the widescreen hack didn't widen anything, and LAN games (starting Dolphin's
 #            netplay) were added (see third_party/dolphin/).
 PATCHED_CORES = {
-    "cemu": {"repo": "exultantliving0/cemu-libretro-nintendall", "tag": "nintendall-1",
+    "cemu": {"repo": "exultantliving0/cemu-libretro-nintendall", "tag": "nintendall-2",
              "platforms": {"linux/x86_64", "windows/x86_64"}},
     "dolphin": {"repo": "exultantliving0/dolphin-libretro-nintendall", "tag": "nintendall-3",
                 "platforms": {"linux/x86_64", "windows/x86_64"}},

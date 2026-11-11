@@ -369,9 +369,15 @@ Disc images (.wud / .wux) are encrypted with keys from your own console: add you
 Decrypted games (.wua, unpacked folders with `code/`, `content/`, `meta/`) and
 homebrew (.rpx, .wuhb) don't need keys.
 
-Cemu is shipped with one fix: in libretro mode it never told games which GamePad
-buttons were *newly* pressed, so most game menus ignored buttons. The patch and
-where it applies are in `third_party/cemu/`; `tools/bundle_cores.py` fetches the
+**Updates and DLC:** put a game's update and DLC folders in the Wii U games folder too
+(next to the game, in any subfolder). Cemu finds them by title ID and uses them with
+the game; the game list shows only the game. Some games need their update: Breath of
+the Wild without its latest update (v208) stops with "A system update is required".
+
+Cemu is shipped with two changes: in libretro mode it never told games which GamePad
+buttons were *newly* pressed, so most game menus ignored buttons; and it now also
+looks for updates and DLC in the Wii U games folder (listed in
+`system/Cemu/game_paths.txt`). The patches and where they apply are in `third_party/cemu/`; `tools/bundle_cores.py` fetches the
 patched core from `exultantliving0/cemu-libretro-nintendall` (built by GitHub
 Actions there) instead of the libretro buildbot.
 
