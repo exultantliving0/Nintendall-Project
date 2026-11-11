@@ -21,12 +21,38 @@
 #include <atomic>
 #include <thread>
 
+#include <zlib.h>
+
 namespace {
 // LAN games: GameCube / Wii use Dolphin's netplay; NES / SNES / N64 use Nintendall's own.
 bool usesDolphinLan(System s) { return s == System::GameCube || s == System::Wii; }
 bool usesNetplay(System s) { return s == System::NES || s == System::FDS || s == System::SNES || s == System::N64; }
 // The console folder a game is in (FDS games are in the NES folder).
 System lanFamily(System s) { return s == System::FDS ? System::NES : s; }
+
+// What the host sends when an NES / SNES / N64 LAN game starts: its save state, plus its save data
+// (battery save, EEPROM, Controller Paks). Some emulators (N64) leave the save data out of their
+// save states, so without it each computer played on its own save - and games that read it (Mario
+// Kart 64, at power-on) went out of step. Format: "NSR1", state size (4 bytes), state, save data.
+constexpr char kLanStartMagic[4] = {'N', 'S', 'R', '1'};
+std::vector<uint8_t> packLanStart(const std::vector<uint8_t>& state, const uint8_t* save, size_t saveSize) {
+    std::vector<uint8_t> out(kLanStartMagic, kLanStartMagic + 4);
+    const uint32_t n = uint32_t(state.size());
+    for (int i = 0; i < 4; ++i) out.push_back(uint8_t(n >> (8 * i)));
+    out.insert(out.end(), state.begin(), state.end());
+    if (save) out.insert(out.end(), save, save + saveSize);
+    return out;
+}
+// False: not in that format (a plain save state).
+bool unpackLanStart(const std::vector<uint8_t>& in, std::vector<uint8_t>& state, std::vector<uint8_t>& save) {
+    if (in.size() < 8 || !std::equal(kLanStartMagic, kLanStartMagic + 4, in.begin())) return false;
+    uint32_t n = 0;
+    for (int i = 0; i < 4; ++i) n |= uint32_t(in[size_t(4 + i)]) << (8 * i);
+    if (n > in.size() - 8) return false;
+    state.assign(in.begin() + 8, in.begin() + 8 + n);
+    save.assign(in.begin() + 8 + n, in.end());
+    return true;
+}
 // Link-cable LAN games: everyone plays their own game, on an emulator with a network link cable
 // (Gambatte for Game Boy / Color, gpSP for GBA), instead of the usual one.
 bool usesLinkLan(System s) { return s == System::GB || s == System::GBC || s == System::GBA; }
@@ -372,7 +398,15 @@ void App::runFrames() {
                 core_->run();
                 netReplay_ = false;
             };
-            lan_.net->advance(cb);
+            int ran = lan_.net->advance(cb);
+            // Waiting for a friend's presses (N64 always waits for them; NES / SNES only when far
+            // behind): keep checking for most of a frame. Giving up until the next frame lost a
+            // whole frame each time a press came in a little late, so N64 games stuttered.
+            const double until = nowSeconds() + 0.75 / core_->avInfo().timing.fps;
+            while (ran == 0 && lan_.net->phase() == Netplay::Phase::Playing && nowSeconds() < until) {
+                SDL_Delay(1);
+                ran = lan_.net->advance(cb);
+            }
         } else if (lan_.warmup < 2) {
             // A couple of frames after loading (some emulators can only save their state after
             // running), then the game waits behind the lobby.
@@ -2133,7 +2167,9 @@ void App::lanStart() {
         osd("Couldn't start - try again in a moment");
         return;
     }
-    lan_.net->start(state);
+    lan_.net->start(packLanStart(state, core_->saveRamData(), core_->saveRamSize()));
+    std::fprintf(stderr, "LAN: starting with a %zu-byte save state and %zu bytes of save data (crc %08lx)\n", state.size(),
+                 core_->saveRamSize(), core_->saveRamData() ? crc32(0L, core_->saveRamData(), uInt(core_->saveRamSize())) : 0ul);
 }
 
 NetInput App::localNetInput() {
@@ -2234,8 +2270,21 @@ void App::updateNetplay() {
         return;
     }
     case Netplay::Phase::Syncing: {
-        std::vector<uint8_t> state;
-        if (!net.isHost() && core_ && net.takeState(state)) {
+        std::vector<uint8_t> received, state, save;
+        if (!net.isHost() && core_ && net.takeState(received)) {
+            if (unpackLanStart(received, state, save)) {
+                // The host's save data replaces ours for this game (it isn't saved over ours: see saveSram).
+                uint8_t* mem = core_->saveRamData();
+                const size_t size = core_->saveRamSize();
+                if (mem && size) {
+                    std::fill(mem, mem + size, uint8_t(0));
+                    std::copy(save.begin(), save.begin() + std::min(save.size(), size), mem);
+                }
+                std::fprintf(stderr, "LAN: got the host's %zu-byte save state and %zu bytes of save data (crc %08lx)\n",
+                             state.size(), save.size(), mem ? crc32(0L, mem, uInt(size)) : 0ul);
+            } else {
+                state = std::move(received);  // (from an older Nintendall: the state alone)
+            }
             if (core_->loadState(state)) net.stateLoaded();
             else lan_.errorText = "Couldn't load the game from the host.";
         }

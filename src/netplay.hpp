@@ -158,6 +158,8 @@ private:
     std::map<int, uint32_t> checks_;               // host: its own state checksums, by frame
     int lastCheck_ = 0;
     int rollbacks_ = 0;  // (for the log)
+    int waits_ = 0;      // (for the log) frames that waited for another player's presses
+    int waitFrame_ = -1;
     bool desyncShown_ = false;
 
     // Link-cable games

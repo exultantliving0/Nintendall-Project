@@ -1015,7 +1015,13 @@ int Netplay::advance(const Callbacks& cb) {
             for (int f = mine + 1; f <= target; ++f) known_[f][size_t(local_)] = in;
             mine = target;
         }
-        if (frame_ > confirmed() + game_.window) break;  // waiting for the others' presses
+        if (frame_ > confirmed() + game_.window) {  // waiting for the others' presses
+            if (waitFrame_ != frame_) {
+                waitFrame_ = frame_;
+                ++waits_;
+            }
+            break;
+        }
 
         // A guess was wrong: go back and play those frames again.
         if (rollbackFrom_ < frame_) {
@@ -1051,6 +1057,9 @@ int Netplay::advance(const Callbacks& cb) {
         cb.run(in, false);
         ++frame_;
         ++ran;
+        if (frame_ % 600 == 0)
+            std::fprintf(stderr, "LAN: frame %d (%d frames waited for other players, rollbacks %d)\n", frame_, waits_,
+                         rollbacks_);
     }
 
     // With rollbacks: check a frame once every press before it is known (and played right), from
