@@ -21,7 +21,8 @@ public:
     void start(const std::filesystem::path& cacheDir);
     // The Box Covers folder of the console being shown.
     void setFolder(const std::filesystem::path& dir) { folder_ = dir; }
-    // The space a cover is shown in (pixels): covers are made exactly that size, so they're sharp.
+    // The space a cover is shown in (pixels): covers are made exactly that size (stretched a little
+    // if their shape is different), so they're sharp and all the same size.
     // A new size (cover size changed with Ctrl + / -, or the screen scale) reloads them.
     void setDisplaySize(int width, int height);
     // A game's cover, or nullptr while it's still loading or if none was found.
@@ -40,6 +41,7 @@ private:
         bool loading = true;
         std::string file;  // the picture shown ("" = none), and its time, to notice changes
         std::filesystem::file_time_type time{};
+        Uint32 retryAt = 0;  // couldn't be looked up (offline, server trouble): look again then (SDL ticks)
     };
     std::shared_ptr<Shared> shared_;
     std::filesystem::path folder_;
@@ -48,3 +50,8 @@ private:
 
 // The cover picture in `dir` for a game file name (.png, .jpg or .jpeg), or "" if there's none.
 std::filesystem::path findCoverFile(const std::filesystem::path& dir, const std::string& fileName);
+
+// The web address of a game's box cover (where Nintendall downloads it from), found with the lists
+// of names already saved in cacheDir, without going online. "" if there's none. (Discord status.)
+std::string coverUrl(const std::filesystem::path& cacheDir, System system, const std::string& fileName,
+                     const std::string& title);

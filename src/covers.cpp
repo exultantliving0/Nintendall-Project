@@ -51,6 +51,7 @@ struct Image {
     std::vector<uint8_t> rgba;
     int w = 0, h = 0;
     fs::path file;  // the picture it came from ("" = no cover)
+    bool retry = false;  // couldn't be looked up (no internet, or the server had a problem): try again later
 };
 
 const char* kCoverExts[] = {".png", ".jpg", ".jpeg"};
@@ -161,6 +162,16 @@ const char* libretroSystem(System s) {
     }
 }
 
+// The plain letter for an accented one (second byte of its UTF-8 after 0xC3): é -> e. 0 = not a letter.
+char plainLetter(unsigned char b) {
+    static const char* const map = "aaaaaaaceeeeiiiidnooooo/ouuuuyty";  // 0xA0..0xBF (lowercase)
+    if (b == 0x9F) return 's';                                               // ß
+    if (b >= 0x80 && b <= 0x9E) b = static_cast<unsigned char>(b + 0x20);  // uppercase -> lowercase
+    if (b < 0xA0 || b > 0xBF) return 0;
+    const char c = map[b - 0xA0];
+    return c == '/' ? 0 : c;
+}
+
 // The words of a game's name before its (tags), lowercase, without "the":
 // "Legend of Zelda, The (USA)" and "The Legend of Zelda" both give {legend, of, zelda}.
 std::vector<std::string> nameWords(const std::string& s) {
@@ -170,13 +181,17 @@ std::vector<std::string> nameWords(const std::string& s) {
         if (!w.empty() && w != "the") words.push_back(w);
         w.clear();
     };
-    for (const char ch : s) {
-        const unsigned char c = static_cast<unsigned char>(ch);
+    for (size_t i = 0; i < s.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        const char plain = c == 0xC3 && i + 1 < s.size() ? plainLetter(static_cast<unsigned char>(s[i + 1])) : 0;
         if (c == '(' || c == '[') break;
         if (c == '&') {
             flush();
             w = "and";
             flush();
+        } else if (plain) {
+            w += plain;  // "Pokémon" = "Pokemon"
+            ++i;
         } else if (std::isalnum(c) || c >= 0x80) {
             w += char(std::tolower(c));
         } else if (c != '\'' && c != '.') {  // "Bros." = "Bros", "Kirby's" = "Kirbys"
@@ -275,14 +290,14 @@ bool isUsaName(const std::string& name) {
     return false;
 }
 
-// The cover's name for a game: only USA releases ("" if the game has none in the library).
-std::string bestMatch(const Index& idx, const std::string& fileName, const std::string& title) {
+// The names matching a game's name (only USA releases if usaOnly): the same words, or else close names.
+std::vector<size_t> findNames(const Index& idx, const std::string& fileName, const std::string& title, bool usaOnly) {
     std::vector<size_t> found;
     for (const std::string& n : {fileName, title}) {
         const auto it = idx.byKey.find(joinWords(nameWords(n)));
         if (it == idx.byKey.end()) continue;
         for (const size_t i : it->second)
-            if (isUsaName(idx.names[i])) found.push_back(i);
+            if (!usaOnly || isUsaName(idx.names[i])) found.push_back(i);
         if (!found.empty()) break;
     }
     for (const std::string& n : {fileName, title}) {
@@ -294,7 +309,7 @@ std::string bestMatch(const Index& idx, const std::string& fileName, const std::
         const std::set<std::string> wantSet(want.begin(), want.end());
         size_t bestExtra = 3;
         for (size_t i = 0; i < idx.names.size(); ++i) {
-            if (!isUsaName(idx.names[i])) continue;
+            if (usaOnly && !isUsaName(idx.names[i])) continue;
             const std::vector<std::string> w = nameWords(idx.names[i]);
             if (w.size() < want.size() || w.size() - want.size() > 2 || w.size() - want.size() > bestExtra) continue;
             const std::set<std::string> have(w.begin(), w.end());
@@ -307,6 +322,12 @@ std::string bestMatch(const Index& idx, const std::string& fileName, const std::
             found.push_back(i);
         }
     }
+    return found;
+}
+
+// The cover's name for a game: only USA releases ("" if the game has none in the library).
+std::string bestMatch(const Index& idx, const std::string& fileName, const std::string& title) {
+    const std::vector<size_t> found = findNames(idx, fileName, title, true);
     std::string best;
     int bestScore = 0;
     for (const size_t i : found) {
@@ -335,6 +356,7 @@ struct Covers::Shared {
 
     // Used only by the thread.
     std::map<System, Index> indexes;
+    std::map<System, std::chrono::steady_clock::time_point> indexRetry;  // list unavailable: not asked again before then
     std::atomic<int> boxW{0}, boxH{0};  // the size covers are shown at (set by the home screen)
     std::chrono::steady_clock::time_point offlineUntil;  // no internet: wait a minute before trying again
 
@@ -377,6 +399,8 @@ const Index& Covers::Shared::index(System s) {
     static const Index empty;
     auto it = indexes.find(s);
     if (it != indexes.end()) return it->second;
+    if (const auto r = indexRetry.find(s); r != indexRetry.end() && std::chrono::steady_clock::now() < r->second)
+        return empty;
     const char* sys = libretroSystem(s);
     if (!sys) return empty;
 
@@ -384,10 +408,11 @@ const Index& Covers::Shared::index(System s) {
     std::vector<std::string> names;
     bool reached = true;
     if (olderThan(file, kIndexAge)) {
-        std::vector<uint8_t> html;
+        std::vector<uint8_t> body;
         reached = false;
-        if (get("https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/", html, reached) == 200)
-            names = parseListing(html);
+        if (get("https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/", body, reached) == 200) {
+            names = parseListing(body);
+        }
         if (!names.empty()) {
             std::string text;
             for (const auto& n : names) text += n + "\n";
@@ -399,7 +424,12 @@ const Index& Covers::Shared::index(System s) {
         for (std::string line; std::getline(f, line);)
             if (!line.empty()) names.push_back(line);
     }
-    if (names.empty() && !reached) return empty;  // offline: try again later
+    if (names.empty()) {
+        // Offline, or the server had a problem: ask again
+        // in a couple of minutes, rather than going without covers until Nintendall restarts.
+        indexRetry[s] = std::chrono::steady_clock::now() + std::chrono::minutes(2);
+        return empty;
+    }
     Index& idx = indexes[s];
     idx.names = std::move(names);
     for (size_t i = 0; i < idx.names.size(); ++i) idx.byKey[joinWords(nameWords(idx.names[i]))].push_back(i);
@@ -410,10 +440,17 @@ std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
     std::vector<uint8_t> body;
     const char* sys = libretroSystem(r.system);
     if (!sys) return {};
-    const std::string name = bestMatch(index(r.system), r.fileName, r.title);
-    if (name.empty()) return {};
+    const Index& idx = index(r.system);
+    if (idx.names.empty()) return {};  // the list isn't available yet: tried again later
+    const std::string name = bestMatch(idx, r.fileName, r.title);
+    if (name.empty()) {
+        reached = true;  // no USA cover in the list
+        return {};
+    }
     const std::string url = "https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/" + urlEncode(name) + ".png";
-    if (get(url, body, reached) == 200 && isImage(body)) return body;
+    const int status = get(url, body, reached);
+    if (status == 200 && isImage(body)) return body;
+    if (status != 404) reached = false;  // offline, or the server had a problem: tried again later
     return {};
 }
 
@@ -434,6 +471,7 @@ Image Covers::Shared::load(const Request& r) {
         bytes = download(r, reached);
         if (bytes.empty()) {
             if (reached) writeFile(none, "", 0);  // the servers answered: there's no cover
+            else img.retry = true;
             return img;
         }
         // Named like the game, unless the player put a picture there meanwhile.
@@ -451,12 +489,12 @@ Image Covers::Shared::load(const Request& r) {
     int w = 0, h = 0, n = 0;
     stbi_uc* px = stbi_load_from_memory(bytes.data(), int(bytes.size()), &w, &h, &n, 4);
     if (!px) return img;
-    // Shrink it to exactly the size it's shown at (sharp, and hundreds of covers fit in memory).
+    // Made exactly the size of the box it's shown in: every cover of a console is the same size
+    // (sharp, and hundreds of covers fit in memory). Covers a little narrower or wider are stretched.
     const int bw = boxW, bh = boxH;
-    const double k = bw > 0 && bh > 0 ? std::min(double(bw) / w, double(bh) / h) : 1.0;
-    if (k < 1.0) {
-        img.w = std::max(1, int(w * k + 0.5));
-        img.h = std::max(1, int(h * k + 0.5));
+    if (bw > 0 && bh > 0 && (w > bw || h > bh)) {
+        img.w = bw;
+        img.h = bh;
         img.rgba = resizeArea(px, w, h, img.w, img.h);
     } else {
         img.rgba.assign(px, px + size_t(w) * h * 4);
@@ -504,7 +542,12 @@ void Covers::setDisplaySize(int w, int h) {
 SDL_Texture* Covers::get(const LibraryGame& g) {
     const std::string key = g.path.u8string();
     const auto it = textures_.find(key);
-    if (it != textures_.end()) return it->second.tex;
+    if (it != textures_.end()) {
+        const Entry& e = it->second;
+        if (e.loading || e.tex || e.retryAt == 0 || SDL_TICKS_PASSED(SDL_GetTicks(), e.retryAt) == SDL_FALSE)
+            return e.tex;
+        textures_.erase(it);  // look for it again
+    }
     textures_[key] = Entry{};
     if (shared_) {
         std::lock_guard<std::mutex> lock(shared_->mutex);
@@ -543,6 +586,7 @@ void Covers::update(SDL_Renderer* renderer) {
         if (it == textures_.end() || !it->second.loading) continue;
         Entry& e = it->second;
         e.loading = false;
+        if (img.retry) e.retryAt = SDL_GetTicks() + 3 * 60 * 1000;  // offline or server trouble: in 3 minutes
         e.file = img.file.u8string();
         std::error_code ec;
         if (!img.file.empty()) e.time = fs::last_write_time(img.file, ec);
@@ -565,4 +609,19 @@ void Covers::clear() {
     shared_->queue.clear();
     shared_->done.clear();
     ++shared_->generation;
+}
+
+std::string coverUrl(const fs::path& cacheDir, System system, const std::string& fileName, const std::string& title) {
+    const char* sys = libretroSystem(system);
+    if (!sys) return {};
+    std::ifstream f(cacheDir / "names" / (std::string(sys) + ".txt"));
+    Index idx;
+    for (std::string line; std::getline(f, line);) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.empty()) idx.names.push_back(line);
+    }
+    for (size_t i = 0; i < idx.names.size(); ++i) idx.byKey[joinWords(nameWords(idx.names[i]))].push_back(i);
+    const std::string best = bestMatch(idx, fileName, title);
+    return best.empty() ? std::string()
+                        : "https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/" + urlEncode(best) + ".png";
 }

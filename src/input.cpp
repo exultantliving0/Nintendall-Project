@@ -377,6 +377,25 @@ SDL_GameController* Input::controllerForPort(int port) const {
     return p ? p->gc : nullptr;
 }
 
+bool Input::enableSensor(int port, bool gyro) {
+    SDL_GameController* gc = controllerForPort(port);
+    const SDL_SensorType type = gyro ? SDL_SENSOR_GYRO : SDL_SENSOR_ACCEL;
+    if (!gc || !SDL_GameControllerHasSensor(gc, type)) return false;
+    if (!SDL_GameControllerIsSensorEnabled(gc, type)) SDL_GameControllerSetSensorEnabled(gc, type, SDL_TRUE);
+    return true;
+}
+
+float Input::sensor(int port, unsigned id) const {
+    SDL_GameController* gc = controllerForPort(port);
+    if (!gc || id > RETRO_SENSOR_GYROSCOPE_Z) return 0.0f;
+    const bool gyro = id >= RETRO_SENSOR_GYROSCOPE_X;
+    const SDL_SensorType type = gyro ? SDL_SENSOR_GYRO : SDL_SENSOR_ACCEL;
+    float v[3] = {0, 0, 0};
+    if (!SDL_GameControllerIsSensorEnabled(gc, type) || SDL_GameControllerGetSensorData(gc, type, v, 3) != 0) return 0.0f;
+    const float x = v[(id - (gyro ? RETRO_SENSOR_GYROSCOPE_X : RETRO_SENSOR_ACCELEROMETER_X))];
+    return gyro ? x : x / 9.80665f;  // SDL: m/s^2 and radians per second
+}
+
 int Input::portForController(SDL_JoystickID id) const {
     for (int p = 0; p < kMaxPlayers; ++p)
         if (const Pad* pad = padForPort(p); pad && pad->id == id) return p;

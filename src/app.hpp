@@ -13,6 +13,7 @@
 #include "config.hpp"
 #include "core.hpp"
 #include "detect.hpp"
+#include "discord.hpp"
 #include "home.hpp"
 #include "input.hpp"
 #include "lan.hpp"
@@ -49,17 +50,19 @@ public:
     unsigned audioOutputRate() const override { return audio_.ok() ? unsigned(audio_.outputRate()) : 48000u; }
     float displayRefreshRate() const override { return float(video_.displayHz()); }
     void hwOutputSize(unsigned& w, unsigned& h) const override;
+    bool onSensorState(unsigned port, unsigned action, unsigned rate) override;
+    float onSensorInput(unsigned port, unsigned id) override;
 
 private:
     // Menu actions
     enum Action {
-        ActOpen = 1, ActCloseGame, ActExit, ActGamesFolder, ActCoversFolder,
+        ActOpen = 1, ActCloseGame, ActExit, ActGamesFolder, ActCoversFolder, ActSavesFolder,
         ActRecent = 10,  // + index
         ActPause = 30, ActReset, ActFastForward,
         ActSaveState = 40, ActLoadState,
         ActSlot = 50,  // + slot number
         ActButtonConfig = 70, ActFullscreen, ActConsoleSettings, ActWiiUKeys, ActPairWiimotes,
-        ActControls = 90, ActAbout,
+        ActControls = 90, ActAbout, ActCoffee,
         ActLayout = 100,  // + layout index
         ActLayoutSwap = 120,
         ActLanHost = 130, ActLanJoin, ActLanStart, ActLanDelayUp, ActLanDelayDown, ActLanLeave, ActLanHelp,
@@ -74,6 +77,16 @@ private:
     void runFrames();
     void saveSram(bool force);
     void loadSram();
+    // Discord status: "Playing Nintendall" with the game, its console and its box cover.
+    void startDiscord();
+    std::string discordAppId() const;  // Nintendall's Discord application ("" = none: no status)
+    void updateDiscord();  // every frame (only changes are sent)
+    DiscordStatus discord_;
+    std::string discordTitle_, discordCover_;
+    int64_t discordStart_ = 0;
+    std::filesystem::path gameCubeSaves();  // Dolphin's GameCube memory card folder (Saves/GameCube)
+    std::filesystem::path savesRoot_;  // the Saves folder (a folder per console)
+    std::filesystem::path saveFile_;   // the running game's battery save (Saves/<console>/<game>.srm)
     std::filesystem::path statePath(int slot) const;
     void saveState();
     void loadState();
@@ -216,6 +229,7 @@ private:
 
     // Running game
     System system_ = System::Unknown;
+    bool wiiUTouchHint_ = false;  // said how to show the Wii U GamePad's touch screen
     std::filesystem::path gamePath_;   // what the user picked (zip or file)
     std::filesystem::path extracted_;  // temp file pulled out of a zip
     std::string gameTitle_;

@@ -47,6 +47,12 @@ static retro_proc_address_t RETRO_CALLCONV cbGetProcAddress(const char* sym) { r
 static bool RETRO_CALLCONV cbRumble(unsigned port, enum retro_rumble_effect effect, uint16_t strength) {
     return g_core && g_core->host().onRumble(port, effect, strength);
 }
+static bool RETRO_CALLCONV cbSensorState(unsigned port, enum retro_sensor_action action, unsigned rate) {
+    return g_core && g_core->host().onSensorState(port, unsigned(action), rate);
+}
+static float RETRO_CALLCONV cbSensorInput(unsigned port, unsigned id) {
+    return g_core ? g_core->host().onSensorInput(port, id) : 0.0f;
+}
 
 LibretroCore::LibretroCore(CoreHost& host, fs::path systemDir, fs::path saveDir, fs::path optionsFile)
     : host_(host), systemDir_(systemDir.u8string()), saveDir_(saveDir.u8string()), optionsFile_(std::move(optionsFile)) {}
@@ -578,6 +584,12 @@ bool LibretroCore::environment(unsigned cmd, void* data) {
     case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
         static_cast<retro_rumble_interface*>(data)->set_rumble_state = cbRumble;
         return true;
+    case RETRO_ENVIRONMENT_GET_SENSOR_INTERFACE: {
+        auto* s = static_cast<retro_sensor_interface*>(data);
+        s->set_sensor_state = cbSensorState;
+        s->get_sensor_input = cbSensorInput;
+        return true;
+    }
     case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
         if (g_verboseCoreLog)  // handy when mapping a new system's buttons
             for (auto* d = static_cast<const retro_input_descriptor*>(data); d && d->description; ++d)

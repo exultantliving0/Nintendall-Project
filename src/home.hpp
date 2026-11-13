@@ -28,6 +28,7 @@ public:
     const std::filesystem::path& coversRoot() const { return coversRoot_; }
     std::filesystem::path consoleFolder() const;
     void refresh();  // look in the folder again
+    std::string titleFor(const std::filesystem::path& game) const;  // its name on the home screen ("" if not there)
 
     // Cover size (Ctrl + / Ctrl - / Ctrl 0), as a step in kCoverSizes; 0 = normal.
     int coverSize() const { return coverSize_; }

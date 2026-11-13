@@ -61,6 +61,12 @@ public:
 
     std::string controllerName(int port) const;
     SDL_GameController* controllerForPort(int port) const;
+    // Motion sensors of a player's controller (Switch Pro, DualShock 4, DualSense...): switches the
+    // gyro or accelerometer on; false if the controller has none.
+    bool enableSensor(int port, bool gyro);
+    // A reading in libretro's units and axes (accelerometer in g, gyro in radians per second;
+    // X right, Y up, Z towards the player, which SDL uses too). 0 without a sensor.
+    float sensor(int port, unsigned id) const;
     int portForController(SDL_JoystickID id) const;
 
     // Button mapping

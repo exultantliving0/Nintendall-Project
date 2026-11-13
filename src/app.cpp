@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "saves.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -15,6 +16,7 @@
 #include "library.hpp"
 #include "selfupdate.hpp"
 #include "sha256.hpp"
+#include "zip.hpp"
 #include "update.hpp"
 #include "wiimotepair.hpp"
 
@@ -148,10 +150,14 @@ void chooseRenderer(LibretroCore& core, System s, Renderer r) {
     }
 }
 
-// Dolphin only sends game sound to a real Wii Remote's speaker with [Core] WiimoteEnableSpeaker
-// on (off by default). The libretro Dolphin has no option for it, but reads its own Dolphin.ini
-// (in <saves>/User/Config), so switch it on there. Other lines are kept as they are.
-void enableWiimoteSpeaker(const fs::path& ini) {
+// Sets a [Core] setting in Dolphin's own Dolphin.ini (in <saves>/User/Config), which the libretro
+// Dolphin reads for settings it has no option for. Other lines are kept as they are.
+// - WiimoteEnableSpeaker = True: Dolphin only sends game sound to a real Wii Remote's speaker with
+//   it on (off by default).
+// - GCIFolderAPath: GameCube memory card A's saves (.gci files): Saves/GameCube, with a folder per
+//   region in it (USA, EUR, JPN), as in Dolphin's own GC folder. (Dolphin's netplay sends the
+//   host's saves from there too.)
+void setDolphinSetting(const fs::path& ini, const std::string& key, const std::string& value) {
     std::vector<std::string> lines;
     {
         std::ifstream in(ini);
@@ -165,7 +171,7 @@ void enableWiimoteSpeaker(const fs::path& ini) {
         while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front()))) t.erase(t.begin());
         return t;
     };
-    const std::string setting = "WiimoteEnableSpeaker = True";
+    const std::string setting = key + " = " + value;
     bool inCore = false, done = false;
     size_t coreEnd = std::string::npos;  // where to add the line if [Core] doesn't have it
     for (size_t i = 0; i < lines.size() && !done; ++i) {
@@ -178,7 +184,7 @@ void enableWiimoteSpeaker(const fs::path& ini) {
         }
         if (inCore) {
             coreEnd = i + 1;
-            if (trim(t.substr(0, t.find('='))) == "WiimoteEnableSpeaker") {
+            if (trim(t.substr(0, t.find('='))) == key) {
                 if (t == setting) return;  // already on
                 lines[i] = setting;
                 done = true;
@@ -206,6 +212,9 @@ bool layoutAvailable(System s, int i) {
 constexpr int kDsLayoutCount = int(sizeof kDsLayouts / sizeof kDsLayouts[0]);
 constexpr int kFirstSideways = 4;
 
+// Help > Send a Coffee: Nintendall's Ko-fi page (donations).
+constexpr const char* kCoffeeUrl = "https://ko-fi.com/exult";
+
 // Config keys can't contain '=' or '#'.
 std::string configSafe(std::string s) {
     for (char& c : s)
@@ -223,6 +232,14 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
     updateInputProfile();  // identity button mapping until a game says otherwise
     paths_.init();
     cfg_.load(paths_.data / "nintendall.cfg");
+    // The Saves folder (saves.folder), next to the Games folder: the games' saves, and where saves
+    // from other emulators go.
+    {
+        const std::string games = cfg_.get("games.folder"), saves = cfg_.get("saves.folder");
+        const fs::path gamesRoot = games.empty() ? defaultGamesFolder(paths_.base, paths_.portable) : fs::u8path(games);
+        savesRoot_ = saves.empty() ? gamesRoot.parent_path() / "Saves" : fs::u8path(saves);
+        createSaveFolders(savesRoot_);
+    }
 
     // Default window: the largest of 3x / 2x NES size that fits on the screen.
     float dpi = 1.0f;
@@ -279,6 +296,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
                 osd("The update to " + updated + " wasn't installed - you can try again next time", 6000);
         }
         startUpdateCheck();
+        startDiscord();  // always on (whenever the Discord app is running)
     }
     input_.setForcedButtons(opt.holdButtons);
 
@@ -315,6 +333,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         }
         checkWiimotePairing();
         updateLan();
+        updateDiscord();
         checkUpdateResult();
         checkUpdateDownload();
         if (settings_.takeRestartRequest() && core_) {
@@ -518,8 +537,42 @@ bool App::startGame(const fs::path& path) {
         gameFile = extracted_;
     }
 
-    if (det.system == System::Wii) enableWiimoteSpeaker(paths_.saves / "User" / "Config" / "Dolphin.ini");
+    if (det.system == System::Wii || det.system == System::GameCube) {
+        const fs::path ini = paths_.saves / "User" / "Config" / "Dolphin.ini";
+        if (det.system == System::Wii) setDolphinSetting(ini, "WiimoteEnableSpeaker", "True");
+        setDolphinSetting(ini, "GCIFolderAPath", gameCubeSaves().u8string());
+        // A game on several discs: Dolphin gets them all (a .m3u list) and puts the next disc in by
+        // itself when the game asks for it. (Not in LAN games: everyone plays from the disc itself.)
+        if (extracted_.empty() && !lanPending_) {
+            const std::vector<fs::path> discs = gameDiscs(gameFile, det.system);
+            if (discs.size() > 1) {
+                const fs::path m3u = paths_.cache / fs::u8path(gameFile.stem().u8string() + ".m3u");
+                std::ofstream out(m3u, std::ios::binary | std::ios::trunc);
+                for (const fs::path& d : discs) out << fs::absolute(d).u8string() << "\n";
+                if (out) {
+                    gameFile = m3u;
+                    std::fprintf(stderr, "%zu discs: %s\n", discs.size(), m3u.u8string().c_str());
+                }
+            }
+        }
+    }
     if (det.system == System::WiiU) writeWiiUGamePaths();
+    std::string saveNote;  // shown when the game starts
+    // Save folders from other emulators in Saves/<console> (Wii, Wii U, 3DS).
+    if (det.system == System::Wii || det.system == System::WiiU || det.system == System::N3DS) {
+        EmulatorSaveFolders to;
+        to.wiiTitles = paths_.saves / "User" / "Wii" / "title" / "00010000";
+        to.cemuSaves = paths_.saves / "Cemu" / "mlc01" / "usr" / "save" / "00050000";
+        const char* zeros = "00000000000000000000000000000000";
+        to.n3dsTitles = paths_.saves / "Azahar" / "sdmc" / "Nintendo 3DS" / zeros / zeros / "title" / "00040000";
+        const LibraryGame info = readGameInfo(path, det.system);
+        const FolderImport imported =
+            importSaveFolders(savesFolderFor(savesRoot_, home_.gamesRoot(), path, det.system), det.system, to, path,
+                              info.gameId);
+        if (!imported.problem.empty()) saveNote = imported.problem;
+        else if (!imported.used.empty()) saveNote = "Using the save from " + imported.used.front();
+        for (const std::string& n : imported.used) std::fprintf(stderr, "Imported save folder %s\n", n.c_str());
+    }
 
     // 4. Start the emulator with the game. GPU systems try the chosen renderer first, then fall
     //    back: Vulkan -> OpenGL -> software (3DS / N64), if this PC can't do the first.
@@ -581,6 +634,8 @@ bool App::startGame(const fs::path& path) {
             core_->preferDefault("dolphin_wiimote_default_device", "nunchuk");  // what most Wii games expect
             core_->preferDefault("dolphin_ir_offset", "10");  // pointer lines up with the mouse / stick
         }
+        // The GamePad's gyro comes from player 1's controller, if it has one (Cemu's default: off).
+        if (coreLoaded && det.system == System::WiiU) core_->preferDefault("cemu_gamepad_motion", "enabled");
         if (coreLoaded && !lanCoreOptions_.empty()) core_->setSessionOptions(lanCoreOptions_);  // joining
         if (coreLoaded && lanPending_ && usesDolphinLan(det.system)) {
             // A LAN game: the emulator hosts / joins, and boots the game when the host starts it.
@@ -652,6 +707,7 @@ bool App::startGame(const fs::path& path) {
     system_ = det.system;
     gamePath_ = path;
     gameTitle_ = path.stem().u8string();
+    saveFile_ = savesFolderFor(savesRoot_, home_.gamesRoot(), path, det.system) / fs::u8path(path.stem().u8string() + ".srm");
     const auto& av = core_->avInfo();
     onAvInfoChanged();
     audio_.clear();
@@ -670,6 +726,7 @@ bool App::startGame(const fs::path& path) {
     paused_ = fastForward_ = fastForwardToggled_ = false;
     playedSinceLaunch_ = true;  // no "new version" popup from now on
     nextFrame_ = nowSeconds();
+    if (startNote.empty()) startNote = saveNote;
     if (!startNote.empty()) osd(startNote, 6000);
     addRecent(path);
     if (video_.window()) SDL_SetWindowTitle(video_.window(), ("Nintendall - " + gameTitle_).c_str());
@@ -684,6 +741,14 @@ bool App::startGame(const fs::path& path) {
         const double winAspect = a.h > 0 ? double(a.w) / a.h : gameAspect;
         if (std::max(gameAspect, winAspect) / std::min(gameAspect, winAspect) > 1.25) fitWindowToGame();
     }
+    // Discord status: the game's name (as on the home screen) and its box cover.
+    discordTitle_ = home_.titleFor(path);
+    if (discordTitle_.empty()) discordTitle_ = cleanTitle(gameTitle_);
+    discordCover_ = discord_.running() ? coverUrl(paths_.data / "covers", system_,
+                                                  fs::is_directory(path) ? path.filename().u8string() : gameTitle_,
+                                                  discordTitle_)
+                                       : std::string();
+    discordStart_ = int64_t(std::time(nullptr));
     std::fprintf(stderr, "Running %s with core %s %s (%ux%u @ %.3f fps, %.0f Hz audio)\n", gameTitle_.c_str(),
                  core_->name().c_str(), core_->version().c_str(), av.geometry.base_width, av.geometry.base_height,
                  av.timing.fps, av.timing.sample_rate);
@@ -694,6 +759,7 @@ void App::stopGame() {
     if (!core_) return;
     saveSram(true);
     core_.reset();
+    wiiUTouchHint_ = false;
     input_.stopAllRumble();
     audio_.clear();
     std::error_code ec;
@@ -731,25 +797,93 @@ std::vector<std::string> App::recentGames() const {
     return list;
 }
 
-// ---- battery saves ----------------------------------------------------------
+// ---- Discord status ----------------------------------------------------------
 
-static fs::path sramPath(const Paths& p, const fs::path& game) {
-    return p.saves / fs::u8path(game.stem().u8string() + ".srm");
+namespace {
+// Nintendall's application on Discord: its name is what Discord shows after "Playing".
+constexpr const char* kDiscordAppId = "1570636947116925101";
+constexpr const char* kDiscordIcon = "https://raw.githubusercontent.com/exultantliving0/Nintendall-Project/main/assets/nintendall-256.png";
+}  // namespace
+
+std::string App::discordAppId() const {
+    const std::string own = cfg_.get("discord.app_id");
+    return own.empty() ? kDiscordAppId : own;
 }
+
+void App::startDiscord() { discord_.start(discordAppId()); }
+
+void App::updateDiscord() {
+    if (!discord_.running()) return;
+    DiscordStatus::Activity a;
+    if (core_ && system_ != System::Unknown) {
+        a.details = discordTitle_;
+        a.state = systemInfo(system_).fullName;
+        if (lan_.active) a.state += " - Multiplayer";
+        a.startTime = discordStart_;
+        a.largeImage = discordCover_.empty() ? kDiscordIcon : discordCover_;
+        a.largeText = discordTitle_;
+        if (!discordCover_.empty()) {
+            a.smallImage = kDiscordIcon;
+            a.smallText = "Nintendall";
+        }
+    } else {
+        a.details = "Choosing a game";
+        a.largeImage = kDiscordIcon;
+        a.largeText = "Nintendall";
+    }
+    discord_.set(a);
+}
+
+// ---- battery saves ----------------------------------------------------------
+// In the Saves folder: Saves/<console>/<game>.srm (see saves.hpp).
 
 void App::loadSram() {
     lastSram_.clear();
     uint8_t* mem = core_ ? core_->saveRamData() : nullptr;
     const size_t size = core_ ? core_->saveRamSize() : 0;
-    if (!mem || size == 0) return;
-    std::ifstream f(sramPath(paths_, gamePath_), std::ios::binary);
+    if (!mem || size == 0 || saveFile_.empty()) return;
+    std::error_code ec;
+    fs::create_directories(saveFile_.parent_path(), ec);
+    // Saves from before the Saves folder (in Nintendall's own data folder) move there.
+    const fs::path old = paths_.saves / saveFile_.filename();
+    if (!fs::exists(saveFile_, ec) && fs::is_regular_file(old, ec)) {
+        fs::rename(old, saveFile_, ec);
+        if (ec && fs::copy_file(old, saveFile_, ec)) fs::remove(old, ec);
+    }
+
+    // Another emulator's save put in the Saves folder with the game's name: use it (once: it's
+    // moved to Saves/<console>/Imported). The save it replaces is kept as <game>.srm.bak.
+    std::vector<uint8_t> ram(mem, mem + size);
+    const std::vector<fs::path> used = importSave(saveFile_.parent_path(), saveFile_.stem().u8string(), system_, ram);
+    if (!used.empty()) {
+        if (!moveToImported(used)) {
+            osd("Couldn't use " + used.front().filename().u8string() + ": it couldn't be moved to the Imported folder", 6000);
+        } else {
+            if (fs::exists(saveFile_, ec)) {
+                fs::path bak = saveFile_;
+                bak += ".bak";
+                fs::remove(bak, ec);
+                fs::rename(saveFile_, bak, ec);
+            }
+            std::copy(ram.begin(), ram.end(), mem);
+            std::ofstream f(saveFile_, std::ios::binary);
+            f.write(reinterpret_cast<const char*>(mem), std::streamsize(size));
+            lastSram_ = ram;
+            lastSramCheck_ = SDL_GetTicks();
+            osd("Using the save from " + used.front().filename().u8string(), 5000);
+            std::fprintf(stderr, "Imported %zu save file(s) into %s\n", used.size(), saveFile_.u8string().c_str());
+            return;
+        }
+    }
+
+    std::ifstream f(saveFile_, std::ios::binary);
     if (f) f.read(reinterpret_cast<char*>(mem), std::streamsize(size));
     lastSram_.assign(mem, mem + size);
     lastSramCheck_ = SDL_GetTicks();
 }
 
 void App::saveSram(bool force) {
-    if (!core_) return;
+    if (!core_ || saveFile_.empty()) return;
     // Joined an NES / SNES / N64 LAN game: the game runs on the host's save, which isn't ours to keep.
     if (lan_.net && !lan_.net->isHost() && !lan_.net->game().link) return;
     const Uint32 now = SDL_GetTicks();
@@ -760,8 +894,31 @@ void App::saveSram(bool force) {
     if (!mem || size == 0) return;
     if (lastSram_.size() == size && std::equal(mem, mem + size, lastSram_.begin())) return;
     lastSram_.assign(mem, mem + size);
-    std::ofstream f(sramPath(paths_, gamePath_), std::ios::binary);
+    std::error_code ec;
+    fs::create_directories(saveFile_.parent_path(), ec);
+    std::ofstream f(saveFile_, std::ios::binary);
     f.write(reinterpret_cast<const char*>(mem), std::streamsize(size));
+}
+
+// GameCube saves (.gci files, memory card A): Saves/GameCube/USA, EUR and JPN. The first time,
+// the saves Dolphin kept in its own folders are copied there.
+fs::path App::gameCubeSaves() {
+    const fs::path dir = savesFolderFor(savesRoot_, {}, {}, System::GameCube);
+    std::error_code ec;
+    for (const char* region : {"USA", "EUR", "JPN"}) fs::create_directories(dir / region, ec);
+    if (cfg_.get("saves.gamecube_copied") != "1") {
+        for (const auto& [from, to_dir] : {std::pair<const char*, const char*>{"USA", "USA"}, {"EUR", "EUR"}, {"JAP", "JPN"}}) {
+            const fs::path old = paths_.saves / "User" / "GC" / from / "Card A";
+            for (const auto& e : fs::directory_iterator(old, ec)) {
+                std::error_code ec2;
+                const fs::path to = dir / to_dir / e.path().filename();
+                if (e.is_regular_file(ec2) && !fs::exists(to, ec2)) fs::copy_file(e.path(), to, ec2);
+            }
+        }
+        cfg_.set("saves.gamecube_copied", "1");
+        cfg_.save();
+    }
+    return dir;
 }
 
 // ---- save states ------------------------------------------------------------
@@ -1138,6 +1295,28 @@ bool App::onRumble(unsigned port, retro_rumble_effect effect, uint16_t strength)
     return input_.rumble(port, effect, strength);
 }
 
+// Motion controls: Wii U games get the controllers' gyro (Switch Pro Controller,
+// DualShock 4, DualSense...). Not Wii or 3DS for now: Dolphin would move the Wii Remote with it,
+// and 3DS games would tilt, which players don't expect yet.
+static bool usesControllerMotion(System s) { return s == System::WiiU; }
+
+bool App::onSensorState(unsigned port, unsigned action, unsigned rate) {
+    (void)rate;
+    if (!usesControllerMotion(system_) || RETRO_SENSOR_INDEX(action) != 0 || netReplay_) return false;
+    switch (RETRO_SENSOR_BASE(action)) {
+    case RETRO_SENSOR_ACCELEROMETER_ENABLE: return input_.enableSensor(int(port), false);
+    case RETRO_SENSOR_GYROSCOPE_ENABLE: return input_.enableSensor(int(port), true);
+    case RETRO_SENSOR_ACCELEROMETER_DISABLE:
+    case RETRO_SENSOR_GYROSCOPE_DISABLE: return true;
+    default: return false;
+    }
+}
+
+float App::onSensorInput(unsigned port, unsigned id) {
+    if (!usesControllerMotion(system_) || RETRO_SENSOR_INDEX(id) != 0) return 0.0f;
+    return input_.sensor(int(port), RETRO_SENSOR_BASE(id));
+}
+
 void App::onMessage(const std::string& msg, unsigned durationMs) {
     if (msg.empty()) return;  // melonDS sends empty messages every frame; they'd wipe ours
     osd(msg, std::max(1500u, durationMs));
@@ -1297,6 +1476,17 @@ void App::handleEvent(const SDL_Event& e) {
         if (e.type == SDL_KEYDOWN || e.type == SDL_MOUSEBUTTONDOWN) return;
     }
 
+    // Wii U showing only the TV picture: the mouse is the GamePad's touch screen, which isn't on
+    // screen, so a click does nothing. Say how to show the GamePad (once per game).
+    if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT && core_ && system_ == System::WiiU &&
+        layout_ == kSingleScreen && !layoutSwap_ && !wiiUTouchHint_ && e.button.windowID == video_.windowId()) {
+        const SDL_Rect a = gameArea();
+        if (mouseX_ >= a.x && mouseY_ >= a.y && mouseX_ < a.x + a.w && mouseY_ < a.y + a.h) {
+            wiiUTouchHint_ = true;
+            osd("The touch screen is the GamePad: show it with Layout > Large + Small Screen (or Side by Side)", 7000);
+        }
+    }
+
     // Home screen (no game running): pick a console and a game.
     if (!core_ && !opt_.headless) {
         fs::path launch;
@@ -1379,6 +1569,10 @@ void App::doAction(int a) {
         createGameFolders(home_.coversRoot());
         openFolder(home_.coversRoot());
         break;
+    case ActSavesFolder:
+        createSaveFolders(savesRoot_);
+        openFolder(savesRoot_);
+        break;
     case ActCloseGame: stopGame(); break;
     case ActExit: quit_ = true; break;
     case ActPause:
@@ -1422,7 +1616,7 @@ void App::doAction(int a) {
         break;
     case ActLanLeave: leaveLan(""); break;
     case ActLanHelp:
-        showMessage("LAN Games",
+        showMessage("Multiplayer",
                     "Play NES, SNES, N64, GameCube and Wii games together on several computers, and link "
                     "Game Boy, Game Boy Color and GBA games (Pokemon trades and battles, ...).\n\n"
                     "Host: LAN > Host Game, pick the game and click Host. Give your friends your address (it "
@@ -1457,6 +1651,10 @@ void App::doAction(int a) {
                     "  Tab / Shift+Tab or L / R = Next / previous console\n"
                     "  Ctrl + / Ctrl - = Bigger / smaller covers,  Ctrl 0 = Normal size",
                     false);
+        break;
+    case ActCoffee:  // Help > Send a Coffee: the Ko-fi page, to support Nintendall
+        SDL_OpenURL(kCoffeeUrl);
+        osd("Opening Ko-fi in your browser - thank you!", 4000);
         break;
     case ActAbout:
         showMessage("About Nintendall", std::string("Nintendall ") + NINTENDALL_VERSION +
@@ -1640,6 +1838,7 @@ void App::buildMenus() {
     file.items.push_back({"Open...", "Ctrl+O", ActOpen});
     file.items.push_back({"Open Games Folder", "", ActGamesFolder});
     file.items.push_back({"Open Box Covers Folder", "", ActCoversFolder});
+    file.items.push_back({"Open Saves Folder", "", ActSavesFolder});
     file.items.push_back({"Close Game", "Ctrl+W", ActCloseGame, game});
     const auto recent = recentGames();
     if (!recent.empty()) {
@@ -1690,9 +1889,7 @@ void App::buildMenus() {
 
     // Shaders, for the running game's console (or the console shown on the home screen).
     Menu shaders{"Shaders", {}};
-    const System shaderSys = shaderSystem();
-    shaders.items.push_back({std::string(systemInfo(shaderSys).fullName) + " games:", "", 0, false});
-    const Shader current = shaderFor(shaderSys);
+    const Shader current = shaderFor(shaderSystem());
     for (size_t i = 0; i < shaderList().size(); ++i) {
         const ShaderInfo& info = shaderList()[i];
         if (info.shader == Shader::Scanlines || info.shader == Shader::LcdGrid) shaders.items.push_back({});
@@ -1711,21 +1908,23 @@ void App::buildMenus() {
 
     // LAN: GameCube and Wii games with friends (Dolphin's netplay).
     const bool lanHost = lan_.active && lan_.req.kind == LanDialog::Kind::Host;
-    Menu lan{"LAN", {}};
+    Menu lan{"Multiplayer", {}};
     lan.items.push_back({"Host Game...", "", ActLanHost, !lan_.active});
     lan.items.push_back({"Join Game...", "", ActLanJoin, !lan_.active});
     lan.items.push_back({});
     lan.items.push_back({"Start Game", "", ActLanStart, lanHost && lan_.status.state == LanState::Lobby});
     lan.items.push_back({"More Input Delay", "", ActLanDelayUp, lanHost && !lan_.net});
     lan.items.push_back({"Less Input Delay", "", ActLanDelayDown, lanHost && !lan_.net});
-    lan.items.push_back({"Leave LAN Game", "", ActLanLeave, lan_.active});
+    lan.items.push_back({"Leave Multiplayer Game", "", ActLanLeave, lan_.active});
     lan.items.push_back({});
-    lan.items.push_back({"How LAN Games Work", "", ActLanHelp});
+    lan.items.push_back({"How Multiplayer Works", "", ActLanHelp});
     menus.push_back(lan);
 
     Menu help{"Help", {}};
     help.items.push_back({"Controls", "", ActControls});
     help.items.push_back({"About Nintendall", "", ActAbout});
+    help.items.push_back({});
+    help.items.push_back({"Send a Coffee...", "", ActCoffee});
     menus.push_back(help);
 
     menu_.setMenus(std::move(menus));
@@ -1821,6 +2020,7 @@ void App::openHomeSettings(System system) {
         settingsCore_->preferDefault("dolphin_wiimote_default_device", "nunchuk");
         settingsCore_->preferDefault("dolphin_ir_offset", "10");
     }
+    if (system == System::WiiU) settingsCore_->preferDefault("cemu_gamepad_motion", "enabled");
     settings_.open(system, *settingsCore_, false);
 }
 

@@ -24,6 +24,10 @@ public:
     virtual float displayRefreshRate() const { return 60.0f; }
     // Size (in pixels) the game picture is shown at, for shrinking GPU frames before copying them. 0 = unknown.
     virtual void hwOutputSize(unsigned& w, unsigned& h) const { w = h = 0; }
+    // Motion sensors (libretro's sensor interface): switch one on (true = the player's controller
+    // has it), and read it (accelerometer in g, gyro in radians per second).
+    virtual bool onSensorState(unsigned port, unsigned action, unsigned rate) { (void)port; (void)action; (void)rate; return false; }
+    virtual float onSensorInput(unsigned port, unsigned id) { (void)port; (void)id; return 0.0f; }
 };
 
 struct CoreOption {

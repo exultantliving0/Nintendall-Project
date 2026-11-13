@@ -30,7 +30,11 @@ struct LibraryGame {
     System system = System::Unknown;  // the console the game is for (FDS games sit in the NES folder)
     std::string title;           // shown under the cover
     std::string fileName;        // file name without extension, for finding the cover by name
-    std::string gameId;          // the game's ID code (GameCube, Wii, Wii U, DS, 3DS), for finding its cover
+    std::string gameId;          // the game's ID code (GameCube, Wii, Wii U, DS, 3DS)
+    int disc = 0;                // GameCube / Wii: which disc this is (1, 2...); 0 = not known
+    // A game on several discs is one game: `path` is its first disc, and this lists every disc
+    // in order (empty for one-disc games).
+    std::vector<std::filesystem::path> discs;
 };
 
 class Library {
@@ -50,3 +54,14 @@ private:
 
 // "Legend of Zelda, The (USA) [!]" -> "The Legend of Zelda"
 std::string cleanTitle(const std::string& fileName);
+
+// The disc number in a file name ("Tales of Symphonia (USA) (Disc 2)", "Game - Disc 2", "[Disk 2]")
+// or 0, and the name without it ("Tales of Symphonia (USA)").
+int discInName(const std::string& fileName, std::string* rest = nullptr);
+
+// One game's name and ID, read from its file (or Wii U game folder).
+LibraryGame readGameInfo(const std::filesystem::path& path, System console);
+
+// Every disc of the game a GameCube / Wii disc belongs to, starting with that one (the game's other
+// discs, from the same folder). Just the file itself for one-disc games.
+std::vector<std::filesystem::path> gameDiscs(const std::filesystem::path& file, System console);
