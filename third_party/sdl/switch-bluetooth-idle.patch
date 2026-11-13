@@ -1,0 +1,19 @@
+diff --git a/src/joystick/hidapi/SDL_hidapi_switch.c b/src/joystick/hidapi/SDL_hidapi_switch.c
+index ab80858..cf35d9b 100644
+--- a/src/joystick/hidapi/SDL_hidapi_switch.c
++++ b/src/joystick/hidapi/SDL_hidapi_switch.c
+@@ -2322,7 +2322,13 @@ static SDL_bool HIDAPI_DriverSwitch_UpdateDevice(SDL_HIDAPI_Device *device)
+                     WriteProprietary(ctx, k_eSwitchProprietaryCommandIDs_ForceUSB, NULL, 0, SDL_FALSE);
+                     ctx->m_bSyncWrite = wasSyncWrite;
+                 }
+-            } else if (device->is_bluetooth) {
++            } else if (device->is_bluetooth &&
++                       ctx->m_nCurrentInputMode != k_eSwitchInputReportIDs_SimpleControllerState) {
++                /* Nintendall: not in simple mode. In simple mode a controller only reports
++                 * changes, so seconds without input are normal (a held direction, or nobody
++                 * touching it), and timing out disconnected and reconnected the controller,
++                 * e.g. Nintendo's NSO SNES controller. A controller that is switched off or
++                 * out of range disappears from the system, which SDL still notices. */
+                 const Uint32 INPUT_WAIT_TIMEOUT_MS = 3000;
+                 if (SDL_TICKS_PASSED(now, ctx->m_unLastInput + INPUT_WAIT_TIMEOUT_MS)) {
+                     /* Bluetooth may have disconnected, try reopening the controller */
