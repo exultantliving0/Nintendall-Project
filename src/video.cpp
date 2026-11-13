@@ -108,11 +108,17 @@ void Video::ensureTexture(unsigned w, unsigned h, Uint32 format) {
 }
 
 void Video::uploadFrame(const void* data, unsigned w, unsigned h, size_t pitch, retro_pixel_format fmt) {
-    // Keep a tightly-packed copy for screenshots.
+    // Screenshots read the picture back from the texture; only without one (no window, or a
+    // renderer that can't draw into a texture) is a copy of every frame kept for them.
     const size_t rowBytes = w * bytesPerPixel(fmt);
-    frame_.resize(rowBytes * h);
-    for (unsigned y = 0; y < h; ++y)
-        std::memcpy(&frame_[y * rowBytes], static_cast<const uint8_t*>(data) + y * pitch, rowBytes);
+    if (!renderer_ || !SDL_RenderTargetSupported(renderer_)) {
+        frame_.resize(rowBytes * h);
+        for (unsigned y = 0; y < h; ++y)
+            std::memcpy(&frame_[y * rowBytes], static_cast<const uint8_t*>(data) + y * pitch, rowBytes);
+    } else if (!frame_.empty()) {
+        frame_.clear();
+        frame_.shrink_to_fit();
+    }
     frameW_ = w;
     frameH_ = h;
     framePitch_ = rowBytes;
@@ -397,6 +403,36 @@ bool Video::toFrame(int x, int y, double& fx, double& fy) const {
 
 bool Video::saveScreenshot(const std::filesystem::path& path) const {
     if (frameW_ == 0) return false;
+    if (frame_.empty()) {
+        // The frame is only on the graphics card: draw it 1:1 into a texture and read that back.
+        if (!renderer_ || !frameTex_) return false;
+        SDL_Texture* target = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET,
+                                                int(frameW_), int(frameH_));
+        if (!target) return false;
+        std::vector<uint8_t> argb(size_t(frameW_) * frameH_ * 4);
+        SDL_Texture* before = SDL_GetRenderTarget(renderer_);
+        SDL_SetRenderTarget(renderer_, target);
+        SDL_ScaleMode mode = SDL_ScaleModeNearest;
+        SDL_GetTextureScaleMode(frameTex_, &mode);
+        SDL_SetTextureScaleMode(frameTex_, SDL_ScaleModeNearest);
+        const SDL_Rect src{0, 0, int(frameW_), int(frameH_)};
+        SDL_RenderCopy(renderer_, frameTex_, &src, nullptr);
+        const bool read = SDL_RenderReadPixels(renderer_, nullptr, SDL_PIXELFORMAT_ARGB8888, argb.data(),
+                                               int(frameW_) * 4) == 0;
+        SDL_SetTextureScaleMode(frameTex_, mode);
+        SDL_SetRenderTarget(renderer_, before);
+        SDL_DestroyTexture(target);
+        if (!read) return false;
+        std::vector<uint8_t> rgb(size_t(frameW_) * frameH_ * 3);
+        for (size_t i = 0, n = size_t(frameW_) * frameH_; i < n; ++i) {
+            uint32_t p;
+            std::memcpy(&p, &argb[i * 4], 4);
+            rgb[i * 3] = uint8_t(p >> 16);
+            rgb[i * 3 + 1] = uint8_t(p >> 8);
+            rgb[i * 3 + 2] = uint8_t(p);
+        }
+        return writePng(path, int(frameW_), int(frameH_), rgb.data());
+    }
     std::vector<uint8_t> rgb(size_t(frameW_) * frameH_ * 3);
     for (unsigned y = 0; y < frameH_; ++y) {
         const uint8_t* row = &frame_[y * framePitch_];
