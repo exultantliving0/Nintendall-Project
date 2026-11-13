@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nintendall VERSION 1.3.0 LANGUAGES CXX)
+project(Nintendall VERSION 1.3.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -120,6 +120,7 @@ install(DIRECTORY ${NINTENDALL_SYSDATA_DIR}/ DESTINATION system)
 install(FILES README.md THIRD_PARTY_LICENSES.md DESTINATION .)
 install(DIRECTORY third_party/cemu DESTINATION third_party)  # source of our change to Cemu (MPL-2.0)
 install(DIRECTORY third_party/dolphin DESTINATION third_party)  # source of our change to Dolphin (GPL-2.0+)
+install(DIRECTORY third_party/sdl DESTINATION third_party)  # our change to SDL2 (zlib)
 
 if(MSVC)
   target_compile_options(nintendall PRIVATE /W3)

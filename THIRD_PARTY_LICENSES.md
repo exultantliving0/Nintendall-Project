@@ -42,7 +42,7 @@ Also used:
 |---|---|---|
 | libretro API headers (`libretro.h`, `libretro_vulkan.h`) | MIT | https://github.com/libretro/libretro-common |
 | Vulkan headers (`third_party/vulkan`, Khronos Group) | Apache-2.0 or MIT, see `third_party/vulkan/LICENSE.md` | https://github.com/KhronosGroup/Vulkan-Headers |
-| SDL2 | zlib | https://libsdl.org |
+| SDL2 (Windows: with a fix for Nintendo controllers over Bluetooth, see `third_party/sdl/`) | zlib | https://libsdl.org |
 | SDL2_ttf (font drawing) | zlib | https://github.com/libsdl-org/SDL_ttf |
 | FreeType (inside SDL2_ttf) | FreeType License (FTL) | https://freetype.org. Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved. |
 | HarfBuzz (inside SDL2_ttf) | MIT ("Old MIT") | https://github.com/harfbuzz/harfbuzz |
