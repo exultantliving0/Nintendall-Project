@@ -10,7 +10,7 @@ Unicode true
 
 !define APPNAME "Nintendall"
 !ifndef VERSION
-  !define VERSION "1.0.4"
+  !define VERSION "1.3.0"
 !endif
 !ifndef SRCDIR
   !error "Pass -DSRCDIR=<folder with nintendall.exe, SDL2.dll and cores\>"
@@ -119,6 +119,14 @@ Section "${APPNAME} (required)" SecMain
   File "${SRCDIR}\nintendall.exe"
   File "${SRCDIR}\SDL2.dll"
   File "${SRCDIR}\SDL2_ttf.dll"
+  ; Versions 1.0.5 - 1.2.6 had Switch games (Eden), with Microsoft's Visual C++ runtime and Eden's
+  ; source next to the program: not needed any more.
+  Delete "$INSTDIR\msvcp140.dll"
+  Delete "$INSTDIR\msvcp140_atomic_wait.dll"
+  Delete "$INSTDIR\msvcp140_codecvt_ids.dll"
+  Delete "$INSTDIR\vcruntime140.dll"
+  Delete "$INSTDIR\vcruntime140_1.dll"
+  RMDir /r "$INSTDIR\third_party\eden"
   File "${SRCDIR}\README.md"
   File "${SRCDIR}\THIRD_PARTY_LICENSES.md"
   File /r "${SRCDIR}\third_party"
@@ -159,6 +167,15 @@ Section "${APPNAME} (required)" SecMain
   CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\Wii"
   CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\Nintendo 3DS"
   CreateDirectory "$DOCUMENTS\Nintendall\Box Covers\Wii U"
+  ; Saves (battery and GameCube saves; saves from other emulators go here too). Uninstalling leaves it.
+  CreateDirectory "$DOCUMENTS\Nintendall\Saves\NES"
+  CreateDirectory "$DOCUMENTS\Nintendall\Saves\Game Boy"
+  CreateDirectory "$DOCUMENTS\Nintendall\Saves\SNES"
+  CreateDirectory "$DOCUMENTS\Nintendall\Saves\Nintendo 64"
+  CreateDirectory "$DOCUMENTS\Nintendall\Saves\Game Boy Color"
+  CreateDirectory "$DOCUMENTS\Nintendall\Saves\Game Boy Advance"
+  CreateDirectory "$DOCUMENTS\Nintendall\Saves\GameCube"
+  CreateDirectory "$DOCUMENTS\Nintendall\Saves\Nintendo DS"
   SetShellVarContext all
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -207,6 +224,11 @@ Section "Uninstall"
   Delete "$INSTDIR\nintendall.exe"
   Delete "$INSTDIR\SDL2.dll"
   Delete "$INSTDIR\SDL2_ttf.dll"
+  Delete "$INSTDIR\msvcp140.dll"
+  Delete "$INSTDIR\msvcp140_atomic_wait.dll"
+  Delete "$INSTDIR\msvcp140_codecvt_ids.dll"
+  Delete "$INSTDIR\vcruntime140.dll"
+  Delete "$INSTDIR\vcruntime140_1.dll"
   Delete "$INSTDIR\README.md"
   Delete "$INSTDIR\THIRD_PARTY_LICENSES.md"
   RMDir /r "$INSTDIR\third_party"

@@ -127,6 +127,52 @@ std::string cleanTitle(const std::string& fileName) {
     return t.empty() ? fileName : t;
 }
 
+int discInName(const std::string& name, std::string* rest) {
+    const std::string low = lower(name);
+    for (size_t at = 0; (at = low.find("dis", at)) != std::string::npos; ++at) {
+        if (at + 4 > low.size() || (low[at + 3] != 'c' && low[at + 3] != 'k')) continue;
+        if (at > 0 && std::isalnum(static_cast<unsigned char>(low[at - 1]))) continue;  // "Indisc..."
+        size_t p = at + 4;
+        while (p < low.size() && (low[p] == ' ' || low[p] == '_' || low[p] == '-')) ++p;
+        size_t q = p;
+        while (q < low.size() && q - p < 2 && std::isdigit(static_cast<unsigned char>(low[q]))) ++q;
+        if (q == p || (q < low.size() && std::isalnum(static_cast<unsigned char>(low[q])))) continue;
+        const int n = std::atoi(low.substr(p, q - p).c_str());
+        if (n < 1 || n > 9) continue;
+        if (rest) {
+            // "of 2" after the number belongs to the tag too.
+            size_t end = q;
+            if (low.compare(end, 4, " of ") == 0 && end + 4 < low.size() && std::isdigit(static_cast<unsigned char>(low[end + 4])))
+                end += 5;
+            size_t start = at;
+            if (start > 0 && (low[start - 1] == '(' || low[start - 1] == '[') && end < low.size() &&
+                (low[end] == ')' || low[end] == ']')) {
+                --start;  // "(Disc 2)": the brackets too
+                ++end;
+            }
+            while (start > 0 && (name[start - 1] == ' ' || name[start - 1] == '-' || name[start - 1] == '_')) --start;
+            *rest = name.substr(0, start) + name.substr(end);
+        }
+        return n;
+    }
+    return 0;
+}
+
+std::vector<fs::path> gameDiscs(const fs::path& file, System console) {
+    Library library;
+    const fs::path want = file.lexically_normal();
+    for (const LibraryGame& g : library.scan(file.parent_path(), console)) {
+        if (g.discs.empty()) continue;
+        for (size_t i = 0; i < g.discs.size(); ++i)
+            if (g.discs[i].lexically_normal() == want) {
+                std::vector<fs::path> list = g.discs;  // the one picked first, then the next ones
+                std::rotate(list.begin(), list.begin() + std::ptrdiff_t(i), list.end());
+                return list;
+            }
+    }
+    return {file};
+}
+
 // ============================================================================
 // Game IDs and names inside the game files
 
@@ -146,7 +192,7 @@ std::vector<uint8_t> readAt(std::ifstream& f, uint64_t off, size_t len) {
 }
 
 // GameCube / Wii disc header: 6-character ID at 0, game name at 0x20.
-bool discHeader(const std::vector<uint8_t>& h, std::string& id, std::string& name) {
+bool discHeader(const std::vector<uint8_t>& h, std::string& id, std::string& name, int& disc) {
     if (h.size() < 0x60) return false;
     const bool wii = be32(&h[0x18]) == 0x5D1C9EA3, gc = be32(&h[0x1C]) == 0xC2339F3D;
     if (!wii && !gc) return false;
@@ -157,20 +203,21 @@ bool discHeader(const std::vector<uint8_t>& h, std::string& id, std::string& nam
     }
     name.clear();
     for (size_t i = 0x20; i < h.size() && i < 0x60 && h[i]; ++i) name += char(h[i]);
+    disc = h[6] < 8 ? h[6] + 1 : 0;  // byte 6: the disc number (0 = disc 1)
     return true;
 }
 
-void gameCubeWiiId(std::ifstream& f, std::string& id, std::string& name) {
+void gameCubeWiiId(std::ifstream& f, std::string& id, std::string& name, int& discNo) {
     const std::vector<uint8_t> head = readAt(f, 0, 0x60);
     if (head.size() < 0x20) return;
-    if (discHeader(head, id, name)) return;  // plain .iso / .gcm
+    if (discHeader(head, id, name, discNo)) return;  // plain .iso / .gcm
     if (std::memcmp(head.data(), "WBFS", 4) == 0) {
         const unsigned shift = head[8];
-        if (shift >= 9 && shift <= 16) discHeader(readAt(f, 1u << shift, 0x60), id, name);
+        if (shift >= 9 && shift <= 16) discHeader(readAt(f, 1u << shift, 0x60), id, name, discNo);
     } else if (std::memcmp(head.data(), "WIA\x01", 4) == 0 || std::memcmp(head.data(), "RVZ\x01", 4) == 0) {
-        discHeader(readAt(f, 0x58, 0x60), id, name);  // a copy of the disc header is stored at 0x58
+        discHeader(readAt(f, 0x58, 0x60), id, name, discNo);  // a copy of the disc header is stored at 0x58
     } else if (std::memcmp(head.data(), "CISO", 4) == 0) {
-        discHeader(readAt(f, 0x8000, 0x60), id, name);
+        discHeader(readAt(f, 0x8000, 0x60), id, name, discNo);
     } else if (le32(head.data()) == 0xB10BC001) {  // GCZ: zlib-compressed blocks
         const uint32_t blocks = le32(&head[0x1C]);
         if (blocks == 0 || blocks > (1u << 24)) return;
@@ -180,7 +227,7 @@ void gameCubeWiiId(std::ifstream& f, std::string& id, std::string& name) {
         const uint64_t p0 = le64(&ptrs[0]), p1 = blocks > 1 ? le64(&ptrs[8]) & ~kRaw : le64(&head[8]);
         const uint64_t start = 0x20 + uint64_t(blocks) * 12 + (p0 & ~kRaw);
         if (p0 & kRaw) {
-            discHeader(readAt(f, start, 0x60), id, name);
+            discHeader(readAt(f, start, 0x60), id, name, discNo);
             return;
         }
         const uint64_t size = std::min<uint64_t>(p1 - (p0 & ~kRaw), 1u << 20);
@@ -193,7 +240,7 @@ void gameCubeWiiId(std::ifstream& f, std::string& id, std::string& name) {
         z.avail_out = uInt(disc.size());
         inflate(&z, Z_SYNC_FLUSH);
         inflateEnd(&z);
-        if (z.avail_out == 0) discHeader(disc, id, name);
+        if (z.avail_out == 0) discHeader(disc, id, name, discNo);
     }
 }
 
@@ -323,7 +370,12 @@ LibraryGame readGame(const fs::path& path, System console, bool folder) {
     if (!f) return g;
     if (console == System::GameCube || console == System::Wii) {
         std::string name;
-        gameCubeWiiId(f, g.gameId, name);
+        gameCubeWiiId(f, g.gameId, name, g.disc);
+        std::string base;
+        if (const int n = discInName(g.fileName, &base)) {
+            g.disc = n;  // the name says which disc it is
+            g.title = cleanTitle(base);
+        }
         // Files named after their ID ("RMGE01.wbfs") or "game.iso" get the name from the disc.
         const bool plainName = validId(g.title, 6) || lower(g.title) == "game" || lower(g.title) == "disc";
         const bool printable = !name.empty() && std::all_of(name.begin(), name.end(), [](char c) {
@@ -341,6 +393,11 @@ LibraryGame readGame(const fs::path& path, System console, bool folder) {
 }
 
 }  // namespace
+
+LibraryGame readGameInfo(const fs::path& path, System console) {
+    std::error_code ec;
+    return readGame(path, console, fs::is_directory(path, ec));
+}
 
 std::vector<LibraryGame> Library::scan(const fs::path& folder, System console) {
     std::vector<LibraryGame> games;
@@ -370,11 +427,47 @@ std::vector<LibraryGame> Library::scan(const fs::path& folder, System console) {
             } else if (e.is_regular_file(ec2)) {
                 const std::string ext = lowerExt(p);
                 const System s = systemFromExtension(ext);
+                if (ext == ".nca") continue;  // pieces of games / firmware (open one with File > Open)
                 if (ext == ".zip" || (s != System::Unknown && family(s) == family(console))) add(p, false);
             }
         }
     };
     walk(folder, 0);
+
+    // A game on several discs (GameCube) shows once, with one cover: its discs are found by the
+    // game's ID (the same on every disc, with the disc number next to it) or by their names
+    // ("(Disc 1)", "(Disc 2)"). Starting it gives the emulator every disc.
+    if (console == System::GameCube || console == System::Wii) {
+        std::map<std::string, std::vector<size_t>> groups;
+        for (size_t i = 0; i < games.size(); ++i) {
+            const LibraryGame& g = games[i];
+            if (g.disc == 0) continue;
+            std::string base;
+            if (!g.gameId.empty()) groups["id:" + g.gameId].push_back(i);
+            else if (discInName(g.fileName, &base)) groups["name:" + lower((g.path.parent_path() / base).u8string())].push_back(i);
+        }
+        std::vector<bool> drop(games.size(), false);
+        for (auto& [key, list] : groups) {
+            std::sort(list.begin(), list.end(), [&](size_t a, size_t b) {
+                return games[a].disc != games[b].disc ? games[a].disc < games[b].disc : games[a].path < games[b].path;
+            });
+            std::vector<size_t> picked;  // one file per disc
+            for (const size_t i : list)
+                if (picked.empty() || games[picked.back()].disc != games[i].disc) picked.push_back(i);
+            if (picked.size() < 2) continue;  // one disc (maybe two copies of it): nothing to join
+            LibraryGame& first = games[picked.front()];
+            for (const size_t i : picked) {
+                first.discs.push_back(games[i].path);
+                if (i != picked.front()) drop[i] = true;
+            }
+            std::string base;
+            if (discInName(first.title, &base)) first.title = cleanTitle(base);  // "Game Disc 1" -> "Game"
+        }
+        std::vector<LibraryGame> kept;
+        for (size_t i = 0; i < games.size(); ++i)
+            if (!drop[i]) kept.push_back(std::move(games[i]));
+        games = std::move(kept);
+    }
 
     std::sort(games.begin(), games.end(), [](const LibraryGame& a, const LibraryGame& b) {
         const std::string x = lower(a.title), y = lower(b.title);

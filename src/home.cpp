@@ -1,6 +1,7 @@
 #include "home.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace fs = std::filesystem;
 
@@ -23,6 +24,23 @@ const Color kButtonHover{82, 82, 94};
 constexpr float kCoverSizes[] = {0.55f, 0.67f, 0.8f, 1.0f, 1.2f, 1.45f, 1.75f, 2.1f};
 constexpr int kNormalSize = 3;
 constexpr int kMinStep = -kNormalSize, kMaxStep = int(sizeof kCoverSizes / sizeof kCoverSizes[0]) - 1 - kNormalSize;
+
+// The shape of a console's game boxes (width / height), from its USA covers: NES and GameCube boxes
+// are tall, SNES and N64 boxes wide, Game Boy boxes square. Every cover is shown in this shape.
+float boxShape(System s) {
+    switch (s) {
+    case System::SNES:
+    case System::N64: return 1.43f;
+    case System::GB:
+    case System::GBC:
+    case System::GBA: return 1.0f;
+    case System::NDS:
+    case System::N3DS: return 1.12f;
+    case System::Wii:
+    case System::WiiU: return 0.715f;
+    default: return 0.70f;  // NES, GameCube
+    }
+}
 
 bool inside(const SDL_Rect& r, int x, int y) { return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h; }
 
@@ -105,6 +123,12 @@ void Home::refresh() {
     lastScan_ = SDL_GetTicks();
 }
 
+std::string Home::titleFor(const fs::path& game) const {
+    for (const LibraryGame& g : games_)
+        if (g.path == game) return g.title;
+    return {};
+}
+
 void Home::selectConsole(int index) {
     const int n = int(homeConsoles().size());
     console_ = (index % n + n) % n;
@@ -157,9 +181,11 @@ Home::Layout Home::layout(Text& t, const SDL_Rect& area) const {
     L.folderButton = {L.header.x + L.header.w - L.margin - bw, L.header.y + (L.header.h - bh) / 2, bw, bh};
     L.grid = {area.x, L.header.y + L.header.h, area.w, std::max(0, area.y + area.h - L.header.y - L.header.h)};
 
+    // Boxes take about the same room on every console (128 x 180 for a tall box), in its own shape.
     const float z = kCoverSizes[kNormalSize + coverSize_];
-    L.cardW = int(128 * s * z);
-    L.coverH = int(180 * s * z);
+    const float shape = boxShape(homeConsoles()[size_t(console_)].system);
+    L.cardW = int(std::sqrt(128.0f * 180.0f * shape) * s * z);
+    L.coverH = int(std::sqrt(128.0f * 180.0f / shape) * s * z);
     L.cardH = L.coverH + int(8 * s) + 2 * t.lineHeight();
     L.gapX = int(22 * s * std::min(z, 1.0f));
     L.gapY = int(22 * s * std::min(z, 1.0f));
@@ -176,10 +202,13 @@ SDL_Rect Home::cardRect(const Layout& L, int i) const {
             L.grid.y + L.margin / 2 + (i / L.cols) * (L.cardH + L.gapY) - scroll_, L.cardW, L.cardH};
 }
 
+// Only the box itself can be clicked: not the title under it, or the space between games.
 int Home::cardAt(const Layout& L, int x, int y) const {
     if (!inside(L.grid, x, y)) return -1;
-    for (int i = 0; i < int(games_.size()); ++i)
-        if (inside(cardRect(L, i), x, y)) return i;
+    for (int i = 0; i < int(games_.size()); ++i) {
+        const SDL_Rect card = cardRect(L, i);
+        if (inside({card.x, card.y, L.cardW, L.coverH}, x, y)) return i;
+    }
     return -1;
 }
 
@@ -304,14 +333,9 @@ void Home::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
         const LibraryGame& g = games_[size_t(i)];
         const bool hot = i == hover || (showSelected_ && i == selected_);
 
-        SDL_Rect cover{card.x, card.y, L.cardW, L.coverH};
+        // Every box fills the same space (the console's box shape), so they're all the same size.
+        const SDL_Rect cover{card.x, card.y, L.cardW, L.coverH};
         if (SDL_Texture* tex = covers_.get(g)) {
-            // Fit the box inside the cover space, standing on its bottom edge like on a shelf.
-            int tw = 0, th = 0;
-            SDL_QueryTexture(tex, nullptr, nullptr, &tw, &th);
-            const double k = std::min(double(L.cardW) / tw, double(L.coverH) / th);
-            const int w = int(tw * k), h = int(th * k);
-            cover = {card.x + (L.cardW - w) / 2, card.y + L.coverH - h, w, h};
             SDL_RenderCopy(r, tex, nullptr, &cover);
         } else {
             // No cover (yet): a plain box with the console and the title.

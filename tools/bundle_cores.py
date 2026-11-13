@@ -162,6 +162,14 @@ def main():
                 shutil.copy2(cached, dest)
         except Exception as e:  # noqa: BLE001 - report every failure at the end
             failed.append(f"{core}: {e}")
+    # Cores that are no longer bundled (left in the folder by an older build) are removed, so they
+    # don't ship.
+    wanted = {f"{core}_libretro{ext}" for core in CORES}
+    if os.path.isdir(args.dest):
+        for name in os.listdir(args.dest):
+            if name.endswith(f"_libretro{ext}") and name not in wanted:
+                os.remove(os.path.join(args.dest, name))
+                print(f"  removed {name} (no longer bundled)")
     if args.system_dest:
         try:
             fetch_system_data(args.cache, args.system_dest, args.update)

@@ -317,6 +317,8 @@ std::vector<SettingGroup> wiiU() {
               "Keeps sound smooth when the game briefly slows down (loading, new effects)"),
           opt("Rumble", "cemu_rumble_strength",
               {{"0", "Off"}, {"50", "50%"}, {"75", "75%"}, {"100", "100%"}}),
+          opt("GamePad Motion", "cemu_gamepad_motion", kOnOff, false,
+              "Tilting a controller with a gyro (DualShock 4, DualSense, Switch Pro) tilts the GamePad, e.g. to aim"),
           opt("Stick Dead Zone", "cemu_stick_deadzone_p1",
               {{"0", "Off"}, {"10", "10%"}, {"15", "15%"}, {"20", "20%"}, {"25", "25%"}, {"30", "30%"}}, false,
               "Raise this if a character drifts without you touching the stick")}},

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the Windows version of Nintendall and its setup.exe, from Linux.
 #
-# Needs (Debian/Ubuntu): sudo apt install mingw-w64 libz-mingw-w64-dev nsis cmake python3 curl
+# Needs (Debian/Ubuntu): sudo apt install mingw-w64 libz-mingw-w64-dev nsis cmake python3 curl 7zip
 # Output: dist/Nintendall-<version>-setup.exe
 set -euo pipefail
 
