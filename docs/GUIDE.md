@@ -61,10 +61,8 @@ GameCube / Wii discs and Wii U games) to the library's list of game names:
   doesn't count as a close name, and a game that's in the list without a USA
   release gets a plain box with its title (Nintendall looks again a week later).
 
-Covers that Nintendall 1.3.1 or older downloaded for the wrong game are noticed
-and replaced once; pictures you put there yourself are never touched. To see
-which cover a game gets: `nintendall --covers <game files>`. Only the game's
-name is sent, to that one site.
+To see which cover a game gets: `nintendall --covers <game files>`. Only the
+game's name is sent, to that one site.
 
 ### Saves
 
