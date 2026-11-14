@@ -211,7 +211,22 @@ std::string joinWords(const std::vector<std::string>& w) {
 struct Index {
     std::vector<std::string> names;
     std::unordered_map<std::string, std::vector<size_t>> byKey;  // joined name words -> names
+    // The words before " - " in names with a subtitle: "Donkey Kong Country 2 - Diddy's Kong
+    // Quest" is found as "donkeykongcountry2".
+    std::unordered_map<std::string, std::vector<size_t>> bySeries;
 };
+
+void buildIndex(Index& idx) {
+    for (size_t i = 0; i < idx.names.size(); ++i) {
+        const std::string& n = idx.names[i];
+        idx.byKey[joinWords(nameWords(n))].push_back(i);
+        const size_t dash = n.find(" - ");
+        if (dash != std::string::npos && dash < n.find('(')) {
+            const std::vector<std::string> series = nameWords(n.substr(0, dash));
+            if (series.size() >= 2) idx.bySeries[joinWords(series)].push_back(i);
+        }
+    }
+}
 
 std::string urlDecode(const std::string& s) {
     std::string out;
@@ -257,9 +272,62 @@ bool isRegionTag(const std::string& tag) {
     return false;
 }
 
-// Picks the best-looking entry: USA first, then World / Europe / Japan, skipping hacks, betas and
-// prototypes unless the file is one too. Other tags the file has ("(Rev 1)") count too.
+// A region tag of the name says USA: "(USA)", "(USA, Europe)", "(Japan, USA)"...
+bool isUsaRegion(const std::string& name) {
+    for (size_t a = name.find('('); a != std::string::npos; a = name.find('(', a + 1)) {
+        const size_t b = name.find(')', a);
+        if (b == std::string::npos) break;
+        const std::string tag = name.substr(a, b - a + 1);
+        if (isRegionTag(tag) && tag.find("USA") != std::string::npos) return true;
+    }
+    return false;
+}
+
+// A list of languages, like "(En,Fr,De)": says nothing about which box it is.
+bool isLanguageTag(const std::string& tag) {
+    if (tag.size() < 4 || tag.front() != '(' || tag.back() != ')') return false;
+    const std::string in = tag.substr(1, tag.size() - 2);
+    size_t i = 0;
+    while (i < in.size()) {
+        if (i + 2 > in.size() || !std::isupper(static_cast<unsigned char>(in[i])) ||
+            !std::islower(static_cast<unsigned char>(in[i + 1])))
+            return false;
+        i += 2;
+        if (i < in.size() && in[i] != ',') return false;
+        ++i;
+    }
+    return true;
+}
+
+// Picks the best-looking entry: the USA box first (then a World one), and the plain release: tags
+// the file has ("(Rev 1)") count for it, other tags against it ("(Virtual Console)", "(Switch
+// Online)", "(Mega Man X Legacy Collection)" are re-releases with other boxes). Hacks, betas and
+// prototypes only for a file that is one too.
 int score(const std::string& name, const std::string& fileName) {
+    if (name == fileName) return 1 << 30;
+    auto has = [](const std::string& s, const char* t) { return s.find(t) != std::string::npos; };
+    int sc = 0;
+    for (size_t a = fileName.find('('); a != std::string::npos; a = fileName.find('(', a + 1)) {
+        const size_t b = fileName.find(')', a);
+        if (b == std::string::npos) break;
+        const std::string tag = fileName.substr(a, b - a + 1);
+        if (!isRegionTag(tag) && !isLanguageTag(tag) && has(name, tag.c_str())) sc += 40;
+    }
+    for (size_t a = name.find('('); a != std::string::npos; a = name.find('(', a + 1)) {
+        const size_t b = name.find(')', a);
+        if (b == std::string::npos) break;
+        const std::string tag = name.substr(a, b - a + 1);
+        if (!isRegionTag(tag) && !isLanguageTag(tag) && !has(fileName, tag.c_str())) sc -= 15;
+    }
+    if (isUsaRegion(name)) sc += 100;
+    else if (has(name, "(World")) sc += 60;
+    for (const char* bad : {"[h", "[b", "[t", "(Beta", "(Proto", "(Demo", "(Sample", "(Pirate", "(Unl", "(Hack", "[a"})
+        if (has(name, bad) && !has(fileName, bad)) sc -= 50;
+    return sc * 1000 - int(std::min<size_t>(name.size(), 999));  // then the shortest name
+}
+
+// The ranking of Nintendall 1.3.1 and earlier (see bestMatchV1).
+int scoreV1(const std::string& name, const std::string& fileName) {
     if (name == fileName) return 1000;
     auto has = [](const std::string& s, const char* t) { return s.find(t) != std::string::npos; };
     int sc = 0;
@@ -279,8 +347,100 @@ int score(const std::string& name, const std::string& fileName) {
     return sc * 1000 - int(std::min<size_t>(name.size(), 999));  // then the shortest name
 }
 
-// True for a USA release: "(USA)", "(USA, Europe)", "(Japan, USA)"...
+// True for a USA release: "(USA)", "(USA, Europe)", "(Japan, USA)"..., and "(World)" (one release
+// for every country, the USA one included: "Super Mario Bros. (World)").
 bool isUsaName(const std::string& name) {
+    for (size_t a = name.find('('); a != std::string::npos; a = name.find('(', a + 1)) {
+        const size_t b = name.find(')', a);
+        if (b == std::string::npos) break;
+        const std::string tag = name.substr(a, b - a + 1);
+        if (isRegionTag(tag) && (tag.find("USA") != std::string::npos || tag.find("World") != std::string::npos))
+            return true;
+    }
+    return false;
+}
+
+// A word that makes another game of a series: "2", "3D", "II", "64"...
+bool isSequelWord(const std::string& w) {
+    if (!w.empty() && std::isdigit(static_cast<unsigned char>(w[0]))) return true;
+    static const char* const roman[] = {"ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"};
+    return std::any_of(std::begin(roman), std::end(roman), [&](const char* r) { return w == r; });
+}
+
+// The names matching a game's name, USA releases only.
+//  - The same words ("Legend of Zelda, The (USA)" for "The Legend of Zelda.nes"). If the list has
+//    the game but not its USA release, there's no match: guessing would pick another game.
+//  - Otherwise close names: every word of the game's name is in the cover's name, which has at most
+//    2 more, and none that make it another game of the series ("Pokemon Red" -> "Pokemon - Red
+//    Version", never "Super Mario Bros." -> "Super Mario Bros. 2"). Fewest extra words wins.
+std::vector<size_t> findNames(const Index& idx, const std::string& fileName, const std::string& title) {
+    std::vector<size_t> found;
+    bool listed = false;  // the game is in the list (in any region)
+    for (const std::string& n : {fileName, title}) {
+        const auto it = idx.byKey.find(joinWords(nameWords(n)));
+        if (it == idx.byKey.end()) continue;
+        listed = true;
+        for (const size_t i : it->second)
+            if (isUsaName(idx.names[i])) found.push_back(i);
+        if (!found.empty()) return found;
+    }
+    if (listed) return {};
+    // The game's name followed by a subtitle: "Donkey Kong Country 2" -> "Donkey Kong Country 2 -
+    // Diddy's Kong Quest (USA)", "Super Mario Land 2" -> "Super Mario Land 2 - 6 Golden Coins".
+    for (const std::string& n : {fileName, title}) {
+        const auto it = idx.bySeries.find(joinWords(nameWords(n)));
+        if (it == idx.bySeries.end()) continue;
+        for (const size_t i : it->second)
+            if (isUsaName(idx.names[i])) found.push_back(i);
+        if (!found.empty()) return found;
+    }
+    for (const std::string& n : {fileName, title}) {
+        // Close names: every word of the game's name is in the cover's name, which has at most 2
+        // more ("Pokemon Red" -> "Pokemon - Red Version"). Fewest extra words wins.
+        const std::vector<std::string> want = nameWords(n);
+        if (want.size() < 2) continue;
+        const std::set<std::string> wantSet(want.begin(), want.end());
+        size_t bestExtra = 3;
+        for (size_t i = 0; i < idx.names.size(); ++i) {
+            if (!isUsaName(idx.names[i])) continue;
+            const std::vector<std::string> w = nameWords(idx.names[i]);
+            if (w.size() < want.size() || w.size() - want.size() > 2 || w.size() - want.size() > bestExtra) continue;
+            const std::set<std::string> have(w.begin(), w.end());
+            if (!std::all_of(wantSet.begin(), wantSet.end(), [&](const std::string& x) { return have.count(x) > 0; }))
+                continue;
+            if (std::any_of(w.begin(), w.end(), [&](const std::string& x) { return !wantSet.count(x) && isSequelWord(x); }))
+                continue;  // another game of the series
+            if (w.size() - want.size() < bestExtra) {
+                bestExtra = w.size() - want.size();
+                found.clear();
+            }
+            found.push_back(i);
+        }
+        if (!found.empty()) break;
+    }
+    return found;
+}
+
+// The cover's name for a game: its USA release ("" if the list has none).
+std::string bestMatch(const Index& idx, const std::string& fileName, const std::string& title) {
+    const std::vector<size_t> found = findNames(idx, fileName, title);
+    std::string best;
+    int bestScore = 0;
+    for (const size_t i : found) {
+        const int sc = score(idx.names[i], fileName);
+        if (best.empty() || sc > bestScore) {
+            best = idx.names[i];
+            bestScore = sc;
+        }
+    }
+    return best;
+}
+
+// ---- The matching of Nintendall 1.3.1 and earlier, only to recognise covers it downloaded (it
+// could pick another game: "Super Mario Bros. (World)" wasn't USA, so it took "Super Mario Bros. 2 (USA)").
+
+// True for a USA release: "(USA)", "(USA, Europe)", "(Japan, USA)"...
+bool isUsaNameV1(const std::string& name) {
     for (size_t a = name.find('('); a != std::string::npos; a = name.find('(', a + 1)) {
         const size_t b = name.find(')', a);
         if (b == std::string::npos) break;
@@ -291,13 +451,13 @@ bool isUsaName(const std::string& name) {
 }
 
 // The names matching a game's name (only USA releases if usaOnly): the same words, or else close names.
-std::vector<size_t> findNames(const Index& idx, const std::string& fileName, const std::string& title, bool usaOnly) {
+std::vector<size_t> findNamesV1(const Index& idx, const std::string& fileName, const std::string& title, bool usaOnly) {
     std::vector<size_t> found;
     for (const std::string& n : {fileName, title}) {
         const auto it = idx.byKey.find(joinWords(nameWords(n)));
         if (it == idx.byKey.end()) continue;
         for (const size_t i : it->second)
-            if (!usaOnly || isUsaName(idx.names[i])) found.push_back(i);
+            if (!usaOnly || isUsaNameV1(idx.names[i])) found.push_back(i);
         if (!found.empty()) break;
     }
     for (const std::string& n : {fileName, title}) {
@@ -309,7 +469,7 @@ std::vector<size_t> findNames(const Index& idx, const std::string& fileName, con
         const std::set<std::string> wantSet(want.begin(), want.end());
         size_t bestExtra = 3;
         for (size_t i = 0; i < idx.names.size(); ++i) {
-            if (usaOnly && !isUsaName(idx.names[i])) continue;
+            if (usaOnly && !isUsaNameV1(idx.names[i])) continue;
             const std::vector<std::string> w = nameWords(idx.names[i]);
             if (w.size() < want.size() || w.size() - want.size() > 2 || w.size() - want.size() > bestExtra) continue;
             const std::set<std::string> have(w.begin(), w.end());
@@ -326,12 +486,12 @@ std::vector<size_t> findNames(const Index& idx, const std::string& fileName, con
 }
 
 // The cover's name for a game: only USA releases ("" if the game has none in the library).
-std::string bestMatch(const Index& idx, const std::string& fileName, const std::string& title) {
-    const std::vector<size_t> found = findNames(idx, fileName, title, true);
+std::string bestMatchV1(const Index& idx, const std::string& fileName, const std::string& title) {
+    const std::vector<size_t> found = findNamesV1(idx, fileName, title, true);
     std::string best;
     int bestScore = 0;
     for (const size_t i : found) {
-        const int sc = score(idx.names[i], fileName);
+        const int sc = scoreV1(idx.names[i], fileName);
         if (best.empty() || sc > bestScore) {
             best = idx.names[i];
             bestScore = sc;
@@ -364,6 +524,8 @@ struct Covers::Shared {
     void run();
     Image load(const Request& r);
     std::vector<uint8_t> download(const Request& r, bool& reached);
+    bool oldWrongDownload(const Request& r, const fs::path& file);
+    std::map<System, std::set<std::string>> checked;  // covers already checked by oldWrongDownload
     const Index& index(System s);
     int get(const std::string& url, std::vector<uint8_t>& body, bool& reached) {
         if (offline()) return 0;
@@ -432,7 +594,7 @@ const Index& Covers::Shared::index(System s) {
     }
     Index& idx = indexes[s];
     idx.names = std::move(names);
-    for (size_t i = 0; i < idx.names.size(); ++i) idx.byKey[joinWords(nameWords(idx.names[i]))].push_back(i);
+    buildIndex(idx);
     return idx;
 }
 
@@ -454,18 +616,67 @@ std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
     return {};
 }
 
+// Nintendall 1.3.1 and earlier could download another game's cover ("Super Mario Bros. 2" for
+// "Super Mario Bros."). Each cover is checked once: if the old matching picks another name than
+// today's and the file is exactly that download, it's the wrong cover, and true is returned so it's
+// replaced. Covers the player put there are never touched (they aren't that exact file).
+bool Covers::Shared::oldWrongDownload(const Request& r, const fs::path& file) {
+    const fs::path list = cacheDir / systemInfo(r.system).key / "covers-checked.txt";
+    auto it = checked.find(r.system);
+    if (it == checked.end()) {
+        it = checked.emplace(r.system, std::set<std::string>{}).first;
+        std::ifstream f(list);
+        for (std::string line; std::getline(f, line);)
+            if (!line.empty()) it->second.insert(line);
+    }
+    if (it->second.count(r.fileName)) return false;
+    auto markChecked = [&] {
+        it->second.insert(r.fileName);
+        std::error_code ec;
+        fs::create_directories(list.parent_path(), ec);
+        std::ofstream(list, std::ios::app) << r.fileName << "\n";
+    };
+    const char* sys = libretroSystem(r.system);
+    if (!sys) {
+        markChecked();
+        return false;
+    }
+    const Index& idx = index(r.system);
+    if (idx.names.empty()) return false;  // the list isn't available yet: checked another time
+    const std::string old = bestMatchV1(idx, r.fileName, r.title);
+    if (old.empty() || old == bestMatch(idx, r.fileName, r.title)) {
+        markChecked();
+        return false;
+    }
+    std::vector<uint8_t> was, mine;
+    bool reached = false;
+    const int status = get("https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/" + urlEncode(old) + ".png",
+                           was, reached);
+    if (status != 200 && status != 404) return false;  // offline or server trouble: another time
+    markChecked();
+    return status == 200 && readFile(file, mine) && mine == was;
+}
+
 Image Covers::Shared::load(const Request& r) {
     Image img;
     std::vector<uint8_t> bytes;
     std::error_code ec;
 
-    // A picture in the Box Covers folder is always used as it is (never replaced).
-    if (const fs::path have = findCoverFile(r.folder, r.fileName); !have.empty()) {
+    // A picture in the Box Covers folder is always used as it is (never replaced), except a cover
+    // an older Nintendall downloaded for the wrong game (see oldWrongDownload): that one is
+    // downloaded again.
+    fs::path have = findCoverFile(r.folder, r.fileName);
+    if (!have.empty() && oldWrongDownload(r, have)) {
+        fs::remove(have, ec);
+        have.clear();
+    }
+    if (!have.empty()) {
         if (readFile(have, bytes)) img.file = have;
     } else {
         // No picture yet: download the USA cover in the best quality there is (unless it was
         // looked for in the last week and doesn't exist), and save it in the Box Covers folder.
-        const fs::path none = cacheDir / systemInfo(r.system).key / ("usa - " + safeFileName(r.fileName) + ".none");
+        // ("usa2": notes from older versions don't count, their matching missed "(World)" covers.)
+        const fs::path none = cacheDir / systemInfo(r.system).key / ("usa2 - " + safeFileName(r.fileName) + ".none");
         if (fs::exists(none, ec) && !olderThan(none, kRetryMissing)) return img;
         bool reached = false;
         bytes = download(r, reached);
@@ -620,7 +831,7 @@ std::string coverUrl(const fs::path& cacheDir, System system, const std::string&
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (!line.empty()) idx.names.push_back(line);
     }
-    for (size_t i = 0; i < idx.names.size(); ++i) idx.byKey[joinWords(nameWords(idx.names[i]))].push_back(i);
+    buildIndex(idx);
     const std::string best = bestMatch(idx, fileName, title);
     return best.empty() ? std::string()
                         : "https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/" + urlEncode(best) + ".png";

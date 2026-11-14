@@ -4,6 +4,7 @@
 //   nintendall                      open the window (drag games in, or File > Open)
 //   nintendall <game file>          detect the system and play it
 //   nintendall --detect <files...>  print what system each file is for
+//   nintendall --covers <files...>  print the box cover each game gets (from the saved name lists)
 //
 // Options:
 //   --fullscreen         start fullscreen
@@ -19,7 +20,9 @@
 #include <vector>
 
 #include "app.hpp"
+#include "covers.hpp"
 #include "detect.hpp"
+#include "library.hpp"
 #include "paths.hpp"
 #include "systems.hpp"
 
@@ -46,11 +49,32 @@ static int detectOnly(const std::vector<std::string>& files) {
     return unknown ? 2 : 0;
 }
 
+// The box cover each game gets: the name in libretro's list, found the way the home screen does,
+// using the lists of names Nintendall has saved (the home screen downloads them).
+static int coversOnly(const std::vector<std::string>& files) {
+    Paths paths;
+    paths.init();
+    int none = 0;
+    for (const auto& f : files) {
+        const fs::path p = fs::u8path(f);
+        const Detection d = detectGame(p);
+        const LibraryGame g = readGameInfo(p, d.system);
+        const std::string url = coverUrl(paths.data / "covers", g.system, g.fileName, g.title);
+        std::string name = url.substr(url.rfind('/') + 1);
+        for (size_t at; (at = name.find('%')) != std::string::npos && at + 2 < name.size();)
+            name.replace(at, 3, std::string(1, char(std::stoi(name.substr(at + 1, 2), nullptr, 16))));
+        if (url.empty()) ++none;
+        std::printf("%-52s -> %s\n", p.filename().u8string().c_str(), url.empty() ? "(no USA cover)" : name.c_str());
+    }
+    return none ? 2 : 0;
+}
+
 static void usage() {
     std::puts(
         "Nintendall " NINTENDALL_VERSION "\n"
         "usage: nintendall [game] [--fullscreen]\n"
         "       nintendall --detect FILE...\n"
+        "       nintendall --covers FILE...\n"
         "       nintendall GAME --frames N [--screenshot out.png] [--hold a,start]");
 }
 
@@ -58,7 +82,7 @@ int main(int argc, char** argv) {
     LaunchOptions opt;
     std::string start;
     std::vector<std::string> detectFiles;
-    bool detect = false;
+    bool detect = false, covers = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -68,6 +92,8 @@ int main(int argc, char** argv) {
             return 0;
         } else if (a == "--detect") {
             detect = true;
+        } else if (a == "--covers") {
+            covers = true;
         } else if (a == "--fullscreen") {
             opt.fullscreen = true;
         } else if (a == "--frames") {
@@ -77,13 +103,14 @@ int main(int argc, char** argv) {
             opt.screenshot = next();
         } else if (a == "--hold") {
             opt.holdButtons = Input::parseButtons(next());
-        } else if (detect) {
+        } else if (detect || covers) {
             detectFiles.push_back(a);
         } else {
             start = a;
         }
     }
 
+    if (covers) return coversOnly(detectFiles);
     if (detect) return detectOnly(detectFiles);
     if (opt.headless && start.empty()) {
         std::fprintf(stderr, "--frames needs a game file\n");

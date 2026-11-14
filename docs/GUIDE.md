@@ -48,11 +48,23 @@ from the [libretro thumbnail library](https://thumbnails.libretro.com) and
 saves it in that folder. A picture that's already there is never replaced.
 Covers are found by matching the game's name (its file name, or the name inside
 GameCube / Wii discs and Wii U games) to the library's list of game names:
-No-Intro names like `Super Mario Bros. 3 (USA).nes` match exactly, and close
-names like `Pokemon Red.gb` usually match too. Only USA releases are used
-(`(USA)`, `(USA, Europe)`, `(Japan, USA)`...); a game with no USA cover there
-gets a plain box with its title (Nintendall looks again a week later). Only the
-game's name is sent, to that one site.
+
+- Only the USA box is used: `(USA)`, `(USA, Europe)`, `(Japan, USA)`..., or
+  `(World)` for games released the same everywhere (`Super Mario Bros. (World)`).
+  A plain release beats re-releases (`(Virtual Console)`, `(Switch Online)`,
+  collections), unless the file is one.
+- No-Intro names like `Super Mario Bros. 3 (USA).nes` match exactly; short names
+  like `Super Mario Bros.nes` or `Pokemon Red.gb` match too, and so do names
+  without the subtitle (`Donkey Kong Country 2.sfc` finds "Donkey Kong Country 2
+  - Diddy's Kong Quest").
+- A game is never given another game's cover: a sequel (`Super Mario Bros. 2`)
+  doesn't count as a close name, and a game that's in the list without a USA
+  release gets a plain box with its title (Nintendall looks again a week later).
+
+Covers that Nintendall 1.3.1 or older downloaded for the wrong game are noticed
+and replaced once; pictures you put there yourself are never touched. To see
+which cover a game gets: `nintendall --covers <game files>`. Only the game's
+name is sent, to that one site.
 
 ### Saves
 
