@@ -75,10 +75,19 @@ goes there. To change it, set `saves.folder` in `nintendall.cfg`.
 - **NES, SNES, N64, Game Boy, Game Boy Color, Game Boy Advance and DS:** each
   game's save is a file named like the game file:
   `Saves/SNES/Super Mario World (USA).srm` is the save of
-  `Games/SNES/Super Mario World (USA).sfc`. (Saves from older versions of
+  `Games/SNES/Super Mario World (USA).sfc`. Famicom Disk System games keep
+  their disk changes as `Saves/NES/<game>.ips`. (Saves from older versions of
   Nintendall move there by themselves.)
 - **GameCube:** the memory card's saves (`.gci` files) are in
   `Saves/GameCube/USA`, `EUR` and `JPN`, like in Dolphin's own `GC` folder.
+- **Wii, Wii U and 3DS:** one folder per game, named with the game's name and
+  ID (`Saves/Wii/Mario Kart Wii [524d4345]`), holding just that game's save
+  files, laid out like Dolphin's, Cemu's and Citra's own save folders. The
+  emulator works on its own copy; before a game starts and after it stops,
+  Nintendall brings the two in step, and the newer copy of each game's save
+  wins.
+
+Save states (F5) are not in the Saves folder; they're in `states/` (see below).
 
 **Saves from other emulators:** put the save file in the console's Saves
 folder, renamed to the game file's name, and start the game. Nintendall uses it
@@ -109,8 +118,10 @@ that console. Nintendall puts it where its emulator keeps that game's save:
 | Wii U (Cemu) | the game's folder in Cemu's `mlc01/usr/save/00050000` (named like `101c9400`) |
 | 3DS (Citra, Azahar) | the game's folder in `sdmc/Nintendo 3DS/.../title/00040000` (named like `00030700`) |
 
-The save that was there is kept in the `Imported` folder (as "... (before)"),
-and the folder you put there is moved to `Imported` too.
+A folder named like the emulator's (`524d4345`, `101c9400`, `00030700`) is
+used as it is, if it's newer than the save Nintendall has for that game. For
+the other names, the save that was there is kept in the `Imported` folder
+(as "... (before)"), and the folder you put there is moved to `Imported` too.
 
 Under the hood it's a **libretro frontend**. The emulation is done by one proven,
 open-source emulator "core" per system, bundled in `cores/` next to the program.
@@ -507,7 +518,7 @@ User data lives in `~/.local/share/Nintendall/` (Linux),
 (Windows). Put a file called `portable.txt` next to the program to keep everything
 beside it instead.
 
-- `saves/`: the emulators' own folders (Dolphin's Wii system memory, Wii U and 3DS saves); battery and GameCube saves are in the Saves folder (see Saves)
+- `saves/`: the emulators' own folders (Dolphin's Wii system memory, Cemu's and Azahar's); every game's save files are also in the Saves folder (see Saves)
 - `states/`: save states
 - `system/`: BIOS / firmware files that some cores need
 - `config/`: per-core settings (`<core>.opt`, editable)
@@ -529,7 +540,7 @@ saves are in the Saves folder next to it (see Saves).
 | `src/vkrender.*` | Vulkan device and frame copy for Wii U |
 | `src/app.*` | main window, menu actions, game loop, saves |
 | `src/discord.*` | Discord status (Rich Presence, through the Discord app's local connection) |
-| `src/saves.*` | the Saves folder: other emulators' save files (conversion and Imported folder) |
+| `src/saves.*` | the Saves folder: other emulators' save files (conversion and Imported folder), Wii / Wii U / 3DS save sync |
 | `src/home.*`, `src/library.*`, `src/covers.*`, `src/http.*` | home screen, Games folder scanning (and game IDs), box cover downloads |
 | `src/update.*`, `src/selfupdate.*`, `src/sha256.*` | checks GitHub for a new version at startup; Update Now (download, check, install, restart) |
 | `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |

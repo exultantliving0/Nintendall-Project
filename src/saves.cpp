@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <map>
+#include <set>
 
 #include "library.hpp"
 
@@ -188,10 +190,6 @@ FolderImport importSaveFolders(const fs::path& dir, System console, const Emulat
         switch (console) {
         case System::Wii: {
             std::string id4;
-            if (isHex(name, 8)) {
-                target = to.wiiTitles / low;
-                break;
-            }
             if ((name.size() == 4 || name.size() == 6) && std::all_of(name.begin(), name.end(), [](char c) {
                     return std::isalnum(static_cast<unsigned char>(c)) != 0;
                 }))
@@ -206,7 +204,7 @@ FolderImport importSaveFolders(const fs::path& dir, System console, const Emulat
             break;
         }
         case System::WiiU: {
-            std::string id = isHex(name, 16) ? low.substr(8) : isHex(name, 8) ? low : std::string();
+            std::string id = isHex(name, 16) ? low.substr(8) : std::string();  // (8 digits: the sync's own)
             if (id.empty() && low == gameName) {
                 const std::string full = wiiUTitleId(game);
                 if (!full.empty()) id = full.substr(8);
@@ -216,7 +214,7 @@ FolderImport importSaveFolders(const fs::path& dir, System console, const Emulat
             break;
         }
         case System::N3DS: {
-            const std::string id = isHex(name, 16) ? low.substr(8) : isHex(name, 8) ? low : std::string();
+            const std::string id = isHex(name, 16) ? low.substr(8) : std::string();  // (8 digits: the sync's own)
             if (id.empty()) continue;
             target = to.n3dsTitles / id;
             break;
@@ -258,4 +256,157 @@ FolderImport importSaveFolders(const fs::path& dir, System console, const Emulat
         result.used.push_back(name);
     }
     return result;
+}
+
+// ============================================================================
+// Wii, Wii U and 3DS saves in the Saves folder (see syncSaveFolders in saves.hpp)
+
+namespace {
+
+// The game ID in a Saves folder's name: "524d4345", or "Mario Kart Wii [524d4345]". "" if none.
+std::string idInName(const std::string& name, size_t len) {
+    if (isHex(name, len)) return lowerCase(name);
+    if (name.size() >= len + 2 && name.back() == ']' && name[name.size() - len - 2] == '[') {
+        const std::string id = name.substr(name.size() - len - 1, len);
+        if (isHex(id, len)) return lowerCase(id);
+    }
+    return {};
+}
+
+// Every file under dir (relative path -> full path).
+std::map<std::string, fs::path> filesIn(const fs::path& dir) {
+    std::map<std::string, fs::path> files;
+    std::error_code ec;
+    for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator();
+         it.increment(ec)) {
+        std::error_code ec2;
+        if (it->is_regular_file(ec2)) files[fs::relative(it->path(), dir, ec2).generic_u8string()] = it->path();
+    }
+    return files;
+}
+
+bool sameFiles(const fs::path& a, const fs::path& b) {
+    const auto fa = filesIn(a), fb = filesIn(b);
+    if (fa.size() != fb.size()) return false;
+    std::vector<uint8_t> x, y;
+    for (const auto& [rel, path] : fa) {
+        const auto it = fb.find(rel);
+        std::error_code ec;
+        if (it == fb.end() || fs::file_size(path, ec) != fs::file_size(it->second, ec)) return false;
+        if (!readAll(path, x) || !readAll(it->second, y) || x != y) return false;
+    }
+    return true;
+}
+
+// (min(), not {}: the file clock's zero can be in the future, so today's times are below it.)
+fs::file_time_type newestFile(const fs::path& dir) {
+    fs::file_time_type newest = fs::file_time_type::min();
+    for (const auto& [rel, path] : filesIn(dir)) {
+        std::error_code ec;
+        const auto t = fs::last_write_time(path, ec);
+        if (!ec && t > newest) newest = t;
+    }
+    return newest;
+}
+
+// Replaces `to` with a copy of `from` (the files keep their times, so the two compare as equal).
+bool copyFolder(const fs::path& from, const fs::path& to) {
+    std::error_code ec;
+    const fs::path temp = to.u8string() + ".copying";
+    fs::remove_all(temp, ec);
+    fs::create_directories(temp, ec);
+    fs::copy(from, temp, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        fs::remove_all(temp, ec);
+        return false;
+    }
+    for (const auto& [rel, path] : filesIn(from)) {
+        std::error_code ec2;
+        const auto t = fs::last_write_time(path, ec2);
+        if (!ec2) fs::last_write_time(temp / fs::u8path(rel), t, ec2);
+    }
+    fs::remove_all(to, ec);
+    if (ec) {
+        fs::remove_all(temp, ec);
+        return false;
+    }
+    fs::create_directories(to.parent_path(), ec);
+    fs::rename(temp, to, ec);
+    return !ec;
+}
+
+std::string folderName(std::string name) {
+    std::string out;
+    for (const char c : name) out += std::strchr("<>:\"/\\|?*", c) || static_cast<unsigned char>(c) < 32 ? ' ' : c;
+    while (!out.empty() && (out.back() == ' ' || out.back() == '.')) out.pop_back();
+    return out;
+}
+
+}  // namespace
+
+std::string saveFolderId(System console, const fs::path& game, const std::string& gameId) {
+    if (console == System::Wii && gameId.size() >= 4) {
+        char hex[16];
+        std::snprintf(hex, sizeof hex, "%02x%02x%02x%02x", unsigned(uint8_t(gameId[0])), unsigned(uint8_t(gameId[1])),
+                      unsigned(uint8_t(gameId[2])), unsigned(uint8_t(gameId[3])));
+        return hex;
+    }
+    if (console == System::WiiU) {
+        const std::string full = wiiUTitleId(game);
+        if (!full.empty()) return full.substr(8);
+    }
+    return {};
+}
+
+SyncCount syncSaveFolders(const fs::path& savesDir, const SaveFolderSync& emu, const std::string& currentId,
+                          const std::string& currentName) {
+    SyncCount count;
+    std::error_code ec;
+    // The games' folders on each side, by ID.
+    std::map<std::string, fs::path> inEmu, inSaves;
+    for (const auto& e : fs::directory_iterator(emu.emulator, ec)) {
+        std::error_code ec2;
+        const std::string name = e.path().filename().u8string();
+        if (e.is_directory(ec2) && isHex(name, emu.idLength) &&
+            (emu.inner.empty() || fs::is_directory(e.path() / emu.inner, ec2)))
+            inEmu[lowerCase(name)] = e.path();
+    }
+    for (const auto& e : fs::directory_iterator(savesDir, ec)) {
+        std::error_code ec2;
+        const std::string id = e.is_directory(ec2) ? idInName(e.path().filename().u8string(), emu.idLength) : "";
+        if (!id.empty() && !inSaves.count(id)) inSaves[id] = e.path();
+    }
+    std::set<std::string> ids;
+    for (const auto& [id, p] : inEmu) ids.insert(id);
+    for (const auto& [id, p] : inSaves) ids.insert(id);
+
+    const std::string current = lowerCase(currentId);
+    for (const std::string& id : ids) {
+        // The Saves folder: named with the game's name too when it's the game being played.
+        fs::path saved = inSaves.count(id) ? inSaves[id] : fs::path();
+        const std::string wanted = id == current && !folderName(currentName).empty()
+                                       ? folderName(currentName) + " [" + id + "]"
+                                       : (saved.empty() ? id : saved.filename().u8string());
+        if (!saved.empty() && saved.filename().u8string() != wanted && !fs::exists(savesDir / fs::u8path(wanted), ec)) {
+            std::error_code ec2;
+            fs::rename(saved, savesDir / fs::u8path(wanted), ec2);
+            if (!ec2) saved = savesDir / fs::u8path(wanted);
+        }
+        if (saved.empty()) saved = savesDir / fs::u8path(wanted);
+        const fs::path emuGame = inEmu.count(id) ? inEmu[id] : emu.emulator / id;
+        const fs::path a = emu.inner.empty() ? emuGame : emuGame / emu.inner;
+        const fs::path b = emu.inner.empty() ? saved : saved / emu.inner;
+        // A side counts only with save files in it (an empty folder isn't a save).
+        const bool haveA = fs::is_directory(a, ec) && !filesIn(a).empty();
+        const bool haveB = fs::is_directory(b, ec) && !filesIn(b).empty();
+        if (!haveA && !haveB) continue;
+        if (haveA && haveB && sameFiles(a, b)) continue;
+        // The newer copy wins; on a tie the emulator's (the one the game used).
+        if (haveA && (!haveB || newestFile(a) >= newestFile(b))) {
+            if (copyFolder(a, b)) ++count.toSaves;
+        } else if (haveB) {
+            if (copyFolder(b, a)) ++count.toEmulator;
+        }
+    }
+    return count;
 }

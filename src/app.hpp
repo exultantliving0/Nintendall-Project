@@ -21,6 +21,7 @@
 #include "netplay.hpp"
 #include "menubar.hpp"
 #include "paths.hpp"
+#include "saves.hpp"
 #include "settingsdialog.hpp"
 #include "text.hpp"
 #include "update.hpp"
@@ -77,6 +78,16 @@ private:
     void runFrames();
     void saveSram(bool force);
     void loadSram();
+    // Wii, Wii U and 3DS saves in the Saves folder: the running game's console and its folders.
+    struct SaveSyncGame {
+        System system = System::Unknown;
+        std::filesystem::path folder;  // Saves/<console>
+        std::string id, title;         // the game's save ID and name ("" if not known)
+    };
+    SaveSyncGame saveSync_;
+    bool emulatorSaves(System s, SaveFolderSync& out) const;
+    void syncSaves();
+    std::filesystem::path saveDirFor(const char* coreName, System system, const std::filesystem::path& game) const;
     // Discord status: "Playing Nintendall" with the game, its console and its box cover.
     void startDiscord();
     std::string discordAppId() const;  // Nintendall's Discord application ("" = none: no status)

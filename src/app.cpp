@@ -572,6 +572,13 @@ bool App::startGame(const fs::path& path) {
         if (!imported.problem.empty()) saveNote = imported.problem;
         else if (!imported.used.empty()) saveNote = "Using the save from " + imported.used.front();
         for (const std::string& n : imported.used) std::fprintf(stderr, "Imported save folder %s\n", n.c_str());
+        // The game's saves in the Saves folder and the emulator's copy, brought in step (again
+        // when the game stops: see stopGame).
+        saveSync_ = SaveSyncGame{det.system, savesFolderFor(savesRoot_, home_.gamesRoot(), path, det.system),
+                                 saveFolderId(det.system, path, info.gameId), info.title};
+        syncSaves();
+    } else {
+        saveSync_ = SaveSyncGame{};
     }
 
     // 4. Start the emulator with the game. GPU systems try the chosen renderer first, then fall
@@ -580,7 +587,7 @@ bool App::startGame(const fs::path& path) {
     std::vector<Renderer> renderers;
     std::string startNote;
     for (size_t attempt = 0; attempt == 0 || attempt < renderers.size(); ++attempt) {
-        core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(coreName), paths_.saves,
+        core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(coreName), saveDirFor(coreName, det.system, path),
                                                paths_.config / (std::string(coreName) + ".opt"));
         const bool coreLoaded = core_->load(corePath, err);
         if (coreLoaded && lanPending_ && usesDolphinLan(det.system) && !lanApi(*core_).ok()) {
@@ -759,6 +766,7 @@ void App::stopGame() {
     if (!core_) return;
     saveSram(true);
     core_.reset();
+    syncSaves();  // the save the game just made goes to the Saves folder
     wiiUTouchHint_ = false;
     input_.stopAllRumble();
     audio_.clear();
@@ -795,6 +803,56 @@ std::vector<std::string> App::recentGames() const {
         if (!p.empty()) list.push_back(p);
     }
     return list;
+}
+
+// ---- Wii, Wii U and 3DS saves in the Saves folder -----------------------------
+
+// Where each emulator keeps its saves: one folder per game, by ID.
+bool App::emulatorSaves(System s, SaveFolderSync& out) const {
+    switch (s) {
+    case System::Wii:
+        out = {paths_.saves / "User" / "Wii" / "title" / "00010000", 8, "data"};
+        return true;
+    case System::WiiU:
+        out = {paths_.saves / "Cemu" / "mlc01" / "usr" / "save" / "00050000", 8, ""};
+        return true;
+    case System::N3DS: {
+        const char* zeros = "00000000000000000000000000000000";
+        out = {paths_.saves / "Azahar" / "sdmc" / "Nintendo 3DS" / zeros / zeros / "title" / "00040000", 8, "data"};
+        return true;
+    }
+    default: return false;
+    }
+}
+
+void App::syncSaves() {
+    SaveFolderSync emu;
+    if (saveSync_.system == System::Unknown || !emulatorSaves(saveSync_.system, emu)) return;
+    std::error_code ec;
+    fs::create_directories(saveSync_.folder, ec);
+    const SyncCount n = syncSaveFolders(saveSync_.folder, emu, saveSync_.id, saveSync_.title);
+    if (n.toSaves || n.toEmulator)
+        std::fprintf(stderr, "Saves folder: %d save(s) copied there, %d to the emulator\n", n.toSaves, n.toEmulator);
+}
+
+// The save folder an emulator gets: Nintendall's own data folder, except Mesen's, whose only files
+// there are Famicom Disk System disk saves (.ips): they go in Saves/NES with the NES saves.
+fs::path App::saveDirFor(const char* coreName, System system, const fs::path& game) const {
+    if (std::string(coreName) != "mesen") return paths_.saves;
+    const fs::path dir = savesFolderFor(savesRoot_, home_.gamesRoot(), game, system);
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    // Disk saves made by older versions move there (unless one with that name is there already).
+    for (const auto& e : fs::directory_iterator(paths_.saves, ec)) {
+        std::error_code ec2;
+        if (!e.is_regular_file(ec2) || e.path().extension() != ".ips") continue;
+        const fs::path to = dir / e.path().filename();
+        if (!fs::exists(to, ec2)) {
+            fs::rename(e.path(), to, ec2);
+            if (ec2 && fs::copy_file(e.path(), to, ec2)) fs::remove(e.path(), ec2);
+        }
+    }
+    return dir;
 }
 
 // ---- Discord status ----------------------------------------------------------
