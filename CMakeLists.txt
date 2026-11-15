@@ -31,6 +31,7 @@ add_executable(nintendall
   src/covers.cpp
   src/discord.cpp
   src/saves.cpp
+  src/aes.cpp
   src/crashlog.cpp
   src/detect.cpp
   src/filedialog.cpp

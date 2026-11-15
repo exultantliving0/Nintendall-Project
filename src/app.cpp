@@ -590,9 +590,23 @@ bool App::startGame(const fs::path& path) {
         to.n3dsTitles = paths_.saves / "Azahar" / "sdmc" / "Nintendo 3DS" / zeros / zeros / "title" / "00040000";
         const LibraryGame info = readGameInfo(path, det.system);
         FolderImport imported;
+        if (det.system == System::Wii) {
+            // A Wii save file from a Wii's SD card or a save site (data.bin) put in the Saves folder.
+            std::map<std::string, std::string> names;
+            if (const std::string id = saveFolderId(det.system, path, info.gameId); !id.empty()) names[id] = info.title;
+            try {
+                imported = importWiiDataBins(savesFolderFor(savesRoot_, home_.gamesRoot(), path, det.system),
+                                             wiiTitles(""), names);
+            } catch (const std::exception& e) {
+                imported.problem = std::string("Couldn't use the Wii save file: ") + e.what();
+            }
+            for (const std::string& n : imported.used) std::fprintf(stderr, "Imported Wii save file %s\n", n.c_str());
+        }
         try {
-            imported = importSaveFolders(savesFolderFor(savesRoot_, home_.gamesRoot(), path, det.system), det.system, to,
-                                         path, info.gameId);
+            FolderImport folders = importSaveFolders(savesFolderFor(savesRoot_, home_.gamesRoot(), path, det.system),
+                                                     det.system, to, path, info.gameId);
+            if (!folders.problem.empty()) imported.problem = folders.problem;
+            imported.used.insert(imported.used.end(), folders.used.begin(), folders.used.end());
         } catch (const std::exception& e) {
             imported.problem = std::string("Couldn't use the save folders: ") + e.what();
         }
@@ -852,15 +866,15 @@ bool App::emulatorSaves(System s, SaveFolderSync& out) const {
     switch (s) {
     case System::Wii:
         // Discs' saves, then channels' (Virtual Console and WiiWare; game channels).
-        out = {wiiTitles(), 8, "data"};
+        out = {wiiTitles(), 8, "data", {}, {}};
         out.alsoIn = {wiiTitles("00010001"), wiiTitles("00010004")};
         return true;
     case System::WiiU:
-        out = {paths_.saves / "Cemu" / "mlc01" / "usr" / "save" / "00050000", 8, ""};
+        out = {paths_.saves / "Cemu" / "mlc01" / "usr" / "save" / "00050000", 8, "", {}, {}};
         return true;
     case System::N3DS: {
         const char* zeros = "00000000000000000000000000000000";
-        out = {paths_.saves / "Azahar" / "sdmc" / "Nintendo 3DS" / zeros / zeros / "title" / "00040000", 8, "data"};
+        out = {paths_.saves / "Azahar" / "sdmc" / "Nintendo 3DS" / zeros / zeros / "title" / "00040000", 8, "data", {}, {}};
         return true;
     }
     default: return false;
@@ -882,8 +896,12 @@ void App::syncSaves() {
     }
 }
 
-// Dolphin's Wii saves: title/00010000 (discs), 00010001 (Virtual Console, WiiWare), 00010004 (game channels).
-fs::path App::wiiTitles(const std::string& type) const { return paths_.saves / "User" / "Wii" / "title" / type; }
+// Dolphin's Wii saves: title/00010000 (discs), 00010001 (Virtual Console, WiiWare), 00010004 (game
+// channels); "" = the title folder itself.
+fs::path App::wiiTitles(const std::string& type) const {
+    const fs::path root = paths_.saves / "User" / "Wii" / "title";
+    return type.empty() ? root : root / type;
+}
 
 // At start: every Wii, Wii U and 3DS save the emulators have is copied to the Saves folder (and
 // the other way, the newer copy winning, like when a game starts), named with the game's name
@@ -909,6 +927,14 @@ void App::syncAllSaves() {
             if (n.toSaves || n.toEmulator)
                 std::fprintf(stderr, "Saves folder (%s): %d save(s) copied there, %d to the emulator\n",
                              systemInfo(console).fullName, n.toSaves, n.toEmulator);
+            if (console == System::Wii) {
+                // Wii save files (data.bin) put in the Saves folder: unpacked into both.
+                const FolderImport bins = importWiiDataBins(folder, wiiTitles(""), names);
+                for (const std::string& u : bins.used) std::fprintf(stderr, "Imported Wii save file %s\n", u.c_str());
+                if (!bins.problem.empty()) std::fprintf(stderr, "Wii save file: %s\n", bins.problem.c_str());
+                if (!bins.used.empty()) osd("Using the Wii save from " + bins.used.front(), 6000);
+                else if (!bins.problem.empty()) osd(bins.problem, 6000);
+            }
         } catch (const std::exception& e) {
             std::fprintf(stderr, "Saves folder (%s): couldn't copy the saves: %s\n", systemInfo(console).fullName, e.what());
         }

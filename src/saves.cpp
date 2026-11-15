@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 
+#include "aes.hpp"
 #include "library.hpp"
 
 namespace fs = std::filesystem;
@@ -241,6 +242,242 @@ std::string wiiUTitleId(const fs::path& game) {
 }
 
 }  // namespace
+
+namespace {
+
+// (Below, with the Wii / Wii U / 3DS save sync.)
+std::string idInName(const std::string& name, size_t len);
+std::map<std::string, fs::path> filesIn(const fs::path& dir);
+std::string folderName(std::string name);
+
+// ---- data.bin (a Wii save copied to an SD card) ----
+// Layout (as Dolphin reads it, Core/HW/WiiSave.cpp): a 0xF0C0-byte header (title ID, banner),
+// encrypted; a 0x80-byte "Bk" header (number of files); then each file or folder: a 0x80-byte
+// header (size, type, name, IV) and its data, encrypted, padded to 64 bytes. The key is the Wii's
+// SD card key, the same on every Wii.
+constexpr uint8_t kSdKey[16] = {0xab, 0x01, 0xb9, 0xd8, 0xe1, 0x62, 0x2b, 0x08,
+                                0xaf, 0xba, 0xd8, 0x4d, 0xbf, 0xc2, 0xa5, 0x5d};
+constexpr uint8_t kSdIv[16] = {0x21, 0x67, 0x12, 0xe6, 0xaa, 0x1f, 0x68, 0x9f,
+                               0x95, 0xc5, 0xa2, 0x23, 0x24, 0xdc, 0x6a, 0x98};
+constexpr size_t kHeaderSize = 0xF0C0, kBkSize = 0x80, kFileHeaderSize = 0x80;
+
+uint32_t be32(const uint8_t* p) { return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3]; }
+
+struct WiiDataBin {
+    uint64_t titleId = 0;
+    std::vector<uint8_t> banner;
+    struct Entry {
+        std::string path;  // inside the save's data folder, "/" between folders
+        bool folder = false;
+        std::vector<uint8_t> data;
+    };
+    std::vector<Entry> entries;
+};
+
+// A part of a name, the way Dolphin keeps it on the computer (Common::EscapeFileName).
+std::string nandName(const std::string& name) {
+    if (std::all_of(name.begin(), name.end(), [](char c) { return c == '.'; })) {
+        std::string out;
+        for (size_t i = 0; i < name.size(); ++i) out += "__2e__";
+        return out;
+    }
+    std::string escaped;
+    for (size_t i = 0; i < name.size();) {
+        if (name.compare(i, 2, "__") == 0) {
+            escaped += "__5f____5f__";
+            i += 2;
+        } else {
+            escaped += name[i++];
+        }
+    }
+    std::string out;
+    for (char c : escaped) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if (u <= 0x1F || u == 0x7F || std::strchr("\"*/:<>?\\|", c)) {
+            char hex[8];
+            std::snprintf(hex, sizeof hex, "__%02x__", u);
+            out += hex;
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+bool readWiiDataBin(const fs::path& file, WiiDataBin& out) {
+    std::error_code ec;
+    const uintmax_t size = fs::file_size(file, ec);
+    if (ec || size < kHeaderSize + kBkSize || size > (64u << 20)) return false;
+    std::vector<uint8_t> d;
+    if (!readAll(file, d) || d.size() < kHeaderSize + kBkSize) return false;
+    // The "Bk" header isn't encrypted: a quick check before decrypting anything.
+    const uint8_t* bk = d.data() + kHeaderSize;
+    if (be32(bk) != 0x70 || be32(bk + 4) != 0x426B0001) return false;
+    std::vector<uint8_t> h(d.begin(), d.begin() + std::ptrdiff_t(kHeaderSize));
+    uint8_t iv[16];
+    std::memcpy(iv, kSdIv, 16);
+    aes128CbcDecrypt(kSdKey, iv, h.data(), h.size());
+    const uint32_t bannerSize = be32(&h[8]);
+    if (bannerSize < 0x72A0 || bannerSize > 0xF0A0 || (bannerSize - 0x60A0) % 0x1200 != 0) return false;
+    out.titleId = uint64_t(be32(&h[0])) << 32 | be32(&h[4]);
+    if ((out.titleId >> 32) >> 16 != 0x0001) return false;  // (Wii titles: 0001xxxx)
+    out.banner.assign(h.begin() + 0x20, h.begin() + 0x20 + std::ptrdiff_t(bannerSize));
+
+    const uint32_t count = be32(bk + 12);
+    if (count > 10000) return false;
+    size_t at = kHeaderSize + kBkSize;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (at + kFileHeaderSize > d.size()) return false;
+        const uint8_t* fh = d.data() + at;
+        if (be32(fh) != 0x03ADF17E) return false;
+        const uint32_t fileSize = be32(fh + 4);
+        const uint8_t type = fh[10];
+        if (type != 1 && type != 2) return false;
+        const char* name = reinterpret_cast<const char*>(fh + 11);
+        WiiDataBin::Entry e;
+        e.path.assign(name, strnlen(name, 0x40));
+        e.folder = type == 2;
+        // Only names inside the save's folder.
+        std::string part;
+        for (size_t p = 0; p <= e.path.size(); ++p) {
+            if (p < e.path.size() && e.path[p] != '/') {
+                part += e.path[p];
+                continue;
+            }
+            if (part.empty() || part == "." || part == "..") return false;
+            part.clear();
+        }
+        at += kFileHeaderSize;
+        if (!e.folder) {
+            const size_t padded = (size_t(fileSize) + 63) & ~size_t(63);
+            if (at + padded > d.size()) return false;
+            e.data.assign(d.begin() + std::ptrdiff_t(at), d.begin() + std::ptrdiff_t(at + padded));
+            uint8_t fileIv[16];
+            std::memcpy(fileIv, fh + 0x50, 16);
+            aes128CbcDecrypt(kSdKey, fileIv, e.data.data(), e.data.size());
+            e.data.resize(fileSize);
+            at += padded;
+        }
+        out.entries.push_back(std::move(e));
+    }
+    return true;
+}
+
+// The save's files as Dolphin keeps them (a "data" folder's contents), written into `dir`.
+bool writeWiiSave(const WiiDataBin& save, const fs::path& dir) {
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    if (ec) return false;
+    auto put = [](const fs::path& p, const std::vector<uint8_t>& data) {
+        std::ofstream f(p, std::ios::binary | std::ios::trunc);
+        f.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));
+        return bool(f);
+    };
+    if (!put(dir / "banner.bin", save.banner)) return false;
+    for (const WiiDataBin::Entry& e : save.entries) {
+        fs::path p = dir;
+        std::string part;
+        for (size_t i = 0; i <= e.path.size(); ++i) {
+            if (i == e.path.size() || e.path[i] == '/') {
+                p /= fs::u8path(nandName(part));
+                part.clear();
+            } else {
+                part += e.path[i];
+            }
+        }
+        if (e.folder) {
+            fs::create_directories(p, ec);
+            if (ec) return false;
+        } else {
+            fs::create_directories(p.parent_path(), ec);
+            if (!put(p, e.data)) return false;
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
+FolderImport importWiiDataBins(const fs::path& dir, const fs::path& titles, const std::map<std::string, std::string>& names) {
+    FolderImport result;
+    // What was put there: a .bin file, or a folder holding data.bin files (not a save folder).
+    std::vector<std::pair<fs::path, std::vector<fs::path>>> found;  // what to move to Imported, its data.bin files
+    for (const auto& e : entriesIn(dir)) {
+        std::error_code ec;
+        const std::string name = e.path().filename().u8string();
+        if (e.is_regular_file(ec) && lowerCase(e.path().extension().u8string()) == ".bin") {
+            found.push_back({e.path(), {e.path()}});
+        } else if (e.is_directory(ec) && name != "Imported" && idInName(name, 8).empty()) {
+            std::vector<fs::path> bins;
+            fs::recursive_directory_iterator it(e.path(), ec), end;
+            for (; !ec && it != end; it.increment(ec)) {
+                std::error_code ec2;
+                if (it.depth() > 6) it.disable_recursion_pending();
+                if (it->is_regular_file(ec2) && lowerCase(it->path().filename().u8string()) == "data.bin")
+                    bins.push_back(it->path());
+            }
+            if (!bins.empty()) found.push_back({e.path(), bins});
+        }
+    }
+    std::sort(found.begin(), found.end());
+
+    for (const auto& [top, bins] : found) {
+        // All of them must be Wii saves (a folder with other things in it is left alone).
+        std::vector<WiiDataBin> saves(bins.size());
+        bool ok = true;
+        for (size_t i = 0; i < bins.size() && ok; ++i) ok = readWiiDataBin(bins[i], saves[i]);
+        if (!ok) continue;
+        const std::string topName = top.filename().u8string();
+        for (const WiiDataBin& save : saves) {
+            char hi[9], id[9];
+            std::snprintf(hi, sizeof hi, "%08x", unsigned(save.titleId >> 32));
+            std::snprintf(id, sizeof id, "%08x", unsigned(save.titleId & 0xFFFFFFFFu));
+            // The game's save folder in Saves (the one there, or a new one named after the game).
+            fs::path saved;
+            for (const auto& e : entriesIn(dir)) {
+                std::error_code ec;
+                if (e.is_directory(ec) && idInName(e.path().filename().u8string(), 8) == id) saved = e.path();
+            }
+            if (saved.empty()) {
+                const auto known = names.find(id);
+                const std::string name = known == names.end() ? "" : folderName(known->second);
+                saved = dir / fs::u8path(name.empty() ? std::string(id) : name + " [" + id + "]");
+            }
+            const fs::path emulator = titles / hi / id / "data";
+            // Keep the save that's there: Imported/"<folder> (before)".
+            std::error_code ec;
+            const fs::path old = fs::is_directory(saved / "data", ec) && !filesIn(saved / "data").empty() ? saved / "data"
+                                 : fs::is_directory(emulator, ec) && !filesIn(emulator).empty()          ? emulator
+                                                                                                        : fs::path();
+            if (!old.empty()) {
+                const std::string keepName = saved.filename().u8string();
+                fs::path keep = dir / "Imported" / fs::u8path(keepName + " (before)") / "data";
+                for (int n = 2; fs::exists(keep.parent_path(), ec) && n < 1000; ++n)
+                    keep = dir / "Imported" / fs::u8path(keepName + " (before " + std::to_string(n) + ")") / "data";
+                fs::create_directories(keep, ec);
+                fs::copy(old, keep, fs::copy_options::recursive, ec);
+                if (ec) {
+                    result.problem = "Couldn't keep a copy of the save that was there, so " + topName + " wasn't used";
+                    ok = false;
+                    break;
+                }
+            }
+            if (!writeWiiSave(save, saved / "data") || !writeWiiSave(save, emulator)) {
+                result.problem = "Couldn't unpack " + topName;
+                ok = false;
+                break;
+            }
+        }
+        if (!ok) continue;
+        if (!moveToImported({top})) {
+            result.problem = topName + " was used but couldn't be moved to the Imported folder";
+            continue;
+        }
+        result.used.push_back(topName);
+    }
+    return result;
+}
 
 FolderImport importSaveFolders(const fs::path& dir, System console, const EmulatorSaveFolders& to, const fs::path& game,
                                const std::string& gameId) {

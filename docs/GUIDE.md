@@ -125,6 +125,15 @@ used as it is, if it's newer than the save Nintendall has for that game. For
 the other names, the save that was there is kept in the `Imported` folder
 (as "... (before)"), and the folder you put there is moved to `Imported` too.
 
+**Wii save files (`data.bin`):** the file a Wii makes when a save is copied to
+an SD card (Wii Options > Data Management > Save Data, `private/wii/title/<ID>/data.bin`
+on the card), which is also how save sites offer Wii saves. Put the file in
+`Saves/Wii/Saves` (any name works: `save.bin`, `Mario Kart Wii.bin`), or the
+whole `private` folder (or the game's folder from it), then start Nintendall or
+any Wii game. The file says which game it's for: Nintendall unpacks it into
+that game's save folder and Dolphin's, keeps the save that was there in
+`Imported` (as "... (before)"), and moves the file to `Imported`.
+
 Under the hood it's a **libretro frontend**. The emulation is done by one proven,
 open-source emulator "core" per system, bundled in `cores/` next to the program.
 Nintendall provides the app around them: game detection, the window and menus,
@@ -542,7 +551,8 @@ saves and save states are in the Saves folder next to it (see Saves).
 | `src/vkrender.*` | Vulkan device and frame copy for Wii U |
 | `src/app.*` | main window, menu actions, game loop, saves |
 | `src/discord.*` | Discord status (Rich Presence, through the Discord app's local connection) |
-| `src/saves.*` | the Saves folder: other emulators' save files (conversion and Imported folder), Wii / Wii U / 3DS save sync |
+| `src/saves.*` | the Saves folder: other emulators' save files (conversion and Imported folder), Wii save files (data.bin), Wii / Wii U / 3DS save sync |
+| `src/aes.*` | AES-128 decryption (for Wii save files) |
 | `src/crashlog.*` | crash.txt: what Nintendall was doing when it closed unexpectedly, and where it crashed (Windows) |
 | `src/home.*`, `src/library.*`, `src/covers.*`, `src/http.*` | home screen, Games folder scanning (and game IDs), box cover downloads |
 | `src/update.*`, `src/selfupdate.*`, `src/sha256.*` | checks GitHub for a new version at startup; Update Now (download, check, install, restart) |

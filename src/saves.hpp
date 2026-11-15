@@ -98,6 +98,15 @@ struct FolderImport {
     std::vector<std::string> used;  // folder names used
     std::string problem;            // why one couldn't be used ("" = none)
 };
+// Wii saves the way a Wii copies them to an SD card (Data Management: private/wii/title/<ID>/data.bin)
+// and save sites offer them: a .bin file put in Saves/Wii/Saves (any name: "save.bin"), or a folder
+// put there with a data.bin in it ("private", "RMCE"). The save is unpacked into the game's save
+// folder there and into Dolphin's (`titles`: its Wii/title folder), replacing the save that was
+// there, which is kept in Imported ("... (before)"); then the file (or folder) is moved to Imported.
+// names: game names by ID, for naming a new save folder.
+FolderImport importWiiDataBins(const std::filesystem::path& dir, const std::filesystem::path& titles,
+                               const std::map<std::string, std::string>& names);
+
 // game: the game being started (its file name and ID are matched to folders named like it).
 FolderImport importSaveFolders(const std::filesystem::path& dir, System console, const EmulatorSaveFolders& to,
                                const std::filesystem::path& game, const std::string& gameId);
