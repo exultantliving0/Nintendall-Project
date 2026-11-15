@@ -50,12 +50,67 @@ std::vector<fs::directory_entry> entriesIn(const fs::path& dir) {
     return entries;
 }
 
+namespace {
+const char* const kSavesSub = "Saves";
+const char* const kStatesSub = "States";
+
+// Moves a file or folder unless its new place is taken.
+bool moveIfFree(const fs::path& from, const fs::path& to) {
+    std::error_code ec;
+    if (fs::exists(to, ec) || ec) return false;
+    fs::create_directories(to.parent_path(), ec);
+    fs::rename(from, to, ec);
+    if (ec) {
+        ec.clear();
+        fs::copy(from, to, fs::copy_options::recursive, ec);
+        if (ec) {
+            std::error_code ec2;
+            fs::remove_all(to, ec2);
+            return false;
+        }
+        fs::remove_all(from, ec);
+    }
+    return true;
+}
+}  // namespace
+
 void createSaveFolders(const fs::path& savesRoot) {
     std::error_code ec;
-    for (const HomeConsole& c : homeConsoles()) fs::create_directories(savesRoot / fs::u8path(c.folder), ec);
+    for (const HomeConsole& c : homeConsoles())
+        for (const char* sub : {kSavesSub, kStatesSub}) fs::create_directories(savesRoot / fs::u8path(c.folder) / sub, ec);
 }
 
-fs::path savesFolderFor(const fs::path& savesRoot, const fs::path& gamesRoot, const fs::path& game, System system) {
+int organizeSaveFolders(const fs::path& savesRoot, const fs::path& oldStates) {
+    int moved = 0;
+    for (const HomeConsole& c : homeConsoles()) {
+        const fs::path console = savesRoot / fs::u8path(c.folder);
+        for (const auto& e : entriesIn(console)) {
+            const std::string name = e.path().filename().u8string();
+            if (name == kSavesSub || name == kStatesSub || name == "desktop.ini" || name == ".DS_Store") continue;
+            if (moveIfFree(e.path(), console / kSavesSub / e.path().filename())) ++moved;
+        }
+    }
+    // "<game>.<key>.state<slot>" -> Saves/<console>/States/<game>.state<slot>
+    for (const auto& e : entriesIn(oldStates)) {
+        std::error_code ec;
+        if (!e.is_regular_file(ec)) continue;
+        const std::string file = e.path().filename().u8string();
+        const size_t at = file.rfind(".state");
+        if (at == std::string::npos || at == 0) continue;
+        const size_t dot = file.rfind('.', at - 1);
+        if (dot == std::string::npos || dot == 0) continue;
+        const std::string key = file.substr(dot + 1, at - dot - 1);
+        System system = System::Unknown;
+        for (System s : allSystems())
+            if (key == systemInfo(s).key) system = s;
+        if (system == System::Unknown) continue;
+        const fs::path to = statesFolderFor(savesRoot, {}, {}, system) / fs::u8path(file.substr(0, dot) + file.substr(at));
+        if (moveIfFree(e.path(), to)) ++moved;
+    }
+    return moved;
+}
+
+fs::path consoleFolderFor(const fs::path& savesRoot, const fs::path& gamesRoot, const fs::path& game, System system) {
     std::error_code ec;
     const fs::path rel = game.empty() || gamesRoot.empty() ? fs::path() : fs::relative(game, gamesRoot, ec);
     if (!ec && !rel.empty() && *rel.begin() != ".." && std::distance(rel.begin(), rel.end()) >= 2)
@@ -65,6 +120,14 @@ fs::path savesFolderFor(const fs::path& savesRoot, const fs::path& gamesRoot, co
     for (const HomeConsole& c : homeConsoles())
         if (c.system == system) return savesRoot / fs::u8path(c.folder);
     return savesRoot;
+}
+
+fs::path savesFolderFor(const fs::path& savesRoot, const fs::path& gamesRoot, const fs::path& game, System system) {
+    return consoleFolderFor(savesRoot, gamesRoot, game, system) / kSavesSub;
+}
+
+fs::path statesFolderFor(const fs::path& savesRoot, const fs::path& gamesRoot, const fs::path& game, System system) {
+    return consoleFolderFor(savesRoot, gamesRoot, game, system) / kStatesSub;
 }
 
 std::vector<fs::path> importSave(const fs::path& dir, const std::string& name, System system, std::vector<uint8_t>& ram) {

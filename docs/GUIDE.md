@@ -66,29 +66,32 @@ game's name is sent, to that one site.
 
 ### Saves
 
-Game saves are in the **Saves** folder next to the Games folder
-(`Documents/Nintendall/Saves/<console>/`), and **File > Open Saves Folder**
-goes there. To change it, set `saves.folder` in `nintendall.cfg`.
+Game saves and save states are in the **Saves** folder next to the Games folder,
+with a folder per console, and **File > Open Saves Folder** goes there. To change
+it, set `saves.folder` in `nintendall.cfg`. Each console's folder has two folders:
+
+- `Saves/<console>/Saves`: the games' own saves (what the game saves itself)
+- `Saves/<console>/States`: save states (F5), named like the game file with the
+  slot number: `Saves/SNES/States/Super Mario World (USA).state1`
+
+(Saves and save states from older versions of Nintendall move there by themselves.)
 
 - **NES, SNES, N64, Game Boy, Game Boy Color, Game Boy Advance and DS:** each
   game's save is a file named like the game file:
-  `Saves/SNES/Super Mario World (USA).srm` is the save of
+  `Saves/SNES/Saves/Super Mario World (USA).srm` is the save of
   `Games/SNES/Super Mario World (USA).sfc`. Famicom Disk System games keep
-  their disk changes as `Saves/NES/<game>.ips`. (Saves from older versions of
-  Nintendall move there by themselves.)
+  their disk changes as `Saves/NES/Saves/<game>.ips`.
 - **GameCube:** the memory card's saves (`.gci` files) are in
-  `Saves/GameCube/USA`, `EUR` and `JPN`, like in Dolphin's own `GC` folder.
+  `Saves/GameCube/Saves/USA`, `EUR` and `JPN`, like in Dolphin's own `GC` folder.
 - **Wii, Wii U and 3DS:** one folder per game, named with the game's name and
-  ID (`Saves/Wii/Mario Kart Wii [524d4345]`), holding just that game's save
+  ID (`Saves/Wii/Saves/Mario Kart Wii [524d4345]`), holding just that game's save
   files, laid out like Dolphin's, Cemu's and Citra's own save folders. The
   emulator works on its own copy; before a game starts and after it stops,
   Nintendall brings the two in step, and the newer copy of each game's save
   wins.
 
-Save states (F5) are not in the Saves folder; they're in `states/` (see below).
-
 **Saves from other emulators:** put the save file in the console's Saves
-folder, renamed to the game file's name, and start the game. Nintendall uses it
+folder (`Saves/<console>/Saves`), renamed to the game file's name, and start the game. Nintendall uses it
 and says so ("Using the save from ..."):
 
 | Console | Files that work |
@@ -98,7 +101,7 @@ and says so ("Using the save from ..."):
 | N64 | Project64 / Mupen64Plus `.eep`, `.sra`, `.fla`, `.mpk` (several at once is fine), or RetroArch's `.srm` |
 | DS | `.sav` (melonDS, no$gba), DeSmuME's `.dsv` |
 | Any of these | RetroArch's `.srm` (just replace Nintendall's) |
-| GameCube | Dolphin's `.gci` files, in the region's folder (`Saves/GameCube/USA`...) |
+| GameCube | Dolphin's `.gci` files, in the region's folder (`Saves/GameCube/Saves/USA`...) |
 
 A used file is moved to the `Imported` folder next to it, so it's used only
 once, and the save it replaced is kept as `<game>.srm.bak`. N64 emulators
@@ -106,8 +109,8 @@ often name saves after the game's internal name (`SUPER MARIO 64.eep`):
 rename them to the game file's name.
 
 **Wii, Wii U and 3DS** saves are folders. Copy the game's save folder
-from the other emulator into the console's Saves folder (`Saves/Wii`,
-`Saves/Wii U`, `Saves/Nintendo 3DS`) and start any game of
+from the other emulator into the console's Saves folder (`Saves/Wii/Saves`,
+`Saves/Wii U/Saves`, `Saves/Nintendo 3DS/Saves`) and start any game of
 that console. Nintendall puts it where its emulator keeps that game's save:
 
 | Console | Folder to copy |
@@ -517,7 +520,6 @@ User data lives in `~/.local/share/Nintendall/` (Linux),
 beside it instead.
 
 - `saves/`: the emulators' own folders (Dolphin's Wii system memory, Cemu's and Azahar's); every game's save files are also in the Saves folder (see Saves)
-- `states/`: save states
 - `system/`: BIOS / firmware files that some cores need
 - `config/`: per-core settings (`<core>.opt`, editable)
 - `screenshots/`
@@ -526,7 +528,7 @@ beside it instead.
 - `crash.txt`: if Nintendall ever closes unexpectedly, what it was doing (and, on Windows, where it crashed); the next start makes it
 
 Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen), and
-saves are in the Saves folder next to it (see Saves).
+saves and save states are in the Saves folder next to it (see Saves).
 
 ## Code layout
 

@@ -81,7 +81,7 @@ private:
     // Wii, Wii U and 3DS saves in the Saves folder: the running game's console and its folders.
     struct SaveSyncGame {
         System system = System::Unknown;
-        std::filesystem::path folder;  // Saves/<console>
+        std::filesystem::path folder;  // Saves/<console>/Saves
         std::string id, title;         // the game's save ID and name ("" if not known)
     };
     SaveSyncGame saveSync_;
@@ -98,9 +98,9 @@ private:
     DiscordStatus discord_;
     std::string discordTitle_, discordCover_;
     int64_t discordStart_ = 0;
-    std::filesystem::path gameCubeSaves();  // Dolphin's GameCube memory card folder (Saves/GameCube)
+    std::filesystem::path gameCubeSaves();  // Dolphin's GameCube memory card folder (Saves/GameCube/Saves)
     std::filesystem::path savesRoot_;  // the Saves folder (a folder per console)
-    std::filesystem::path saveFile_;   // the running game's battery save (Saves/<console>/<game>.srm)
+    std::filesystem::path saveFile_;   // the running game's battery save (Saves/<console>/Saves/<game>.srm)
     std::filesystem::path statePath(int slot) const;
     void saveState();
     void loadState();

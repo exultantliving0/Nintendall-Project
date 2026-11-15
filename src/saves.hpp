@@ -7,22 +7,35 @@
 #include "systems.hpp"
 
 // The Saves folder (Documents/Nintendall/Saves, next to Games and Box Covers) has a folder per
-// console. Battery saves (NES, SNES, N64, Game Boy, GBA, DS) live there, named like the game file:
-// "Saves/SNES/Super Mario World (USA).srm" (Famicom Disk System disk saves: "<game>.ips" in Saves/NES).
-// Saves from other emulators can be put there with the game's name ("Pokemon Emerald.sav"): the
-// next time the game starts, Nintendall uses them.
+// console, and in each of them a Saves folder (the games' own saves) and a States folder (save
+// states). Battery saves (NES, SNES, N64, Game Boy, GBA, DS) are named like the game file:
+// "Saves/SNES/Saves/Super Mario World (USA).srm" (Famicom Disk System disk saves: "<game>.ips" in
+// Saves/NES/Saves). Saves from other emulators can be put there with the game's name
+// ("Pokemon Emerald.sav"): the next time the game starts, Nintendall uses them. Save states:
+// "Saves/SNES/States/Super Mario World (USA).state1" (slot 1).
 
 // The files and folders in a folder (none if it can't be read). Unlike a loop over a
 // directory_iterator, this never throws (an error thrown when a game closes would end Nintendall).
 std::vector<std::filesystem::directory_entry> entriesIn(const std::filesystem::path& dir);
 
-// Makes the Saves folder's console folders.
+// Makes the Saves folder's console folders, each with its Saves and States folders.
 void createSaveFolders(const std::filesystem::path& savesRoot);
 
-// The console folder for a game's save: the folder the game is in inside the Games folder (so a
-// .gbc game in Games/Game Boy saves in Saves/Game Boy), or else the console's own folder.
+// Files from older versions move into place: what was right in a console folder goes into its
+// Saves folder, and the save states in `oldStates` (Nintendall's own data folder, named
+// "<game>.<console key>.state<slot>") into the console's States folder. Nothing is written over:
+// a file whose new place is taken stays where it was. Returns how many were moved.
+int organizeSaveFolders(const std::filesystem::path& savesRoot, const std::filesystem::path& oldStates);
+
+// A game's console folder: the folder the game is in inside the Games folder (so a .gbc game in
+// Games/Game Boy goes in Saves/Game Boy), or else the console's own folder.
+std::filesystem::path consoleFolderFor(const std::filesystem::path& savesRoot, const std::filesystem::path& gamesRoot,
+                                       const std::filesystem::path& game, System system);
+// Its Saves folder (the game's own saves) and States folder (save states).
 std::filesystem::path savesFolderFor(const std::filesystem::path& savesRoot, const std::filesystem::path& gamesRoot,
                                      const std::filesystem::path& game, System system);
+std::filesystem::path statesFolderFor(const std::filesystem::path& savesRoot, const std::filesystem::path& gamesRoot,
+                                      const std::filesystem::path& game, System system);
 
 // Looks in `dir` for another emulator's save of the game named `name` (.sav, .dsv, Project64's
 // .eep / .sra / .fla / .mpk...). If there is one, it's put into `ram` (the emulator's save memory,
@@ -35,12 +48,12 @@ std::vector<std::filesystem::path> importSave(const std::filesystem::path& dir, 
 // only once, and are still there if they're wanted again). Returns false if one couldn't be moved.
 bool moveToImported(const std::vector<std::filesystem::path>& files);
 
-// Wii, Wii U and 3DS: the save files of each game are kept in Saves/<console>, one folder per game,
+// Wii, Wii U and 3DS: the save files of each game are kept in Saves/<console>/Saves, one folder per game,
 // laid out like the emulator's own save folder (and Dolphin's / Cemu's / Citra's, so their save
 // folders can be put there as they are):
-//   Wii    Saves/Wii/<game> [524d4345]/data/...      (Dolphin: Wii/title/00010000/<id>/data)
-//   Wii U  Saves/Wii U/<game> [101c9400]/user/...    (Cemu: mlc01/usr/save/00050000/<id>)
-//   3DS    Saves/Nintendo 3DS/00030700/data/...      (Citra: sdmc/.../title/00040000/<id>/data)
+//   Wii    Saves/Wii/Saves/<game> [524d4345]/data/...      (Dolphin: Wii/title/00010000/<id>/data)
+//   Wii U  Saves/Wii U/Saves/<game> [101c9400]/user/...    (Cemu: mlc01/usr/save/00050000/<id>)
+//   3DS    Saves/Nintendo 3DS/Saves/00030700/data/...      (Citra: sdmc/.../title/00040000/<id>/data)
 // A folder is named with the game's ID, and the game's name in front when Nintendall knows it.
 // The emulator keeps working on its own copy: before a game starts and after it stops, the two
 // are brought in step, each game's newer copy replacing the older one. Only save files go in
@@ -61,13 +74,13 @@ SyncCount syncSaveFolders(const std::filesystem::path& savesDir, const SaveFolde
 // folder's meta.xml), "" if it isn't known.
 std::string saveFolderId(System console, const std::filesystem::path& game, const std::string& gameId);
 
-// Save folders in Saves/<console> named another way than syncSaveFolders' are copied into the
+// Save folders in Saves/<console>/Saves named another way than syncSaveFolders' are copied into the
 // emulator when a game of that console starts (and then come back to Saves with the sync):
 //   Wii:   a folder named like the game file, or with its ID ("RMCE01"), holding the save's files
 //          (or Dolphin's "data" folder)
 //   Wii U: a folder named like the game (folder games), or with the full title ID ("00050000101c9400")
 //   3DS:   a folder named with the full title ID ("0004000000030700")
-// The save that was there is kept in Saves/<console>/Imported, then the folder used is moved there.
+// The save that was there is kept in Saves/<console>/Saves/Imported, then the folder used is moved there.
 struct EmulatorSaveFolders {
     std::filesystem::path wiiTitles;   // Dolphin's Wii/title/00010000
     std::filesystem::path cemuSaves;   // Cemu's mlc01/usr/save/00050000

@@ -155,7 +155,7 @@ void chooseRenderer(LibretroCore& core, System s, Renderer r) {
 // Dolphin reads for settings it has no option for. Other lines are kept as they are.
 // - WiimoteEnableSpeaker = True: Dolphin only sends game sound to a real Wii Remote's speaker with
 //   it on (off by default).
-// - GCIFolderAPath: GameCube memory card A's saves (.gci files): Saves/GameCube, with a folder per
+// - GCIFolderAPath: GameCube memory card A's saves (.gci files): Saves/GameCube/Saves, with a folder per
 //   region in it (USA, EUR, JPN), as in Dolphin's own GC folder. (Dolphin's netplay sends the
 //   host's saves from there too.)
 void setDolphinSetting(const fs::path& ini, const std::string& key, const std::string& value) {
@@ -240,6 +240,9 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         const fs::path gamesRoot = games.empty() ? defaultGamesFolder(paths_.base, paths_.portable) : fs::u8path(games);
         savesRoot_ = saves.empty() ? gamesRoot.parent_path() / "Saves" : fs::u8path(saves);
         createSaveFolders(savesRoot_);
+        // Older versions kept saves right in Saves/<console> and save states in the data folder.
+        if (const int n = organizeSaveFolders(savesRoot_, paths_.states))
+            std::fprintf(stderr, "Saves folder: %d file(s) moved into the Saves / States folders\n", n);
     }
 
     // Default window: the largest of 3x / 2x NES size that fits on the screen.
@@ -573,7 +576,7 @@ bool App::startGame(const fs::path& path) {
     }
     if (det.system == System::WiiU) writeWiiUGamePaths();
     std::string saveNote;  // shown when the game starts
-    // Save folders from other emulators in Saves/<console> (Wii, Wii U, 3DS).
+    // Save folders from other emulators in Saves/<console>/Saves (Wii, Wii U, 3DS).
     if (det.system == System::Wii || det.system == System::WiiU || det.system == System::N3DS) {
         EmulatorSaveFolders to;
         to.wiiTitles = paths_.saves / "User" / "Wii" / "title" / "00010000";
@@ -871,7 +874,7 @@ void App::syncSaves() {
 }
 
 // The save folder an emulator gets: Nintendall's own data folder, except Mesen's, whose only files
-// there are Famicom Disk System disk saves (.ips): they go in Saves/NES with the NES saves.
+// there are Famicom Disk System disk saves (.ips): they go in Saves/NES/Saves with the NES saves.
 fs::path App::saveDirFor(const char* coreName, System system, const fs::path& game) const {
     if (std::string(coreName) != "mesen") return paths_.saves;
     const fs::path dir = savesFolderFor(savesRoot_, home_.gamesRoot(), game, system);
@@ -891,7 +894,7 @@ fs::path App::saveDirFor(const char* coreName, System system, const fs::path& ga
 }
 
 // bsnes (SNES) writes the battery save itself, named like the file it plays: "<game>.srm" (and
-// "<game>.rtc" for a game with a clock), in the folder it gets. That's Saves/SNES.
+// "<game>.rtc" for a game with a clock), in the folder it gets. That's Saves/SNES/Saves.
 fs::path App::snesSaveDir(const fs::path& game, const fs::path& launched, std::string& note) {
     std::error_code ec;
     if (lanJoinLoad_) {
@@ -914,7 +917,7 @@ fs::path App::snesSaveDir(const fs::path& game, const fs::path& launched, std::s
         }
     }
     // Another emulator's save put there with the game's name ("<game>.sav"): used once, then moved
-    // to Saves/SNES/Imported. The save it replaces is kept as <game>.srm.bak.
+    // to Saves/SNES/Saves/Imported. The save it replaces is kept as <game>.srm.bak.
     const fs::path srm = dir / fs::u8path(name + ".srm");
     for (const auto& e : entriesIn(dir)) {
         std::error_code ec2;
@@ -949,7 +952,7 @@ fs::path App::snesSaveDir(const fs::path& game, const fs::path& launched, std::s
 }
 
 // At start: SNES saves older versions left in Nintendall's own data folder, for the games in the
-// SNES games folder, move to Saves/SNES (a zipped game's save moves when it's played).
+// SNES games folder, move to Saves/SNES/Saves (a zipped game's save moves when it's played).
 void App::moveOldSnesSaves() {
     const HomeConsole* snes = nullptr;
     for (const HomeConsole& c : homeConsoles())
@@ -1013,7 +1016,7 @@ void App::updateDiscord() {
 }
 
 // ---- battery saves ----------------------------------------------------------
-// In the Saves folder: Saves/<console>/<game>.srm (see saves.hpp).
+// In the Saves folder: Saves/<console>/Saves/<game>.srm (see saves.hpp).
 
 void App::loadSram() {
     lastSram_.clear();
@@ -1030,7 +1033,7 @@ void App::loadSram() {
     }
 
     // Another emulator's save put in the Saves folder with the game's name: use it (once: it's
-    // moved to Saves/<console>/Imported). The save it replaces is kept as <game>.srm.bak.
+    // moved to Saves/<console>/Saves/Imported). The save it replaces is kept as <game>.srm.bak.
     std::vector<uint8_t> ram(mem, mem + size);
     const std::vector<fs::path> used = importSave(saveFile_.parent_path(), saveFile_.stem().u8string(), system_, ram);
     if (!used.empty()) {
@@ -1078,7 +1081,7 @@ void App::saveSram(bool force) {
     f.write(reinterpret_cast<const char*>(mem), std::streamsize(size));
 }
 
-// GameCube saves (.gci files, memory card A): Saves/GameCube/USA, EUR and JPN. The first time,
+// GameCube saves (.gci files, memory card A): Saves/GameCube/Saves/USA, EUR and JPN. The first time,
 // the saves Dolphin kept in its own folders are copied there.
 fs::path App::gameCubeSaves() {
     const fs::path dir = savesFolderFor(savesRoot_, {}, {}, System::GameCube);
@@ -1102,7 +1105,9 @@ fs::path App::gameCubeSaves() {
 // ---- save states ------------------------------------------------------------
 
 fs::path App::statePath(int slot) const {
-    return paths_.states / fs::u8path(gameTitle_ + "." + systemInfo(system_).key + ".state" + std::to_string(slot));
+    // Saves/<console>/States/<game>.state1
+    return statesFolderFor(savesRoot_, home_.gamesRoot(), gamePath_, system_) /
+           fs::u8path(gameTitle_ + ".state" + std::to_string(slot));
 }
 
 void App::saveState() {
@@ -1116,6 +1121,8 @@ void App::saveState() {
         osd("Save states aren't available for this game");
         return;
     }
+    std::error_code ec;
+    fs::create_directories(statePath(slot_).parent_path(), ec);
     std::ofstream f(statePath(slot_), std::ios::binary);
     f.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));
     osd(f ? "State saved (slot " + std::to_string(slot_) + ")" : std::string("Saving the state failed"));
