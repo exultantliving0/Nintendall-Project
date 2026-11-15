@@ -325,6 +325,11 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         return 0;
     }
 
+    try {
+        moveOldSnesSaves();
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "Saves folder: couldn't move the old SNES saves: %s\n", e.what());
+    }
     std::error_code ec;
     draw();  // show the window before any message box can pop up
     if (!start.empty() && !fs::is_directory(start, ec)) startGame(start);
@@ -595,13 +600,17 @@ bool App::startGame(const fs::path& path) {
         saveSync_ = SaveSyncGame{};
     }
 
+    // The SNES emulator keeps the battery save itself: it gets the Saves folder (see snesSaveDir).
+    const fs::path coreSaveDir = std::string(coreName) == "bsnes" ? snesSaveDir(path, gameFile, saveNote)
+                                                                    : saveDirFor(coreName, det.system, path);
+
     // 4. Start the emulator with the game. GPU systems try the chosen renderer first, then fall
     //    back: Vulkan -> OpenGL -> software (3DS / N64), if this PC can't do the first.
     std::string err;
     std::vector<Renderer> renderers;
     std::string startNote;
     for (size_t attempt = 0; attempt == 0 || attempt < renderers.size(); ++attempt) {
-        core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(coreName), saveDirFor(coreName, det.system, path),
+        core_ = std::make_unique<LibretroCore>(*this, paths_.systemDirFor(coreName), coreSaveDir,
                                                paths_.config / (std::string(coreName) + ".opt"));
         const bool coreLoaded = core_->load(corePath, err);
         if (coreLoaded && lanPending_ && usesDolphinLan(det.system) && !lanApi(*core_).ok()) {
@@ -879,6 +888,91 @@ fs::path App::saveDirFor(const char* coreName, System system, const fs::path& ga
         }
     }
     return dir;
+}
+
+// bsnes (SNES) writes the battery save itself, named like the file it plays: "<game>.srm" (and
+// "<game>.rtc" for a game with a clock), in the folder it gets. That's Saves/SNES.
+fs::path App::snesSaveDir(const fs::path& game, const fs::path& launched, std::string& note) {
+    std::error_code ec;
+    if (lanJoinLoad_) {
+        // Joined a LAN game: it runs on the host's save, which mustn't be written over our own.
+        const fs::path dir = paths_.cache / "LAN game save";
+        fs::remove_all(dir, ec);
+        fs::create_directories(dir, ec);
+        return dir;
+    }
+    const fs::path dir = savesFolderFor(savesRoot_, home_.gamesRoot(), game, System::SNES);
+    fs::create_directories(dir, ec);
+    const std::string name = launched.stem().u8string();
+    // Saves older versions left in Nintendall's own data folder move there.
+    for (const char* ext : {".srm", ".rtc"}) {
+        std::error_code ec2;
+        const fs::path from = paths_.saves / fs::u8path(name + ext), to = dir / fs::u8path(name + ext);
+        if (fs::is_regular_file(from, ec2) && !fs::exists(to, ec2)) {
+            fs::rename(from, to, ec2);
+            if (ec2 && fs::copy_file(from, to, ec2)) fs::remove(from, ec2);
+        }
+    }
+    // Another emulator's save put there with the game's name ("<game>.sav"): used once, then moved
+    // to Saves/SNES/Imported. The save it replaces is kept as <game>.srm.bak.
+    const fs::path srm = dir / fs::u8path(name + ".srm");
+    for (const auto& e : entriesIn(dir)) {
+        std::error_code ec2;
+        const fs::path& sav = e.path();
+        if (!e.is_regular_file(ec2) || sav.stem().u8string() != name || lowerExt(sav) != ".sav")
+            continue;
+        fs::path bak = srm, part = srm;
+        bak += ".bak";
+        part += ".part";
+        if (!fs::copy_file(sav, part, fs::copy_options::overwrite_existing, ec2)) {
+            note = "Couldn't use " + sav.filename().u8string();
+            break;
+        }
+        if (fs::exists(srm, ec2)) {
+            fs::remove(bak, ec2);
+            fs::rename(srm, bak, ec2);
+        }
+        fs::rename(part, srm, ec2);
+        if (ec2) {
+            fs::remove(part, ec2);
+            if (!fs::exists(srm, ec2) && fs::exists(bak, ec2)) fs::rename(bak, srm, ec2);
+            note = "Couldn't use " + sav.filename().u8string();
+        } else if (!moveToImported({sav})) {
+            note = "Couldn't use " + sav.filename().u8string() + ": it couldn't be moved to the Imported folder";
+        } else {
+            note = "Using the save from " + sav.filename().u8string();
+            std::fprintf(stderr, "Imported %s into %s\n", sav.u8string().c_str(), srm.u8string().c_str());
+        }
+        break;
+    }
+    return dir;
+}
+
+// At start: SNES saves older versions left in Nintendall's own data folder, for the games in the
+// SNES games folder, move to Saves/SNES (a zipped game's save moves when it's played).
+void App::moveOldSnesSaves() {
+    const HomeConsole* snes = nullptr;
+    for (const HomeConsole& c : homeConsoles())
+        if (c.system == System::SNES) snes = &c;
+    if (!snes || home_.gamesRoot().empty()) return;
+    const std::vector<std::string>& exts = systemInfo(System::SNES).extensions;
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(home_.gamesRoot() / fs::u8path(snes->folder), ec), end; !ec && it != end;
+         it.increment(ec)) {
+        std::error_code ec2;
+        if (!it->is_regular_file(ec2)) continue;
+        if (std::find(exts.begin(), exts.end(), lowerExt(it->path())) == exts.end()) continue;
+        const std::string name = it->path().stem().u8string();
+        const fs::path dir = savesFolderFor(savesRoot_, home_.gamesRoot(), it->path(), System::SNES);
+        for (const char* ext : {".srm", ".rtc"}) {
+            const fs::path from = paths_.saves / fs::u8path(name + ext), to = dir / fs::u8path(name + ext);
+            if (!fs::is_regular_file(from, ec2) || fs::exists(to, ec2)) continue;
+            fs::create_directories(dir, ec2);
+            fs::rename(from, to, ec2);
+            if (ec2 && fs::copy_file(from, to, ec2)) fs::remove(from, ec2);
+            std::fprintf(stderr, "Moved %s to %s\n", from.u8string().c_str(), to.u8string().c_str());
+        }
+    }
 }
 
 // ---- Discord status ----------------------------------------------------------
@@ -2557,7 +2651,9 @@ void App::updateNetplay() {
         Lan keep = std::move(lan_);
         lan_ = Lan{};
         lanCoreOptions_ = g.options;
+        lanJoinLoad_ = true;
         const bool ok = startGame(found);
+        lanJoinLoad_ = false;
         lanCoreOptions_.clear();
         if (!ok) {
             keep.net->leave();

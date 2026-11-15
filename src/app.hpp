@@ -88,6 +88,9 @@ private:
     bool emulatorSaves(System s, SaveFolderSync& out) const;
     void syncSaves();
     std::filesystem::path saveDirFor(const char* coreName, System system, const std::filesystem::path& game) const;
+    std::filesystem::path snesSaveDir(const std::filesystem::path& game, const std::filesystem::path& launched,
+                                      std::string& note);
+    void moveOldSnesSaves();
     // Discord status: "Playing Nintendall" with the game, its console and its box cover.
     void startDiscord();
     std::string discordAppId() const;  // Nintendall's Discord application ("" = none: no status)
@@ -188,6 +191,7 @@ public:
     void linkSend(unsigned to, const void* data, size_t size);
 private:
     bool lanLinkLoad_ = false;  // startGame: load a link-cable game's emulator
+    bool lanJoinLoad_ = false;  // startGame: load the host's game after joining (NES / SNES / N64)
     int16_t localInputState(unsigned port, unsigned device, unsigned index, unsigned id);
     NetInput localNetInput();
     NetInputs netInputs_{};  // the presses for the frame being run (LAN games, NES / SNES / N64)
