@@ -286,7 +286,8 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         const std::string games = cfg_.get("games.folder"), covers = cfg_.get("covers.folder");
         const fs::path gamesRoot = games.empty() ? defaultGamesFolder(paths_.base, paths_.portable) : fs::u8path(games);
         const fs::path coversRoot = covers.empty() ? gamesRoot.parent_path() / "Box Covers" : fs::u8path(covers);
-        home_.start(gamesRoot, coversRoot, paths_.data / "covers", cfg_.get("home.console"));
+        home_.start(gamesRoot, coversRoot, paths_.data / "covers", paths_.base / "gameinfo", paths_.data / "game info",
+                    cfg_.get("home.console"));
         home_.setCoverSize(std::atoi(cfg_.get("home.cover_size").c_str()));
         settings_.setWiiUPackFolders(paths_.systemDirFor("cemu") / "Cemu" / "graphicPacks",
                                      paths_.systemDirFor("cemu") / "Cemu" / "customGraphicPacks");

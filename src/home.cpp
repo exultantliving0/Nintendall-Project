@@ -93,12 +93,13 @@ std::vector<std::string> wrap(Text& t, const std::string& text, int width, int m
 }  // namespace
 
 void Home::start(const fs::path& gamesRoot, const fs::path& coversRoot, const fs::path& coverCache,
-                 const std::string& consoleKey) {
+                 const fs::path& infoDir, const fs::path& infoCache, const std::string& consoleKey) {
     root_ = gamesRoot;
     coversRoot_ = coversRoot;
     createGameFolders(root_);
     createGameFolders(coversRoot_);
     covers_.start(coverCache);
+    panel_.start(infoDir, infoCache);
     const auto& list = homeConsoles();
     for (size_t i = 0; i < list.size(); ++i)
         if (consoleKey == systemInfo(list[i].system).key) console_ = int(i);
@@ -106,7 +107,10 @@ void Home::start(const fs::path& gamesRoot, const fs::path& coversRoot, const fs
     refresh();
 }
 
-void Home::shutdown() { covers_.clear(); }
+void Home::shutdown() {
+    panel_.shutdown();
+    covers_.clear();
+}
 
 std::string Home::consoleKey() const { return systemInfo(homeConsoles()[size_t(console_)].system).key; }
 
@@ -132,6 +136,7 @@ std::string Home::titleFor(const fs::path& game) const {
 void Home::selectConsole(int index) {
     const int n = int(homeConsoles().size());
     console_ = (index % n + n) % n;
+    panel_.close();
     covers_.clear();
     covers_.setFolder(coversRoot_ / fs::u8path(homeConsoles()[size_t(console_)].folder));
     lines_.clear();
@@ -239,6 +244,17 @@ void Home::zoom(Text& t, const SDL_Rect& area, int step) {
     }
 }
 
+void Home::showInfo(int i) {
+    if (i < 0 || i >= int(games_.size())) return;
+    const LibraryGame& g = games_[size_t(i)];
+    if (panel_.isOpen() && panel_.game() == g.path) {
+        panel_.close();
+        return;
+    }
+    // Pictures of the backs of the boxes are kept beside the covers: "Box Covers/NES/Back".
+    panel_.open(g, coversRoot_ / fs::u8path(homeConsoles()[size_t(console_)].folder) / "Back");
+}
+
 void Home::moveSelection(const Layout& L, int dx, int dy) {
     const int n = int(games_.size());
     showSelected_ = true;
@@ -334,6 +350,8 @@ void Home::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
             if (!line.empty()) t.draw(L.grid.x + (L.grid.w - t.width(line, size)) / 2, y, line, c, size);
             y += t.lineHeight(size) + int(4 * s);
         }
+        panel_.close();
+        panel_.draw(v, t, area, mx, my);
         return;
     }
 
@@ -381,6 +399,9 @@ void Home::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
         const int y = L.grid.y + int(6 * s) + (track - thumb) * scroll_ / L.maxScroll;
         v.fillRect(L.grid.x + L.grid.w - int(9 * s), y, int(5 * s), thumb, {90, 90, 100});
     }
+
+    // The info panel, over everything.
+    panel_.draw(v, t, area, mx, my);
 }
 
 // ============================================================================
@@ -392,6 +413,28 @@ bool Home::handleEvent(const SDL_Event& e, int mx, int my, Text& t, const SDL_Re
     auto play = [&](int i) {
         if (i >= 0 && i < n) launch = games_[size_t(i)].path;
     };
+
+    // The info panel takes everything while it's open, except a right-click on another game
+    // (shows that game's info) or beside the panel (closes it).
+    const bool rightClick = e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_RIGHT;
+    if (panel_.isOpen() && (panel_.bigPage() || !(rightClick && !inside(panel_.rect(t, area), mx, my)))) {
+        if (panel_.handleEvent(e, mx, my, t, area)) {
+            pressed_ = -1;
+            return true;
+        }
+        // Keys and buttons the panel doesn't use go to the program (F11...), not to the games behind it.
+        if (e.type == SDL_KEYDOWN || e.type == SDL_CONTROLLERBUTTONDOWN) return false;
+    }
+    if (rightClick && inside(area, mx, my)) {
+        const int i = cardAt(L, mx, my);
+        if (i >= 0) {
+            selected_ = i;
+            showInfo(i);
+        } else {
+            panel_.close();
+        }
+        return true;
+    }
 
     switch (e.type) {
     case SDL_MOUSEMOTION:
@@ -462,6 +505,11 @@ bool Home::handleEvent(const SDL_Event& e, int mx, int my, Text& t, const SDL_Re
             else moveSelection(L, 0, 0);
             return true;
         case SDLK_F5: refresh(); return true;
+        case SDLK_i:
+        case SDLK_APPLICATION:  // the menu key
+            if (showSelected_ && selected_ >= 0) showInfo(selected_);
+            else moveSelection(L, 0, 0);
+            return true;
         default: return false;
         }
     }
@@ -476,6 +524,10 @@ bool Home::handleEvent(const SDL_Event& e, int mx, int my, Text& t, const SDL_Re
         case SDL_CONTROLLER_BUTTON_A:
         case SDL_CONTROLLER_BUTTON_START:
             if (showSelected_ && selected_ >= 0) play(selected_);
+            else moveSelection(L, 0, 0);
+            return true;
+        case SDL_CONTROLLER_BUTTON_Y:  // the top button: the selected game's info
+            if (showSelected_ && selected_ >= 0) showInfo(selected_);
             else moveSelection(L, 0, 0);
             return true;
         default: return false;

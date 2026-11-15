@@ -10,7 +10,7 @@ Unicode true
 
 !define APPNAME "Nintendall"
 !ifndef VERSION
-  !define VERSION "1.3.7"
+  !define VERSION "1.3.8"
 !endif
 !ifndef SRCDIR
   !error "Pass -DSRCDIR=<folder with nintendall.exe, SDL2.dll and cores\>"
@@ -137,6 +137,10 @@ Section "${APPNAME} (required)" SecMain
   RMDir /r "$INSTDIR\system"
   SetOutPath "$INSTDIR\system"
   File /r "${SRCDIR}\system\*.*"
+  ; Game descriptions and back cover addresses (the game info on the home screen)
+  RMDir /r "$INSTDIR\gameinfo"
+  SetOutPath "$INSTDIR\gameinfo"
+  File "${SRCDIR}\gameinfo\*.txt"
   SetOutPath "$INSTDIR"
 
   ; Games folder (Documents\Nintendall\Games) with a folder for each console: put games in
@@ -220,6 +224,7 @@ Section "Uninstall"
   RMDir /r "$INSTDIR\cores"
   RMDir /r "$INSTDIR\fonts"
   RMDir /r "$INSTDIR\system"
+  RMDir /r "$INSTDIR\gameinfo"
   Delete "$INSTDIR\nintendall.exe"
   Delete "$INSTDIR\SDL2.dll"
   Delete "$INSTDIR\SDL2_ttf.dll"

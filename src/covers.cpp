@@ -599,6 +599,25 @@ Image Covers::Shared::load(const Request& r) {
 
 // ============================================================================
 
+bool decodePicture(const std::vector<uint8_t>& bytes, int maxW, int maxH, std::vector<uint8_t>& rgba, int& w, int& h) {
+    if (!isImage(bytes)) return false;
+    int iw = 0, ih = 0, n = 0;
+    stbi_uc* px = stbi_load_from_memory(bytes.data(), int(bytes.size()), &iw, &ih, &n, 4);
+    if (!px) return false;
+    const double f = std::min({1.0, double(maxW) / iw, double(maxH) / ih});
+    if (f < 1.0) {
+        w = std::max(1, int(iw * f + 0.5));
+        h = std::max(1, int(ih * f + 0.5));
+        rgba = resizeArea(px, iw, ih, w, h);
+    } else {
+        w = iw;
+        h = ih;
+        rgba.assign(px, px + size_t(iw) * ih * 4);
+    }
+    stbi_image_free(px);
+    return true;
+}
+
 fs::path findCoverFile(const fs::path& dir, const std::string& fileName) {
     if (dir.empty() || fileName.empty()) return {};
     std::error_code ec;

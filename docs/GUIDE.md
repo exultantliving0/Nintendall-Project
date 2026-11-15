@@ -14,6 +14,28 @@ Shift+Tab or L / R switch consoles. **Ctrl +** and **Ctrl -** (or the **+** and 
 buttons beside Open Folder) make the covers bigger or smaller (remembered),
 **Ctrl 0** puts them back to normal.
 
+**Game info:** right-click a game's box (or choose it with the keyboard and press
+**I**, or with a controller and press the top button) and a panel slides in from
+the left with three pages:
+
+- **About**: what the game is about, when it came out and how many can play.
+- **Back of Box**: a picture of the back of the box (click it to see it big).
+  It's downloaded once and kept in a `Back` folder in the console's Box Covers
+  folder (`Box Covers/NES/Back/Super Mario Bros. (World).jpg`). To use your own,
+  put a `.png` or `.jpg` named like the game there; a picture that's already
+  there is never replaced.
+- **Manual**: the game's instruction booklet, page by page. Click a page (or
+  press Enter / A) to see it big; the arrows, arrow keys or D-pad turn the pages.
+  **Open in Browser** opens it on the Internet Archive's site.
+
+Tab / Shift+Tab (L / R on a controller) switch pages; Esc, B, a click beside the
+panel or the X close it. Descriptions and back covers come from
+[TheGamesDB](https://thegamesdb.net) (the descriptions are installed with
+Nintendall, so they work without internet); manuals are scans from the
+[Internet Archive](https://archive.org), looked up by the game's name, so a game
+can be missing one or, rarely, get another game's. Games are found by name like
+box covers, so a game whose file has an unusual name may have no info.
+
 The games come from the **Games folder**, which has one folder per console:
 
 ```
@@ -52,7 +74,7 @@ GameCube / Wii discs and Wii U games) to the library's list of game names:
 
 - Only the USA box is used: `(USA)`, `(USA, Europe)`, `(Japan, USA)`..., or
   `(World)` for games released the same everywhere (`Super Mario Bros. (World)`).
-  A plain release beats re-releases (`(Virtual Console)`, `(Switch Online)`,
+  A plain release beats re-releases (`(Virtual Console)`, `(Collector's Edition)`,
   collections), unless the file is one.
 - No-Intro names like `Super Mario Bros. 3 (USA).nes` match exactly; short names
   like `Super Mario Bros.nes` or `Pokemon Red.gb` match too, and so do names

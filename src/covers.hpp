@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "library.hpp"
 
@@ -50,6 +51,10 @@ private:
 
 // The cover picture in `dir` for a game file name (.png, .jpg or .jpeg), or "" if there's none.
 std::filesystem::path findCoverFile(const std::filesystem::path& dir, const std::string& fileName);
+
+// Reads a PNG or JPEG picture into RGBA pixels (4 bytes each), made no bigger than maxW x maxH
+// (shrunk, keeping its shape). False if it isn't a picture.
+bool decodePicture(const std::vector<uint8_t>& bytes, int maxW, int maxH, std::vector<uint8_t>& rgba, int& w, int& h);
 
 // The web address of a game's box cover (where Nintendall downloads it from), found with the lists
 // of names already saved in cacheDir, without going online. "" if there's none. (Discord status.)

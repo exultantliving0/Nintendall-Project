@@ -53,6 +53,12 @@ Also used:
 Box covers are not part of Nintendall: the home screen downloads them on each
 user's PC from the libretro thumbnail library (https://thumbnails.libretro.com).
 
+The game descriptions in the `gameinfo` folder come from TheGamesDB
+(https://thegamesdb.net), whose database is made by its community. Pictures of
+the backs of boxes are downloaded on each user's PC from TheGamesDB, and game
+manuals are shown from the Internet Archive's scans (https://archive.org); they
+are not part of Nintendall.
+
 ## Source code offer
 
 For the GPL-licensed cores above, the exact source code for the shipped

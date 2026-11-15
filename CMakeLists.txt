@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nintendall VERSION 1.3.7 LANGUAGES CXX)
+project(Nintendall VERSION 1.3.8 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,6 +32,8 @@ add_executable(nintendall
   src/discord.cpp
   src/saves.cpp
   src/aes.cpp
+  src/gameinfo.cpp
+  src/infopanel.cpp
   src/crashlog.cpp
   src/detect.cpp
   src/filedialog.cpp
@@ -115,10 +117,20 @@ add_custom_target(bundle_cores ALL
   VERBATIM)
 add_dependencies(nintendall bundle_cores)
 
+# Game descriptions and back cover addresses (from TheGamesDB) for the home screen's game info.
+set(NINTENDALL_GAMEINFO_DIR ${CMAKE_BINARY_DIR}/gameinfo)
+add_custom_target(game_info ALL
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/make_game_info.py
+          --dest ${NINTENDALL_GAMEINFO_DIR} --cache ${CMAKE_BINARY_DIR}/thegamesdb
+  COMMENT "Making the game information files"
+  VERBATIM)
+add_dependencies(nintendall game_info)
+
 # "cmake --install build --prefix dist/Nintendall" makes the shippable folder.
 install(TARGETS nintendall RUNTIME DESTINATION .)
 install(DIRECTORY ${NINTENDALL_CORES_DIR}/ DESTINATION cores)
 install(DIRECTORY ${NINTENDALL_SYSDATA_DIR}/ DESTINATION system)
+install(DIRECTORY ${NINTENDALL_GAMEINFO_DIR}/ DESTINATION gameinfo)
 install(FILES README.md THIRD_PARTY_LICENSES.md DESTINATION .)
 install(DIRECTORY third_party/cemu DESTINATION third_party)  # source of our change to Cemu (MPL-2.0)
 install(DIRECTORY third_party/dolphin DESTINATION third_party)  # source of our change to Dolphin (GPL-2.0+)

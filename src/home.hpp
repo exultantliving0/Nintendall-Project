@@ -7,19 +7,23 @@
 #include <vector>
 
 #include "covers.hpp"
+#include "infopanel.hpp"
 #include "library.hpp"
 #include "text.hpp"
 #include "video.hpp"
 
 // The home screen shown when no game is running: a row of consoles (NES ... Wii U) and, under it,
 // the games in that console's folder with their box covers. Click a game (or pick it with the
-// arrow keys / a controller and press Enter / A) to play it.
+// arrow keys / a controller and press Enter / A) to play it. Right-click a game (or press I / the
+// controller's top button) for its info panel: description, back of the box and manual.
 class Home {
 public:
     // gamesRoot: the Games folder; coversRoot: the Box Covers folder (both with a folder per console);
-    // coverCache: Nintendall's own cover notes.
+    // coverCache: Nintendall's own cover notes; infoDir: the gameinfo folder shipped with the program;
+    // infoCache: Nintendall's own notes for the info panel (manuals found, pages seen).
     void start(const std::filesystem::path& gamesRoot, const std::filesystem::path& coversRoot,
-               const std::filesystem::path& coverCache, const std::string& consoleKey);
+               const std::filesystem::path& coverCache, const std::filesystem::path& infoDir,
+               const std::filesystem::path& infoCache, const std::string& consoleKey);
     void shutdown();  // frees the cover textures (before the renderer goes away)
 
     std::string consoleKey() const;  // the console being shown, e.g. "gba"
@@ -54,11 +58,13 @@ private:
     void moveSelection(const Layout& L, int dx, int dy);
     void scrollTo(const Layout& L, int i);
     void zoom(Text& t, const SDL_Rect& area, int step);  // change the cover size, keeping the same games in view
+    void showInfo(int i);  // opens the info panel for a game (closes it if it's already showing that game)
     // The title split into lines (remembered: measuring text is slow).
     const std::vector<std::string>& titleLines(Text& t, const LibraryGame& g, int width, int maxLines);
 
     Library library_;
     Covers covers_;
+    InfoPanel panel_;
     std::filesystem::path root_, coversRoot_;
     int console_ = 0;
     int coverSize_ = 0;

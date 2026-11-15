@@ -23,8 +23,9 @@ Needs Windows 10 or 11.
    console (NES, SNES, GameCube, Wii U...).
 2. Open Nintendall, click a console at the top, then click a game's box to play.
 
-New games show up by themselves, with their box covers. You need your own game
-files; none are included.
+New games show up by themselves, with their box covers. Right-click a box to see
+what the game is about, the back of its box and its manual. You need your own
+game files; none are included.
 
 ## Consoles
 
