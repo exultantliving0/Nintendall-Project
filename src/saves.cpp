@@ -193,11 +193,11 @@ std::vector<fs::path> importSave(const fs::path& dir, const std::string& name, S
     return {p};
 }
 
-bool moveToImported(const std::vector<fs::path>& files) {
+bool moveToImported(const std::vector<fs::path>& files, const fs::path& into) {
     bool ok = true;
     for (const fs::path& p : files) {
         std::error_code ec;
-        const fs::path dir = p.parent_path() / "Imported";
+        const fs::path dir = into.empty() ? p.parent_path() / "Imported" : into;
         fs::create_directories(dir, ec);
         const std::string ext = fs::is_directory(p, ec) ? "" : p.extension().u8string();
         const std::string stem = ext.empty() ? p.filename().u8string() : p.stem().u8string();
@@ -401,34 +401,49 @@ bool writeWiiSave(const WiiDataBin& save, const fs::path& dir) {
 
 FolderImport importWiiDataBins(const fs::path& dir, const fs::path& titles, const std::map<std::string, std::string>& names) {
     FolderImport result;
-    // What was put there: a .bin file, or a folder holding data.bin files (not a save folder).
-    std::vector<std::pair<fs::path, std::vector<fs::path>>> found;  // what to move to Imported, its data.bin files
+    // What was put there: a .bin file, or a folder holding data.bin files (not a save folder), right
+    // in `dir` or in a game's save folder (next to its "data").
+    struct Found {
+        fs::path top;               // what's moved to Imported afterwards
+        std::vector<fs::path> bins;  // its data.bin files
+        std::string folderId;       // put in this game's save folder ("" = right in `dir`)
+    };
+    std::vector<Found> found;
+    auto look = [&](const fs::path& folder, const std::string& folderId) {
+        for (const auto& e : entriesIn(folder)) {
+            std::error_code ec;
+            const std::string name = e.path().filename().u8string();
+            if (e.is_regular_file(ec) && lowerCase(e.path().extension().u8string()) == ".bin") {
+                found.push_back({e.path(), {e.path()}, folderId});
+            } else if (e.is_directory(ec) && name != "Imported" && name != "data" && idInName(name, 8).empty()) {
+                std::vector<fs::path> bins;
+                fs::recursive_directory_iterator it(e.path(), ec), end;
+                for (; !ec && it != end; it.increment(ec)) {
+                    std::error_code ec2;
+                    if (it.depth() > 6) it.disable_recursion_pending();
+                    if (it->is_regular_file(ec2) && lowerCase(it->path().filename().u8string()) == "data.bin")
+                        bins.push_back(it->path());
+                }
+                if (!bins.empty()) found.push_back({e.path(), bins, folderId});
+            }
+        }
+    };
+    look(dir, "");
     for (const auto& e : entriesIn(dir)) {
         std::error_code ec;
-        const std::string name = e.path().filename().u8string();
-        if (e.is_regular_file(ec) && lowerCase(e.path().extension().u8string()) == ".bin") {
-            found.push_back({e.path(), {e.path()}});
-        } else if (e.is_directory(ec) && name != "Imported" && idInName(name, 8).empty()) {
-            std::vector<fs::path> bins;
-            fs::recursive_directory_iterator it(e.path(), ec), end;
-            for (; !ec && it != end; it.increment(ec)) {
-                std::error_code ec2;
-                if (it.depth() > 6) it.disable_recursion_pending();
-                if (it->is_regular_file(ec2) && lowerCase(it->path().filename().u8string()) == "data.bin")
-                    bins.push_back(it->path());
-            }
-            if (!bins.empty()) found.push_back({e.path(), bins});
-        }
+        const std::string id = e.is_directory(ec) ? idInName(e.path().filename().u8string(), 8) : "";
+        if (!id.empty()) look(e.path(), id);
     }
-    std::sort(found.begin(), found.end());
+    std::sort(found.begin(), found.end(), [](const Found& a, const Found& b) { return a.top < b.top; });
 
-    for (const auto& [top, bins] : found) {
+    for (const auto& [top, bins, folderId] : found) {
         // All of them must be Wii saves (a folder with other things in it is left alone).
         std::vector<WiiDataBin> saves(bins.size());
         bool ok = true;
         for (size_t i = 0; i < bins.size() && ok; ++i) ok = readWiiDataBin(bins[i], saves[i]);
         if (!ok) continue;
         const std::string topName = top.filename().u8string();
+        std::string otherGame;  // put in another game's folder: the folder it went to instead
         for (const WiiDataBin& save : saves) {
             char hi[9], id[9];
             std::snprintf(hi, sizeof hi, "%08x", unsigned(save.titleId >> 32));
@@ -444,6 +459,7 @@ FolderImport importWiiDataBins(const fs::path& dir, const fs::path& titles, cons
                 const std::string name = known == names.end() ? "" : folderName(known->second);
                 saved = dir / fs::u8path(name.empty() ? std::string(id) : name + " [" + id + "]");
             }
+            if (!folderId.empty() && folderId != id) otherGame = saved.filename().u8string();
             const fs::path emulator = titles / hi / id / "data";
             // Keep the save that's there: Imported/"<folder> (before)".
             std::error_code ec;
@@ -470,11 +486,11 @@ FolderImport importWiiDataBins(const fs::path& dir, const fs::path& titles, cons
             }
         }
         if (!ok) continue;
-        if (!moveToImported({top})) {
+        if (!moveToImported({top}, dir / "Imported")) {
             result.problem = topName + " was used but couldn't be moved to the Imported folder";
             continue;
         }
-        result.used.push_back(topName);
+        result.used.push_back(otherGame.empty() ? topName : topName + " (it's for another game: " + otherGame + ")");
     }
     return result;
 }

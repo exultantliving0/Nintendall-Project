@@ -45,9 +45,10 @@ std::filesystem::path statesFolderFor(const std::filesystem::path& savesRoot, co
 std::vector<std::filesystem::path> importSave(const std::filesystem::path& dir, const std::string& name, System system,
                                               std::vector<uint8_t>& ram);
 
-// Moves files (or folders) that were used into the Imported folder next to them (so they're used
-// only once, and are still there if they're wanted again). Returns false if one couldn't be moved.
-bool moveToImported(const std::vector<std::filesystem::path>& files);
+// Moves files (or folders) that were used into the Imported folder next to them, or into `into`
+// (so they're used only once, and are still there if they're wanted again). Returns false if one
+// couldn't be moved.
+bool moveToImported(const std::vector<std::filesystem::path>& files, const std::filesystem::path& into = {});
 
 // Wii, Wii U and 3DS: the save files of each game are kept in Saves/<console>/Saves, one folder per game,
 // laid out like the emulator's own save folder (and Dolphin's / Cemu's / Citra's, so their save
@@ -100,7 +101,8 @@ struct FolderImport {
 };
 // Wii saves the way a Wii copies them to an SD card (Data Management: private/wii/title/<ID>/data.bin)
 // and save sites offer them: a .bin file put in Saves/Wii/Saves (any name: "save.bin"), or a folder
-// put there with a data.bin in it ("private", "RMCE"). The save is unpacked into the game's save
+// put there with a data.bin in it ("private", "RMCE"); also in a game's save folder there, next to
+// its "data" (the file says which game it's for, so it goes to its own game). The save is unpacked into the game's save
 // folder there and into Dolphin's (`titles`: its Wii/title folder), replacing the save that was
 // there, which is kept in Imported ("... (before)"); then the file (or folder) is moved to Imported.
 // names: game names by ID, for naming a new save folder.

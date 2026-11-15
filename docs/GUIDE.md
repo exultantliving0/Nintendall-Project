@@ -130,9 +130,13 @@ an SD card (Wii Options > Data Management > Save Data, `private/wii/title/<ID>/d
 on the card), which is also how save sites offer Wii saves. Put the file in
 `Saves/Wii/Saves` (any name works: `save.bin`, `Mario Kart Wii.bin`), or the
 whole `private` folder (or the game's folder from it), then start Nintendall or
-any Wii game. The file says which game it's for: Nintendall unpacks it into
-that game's save folder and Dolphin's, keeps the save that was there in
-`Imported` (as "... (before)"), and moves the file to `Imported`.
+any Wii game. If the game already has a save folder there
+(`Saves/Wii/Saves/Mario Kart Wii [524d4345]`), the file can go in it too, next
+to its `data` folder. The file says which game it's for: Nintendall unpacks it
+into that game's save folder and Dolphin's (if it was put in another game's
+folder, it still goes to its own game, and Nintendall says so), keeps the save
+that was there in `Imported` (as "... (before)"), and moves the file to
+`Saves/Wii/Saves/Imported`.
 
 Under the hood it's a **libretro frontend**. The emulation is done by one proven,
 open-source emulator "core" per system, bundled in `cores/` next to the program.
