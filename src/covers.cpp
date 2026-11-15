@@ -300,8 +300,8 @@ bool isLanguageTag(const std::string& tag) {
 }
 
 // Picks the best-looking entry: the USA box first (then a World one), and the plain release: tags
-// the file has ("(Rev 1)") count for it, other tags against it ("(Virtual Console)", "(Switch
-// Online)", "(Mega Man X Legacy Collection)" are re-releases with other boxes). Hacks, betas and
+// the file has ("(Rev 1)") count for it, other tags against it ("(Virtual Console)", "(Collector's
+// Edition)", "(Mega Man X Legacy Collection)" are re-releases with other boxes). Hacks, betas and
 // prototypes only for a file that is one too.
 int score(const std::string& name, const std::string& fileName) {
     if (name == fileName) return 1 << 30;
