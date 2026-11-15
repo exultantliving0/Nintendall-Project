@@ -44,7 +44,7 @@ private:
         float s = 1;
         std::vector<SDL_Rect> tabs;
         std::vector<std::string> labels;
-        SDL_Rect tabBar{}, header{}, folderButton{}, grid{};
+        SDL_Rect tabBar{}, header{}, folderButton{}, zoomOut{}, zoomIn{}, grid{};
         int margin = 0, cardW = 0, coverH = 0, cardH = 0, gapX = 0, gapY = 0, cols = 1, x0 = 0, maxScroll = 0;
     };
     Layout layout(Text& t, const SDL_Rect& area) const;

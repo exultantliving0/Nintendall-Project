@@ -179,6 +179,9 @@ Home::Layout Home::layout(Text& t, const SDL_Rect& area) const {
     L.header = {area.x, area.y + tabH, area.w, int(52 * s)};
     const int bw = t.width("Open Folder") + int(28 * s), bh = t.lineHeight() + int(14 * s);
     L.folderButton = {L.header.x + L.header.w - L.margin - bw, L.header.y + (L.header.h - bh) / 2, bw, bh};
+    // - and + (smaller / bigger boxes, like Ctrl - / Ctrl +) beside Open Folder.
+    L.zoomIn = {L.folderButton.x - int(10 * s) - bh, L.folderButton.y, bh, bh};
+    L.zoomOut = {L.zoomIn.x - int(4 * s) - bh, L.folderButton.y, bh, bh};
     L.grid = {area.x, L.header.y + L.header.h, area.w, std::max(0, area.y + area.h - L.header.y - L.header.h)};
 
     // Boxes take about the same room on every console (128 x 180 for a tall box), in its own shape.
@@ -301,6 +304,17 @@ void Home::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
     const SDL_Rect& b = L.folderButton;
     v.fillRect(b.x, b.y, b.w, b.h, inside(b, mx, my) ? kButtonHover : kButton);
     t.draw(b.x + (b.w - t.width("Open Folder")) / 2, b.y + (b.h - t.lineHeight()) / 2, "Open Folder", kText);
+    // - and +, drawn as bars (dim when the boxes can't get any smaller / bigger).
+    for (const bool in : {false, true}) {
+        const SDL_Rect& z = in ? L.zoomIn : L.zoomOut;
+        const bool can = in ? coverSize_ < kMaxStep : coverSize_ > kMinStep;
+        v.fillRect(z.x, z.y, z.w, z.h, can && inside(z, mx, my) ? kButtonHover : kButton);
+        const int len = std::max(6, z.w * 2 / 5), th = std::max(2, int(2 * s));
+        const int cx = z.x + z.w / 2, cy = z.y + z.h / 2;
+        const Color c = can ? kText : kDim;
+        v.fillRect(cx - len / 2, cy - th / 2, len, th, c);
+        if (in) v.fillRect(cx - th / 2, cy - len / 2, th, len, c);
+    }
 
     // No games yet: say where they go.
     if (games_.empty()) {
@@ -392,6 +406,10 @@ bool Home::handleEvent(const SDL_Event& e, int mx, int my, Text& t, const SDL_Re
             }
         if (inside(L.folderButton, mx, my)) {
             openFolder(consoleFolder());
+            return true;
+        }
+        if (inside(L.zoomOut, mx, my) || inside(L.zoomIn, mx, my)) {
+            zoom(t, area, coverSize_ + (inside(L.zoomIn, mx, my) ? 1 : -1));
             return true;
         }
         pressed_ = cardAt(L, mx, my);
