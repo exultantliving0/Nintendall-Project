@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "crashlog.hpp"
 #include "saves.hpp"
 
 #include <algorithm>
@@ -299,6 +300,12 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         startDiscord();  // always on (whenever the Discord app is running)
     }
     input_.setForcedButtons(opt.holdButtons);
+    // What Nintendall is doing, for finding out why if it ever closes unexpectedly (crash.txt).
+    if (!opt.headless) {
+        const std::string previous = crashLogStart(paths_.data);
+        if (!previous.empty())
+            std::fprintf(stderr, "The last time, Nintendall closed unexpectedly while %s (see crash.txt)\n", previous.c_str());
+    }
 
     // Headless: load the game, run N frames as fast as possible, report, exit.
     if (opt.headless) {
@@ -380,11 +387,13 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
 
     stopGame();
     saveConfig();
+    crashStep("closing Nintendall");
     home_.shutdown();
     text_.shutdown();
     input_.shutdown();
     audio_.shutdown();
     video_.shutdown();
+    if (!opt.headless) crashLogEnd();
     return 0;
 }
 
@@ -483,6 +492,7 @@ bool App::startGame(const fs::path& path) {
     }
     const SystemInfo& sys = systemInfo(det.system);
     std::fprintf(stderr, "Detected %s (%s)\n", sys.fullName, det.detail.c_str());
+    crashStep(std::string("starting ") + sys.fullName + " game " + path.filename().u8string());
 
     if (sys.needsGpu) {
         showMessage("Coming soon", std::string(sys.fullName) +
@@ -566,9 +576,13 @@ bool App::startGame(const fs::path& path) {
         const char* zeros = "00000000000000000000000000000000";
         to.n3dsTitles = paths_.saves / "Azahar" / "sdmc" / "Nintendo 3DS" / zeros / zeros / "title" / "00040000";
         const LibraryGame info = readGameInfo(path, det.system);
-        const FolderImport imported =
-            importSaveFolders(savesFolderFor(savesRoot_, home_.gamesRoot(), path, det.system), det.system, to, path,
-                              info.gameId);
+        FolderImport imported;
+        try {
+            imported = importSaveFolders(savesFolderFor(savesRoot_, home_.gamesRoot(), path, det.system), det.system, to,
+                                         path, info.gameId);
+        } catch (const std::exception& e) {
+            imported.problem = std::string("Couldn't use the save folders: ") + e.what();
+        }
         if (!imported.problem.empty()) saveNote = imported.problem;
         else if (!imported.used.empty()) saveNote = "Using the save from " + imported.used.front();
         for (const std::string& n : imported.used) std::fprintf(stderr, "Imported save folder %s\n", n.c_str());
@@ -759,14 +773,21 @@ bool App::startGame(const fs::path& path) {
     std::fprintf(stderr, "Running %s with core %s %s (%ux%u @ %.3f fps, %.0f Hz audio)\n", gameTitle_.c_str(),
                  core_->name().c_str(), core_->version().c_str(), av.geometry.base_width, av.geometry.base_height,
                  av.timing.fps, av.timing.sample_rate);
+    crashStep(std::string("playing ") + systemInfo(system_).fullName + " game " + gameTitle_ + " (" + core_->name() + " " +
+              core_->version() + ")");
     return true;
 }
 
 void App::stopGame() {
     if (!core_) return;
+    const std::string closing = std::string("closing ") + systemInfo(system_).fullName + " game " + gameTitle_ + ": ";
+    crashStep(closing + "saving");
     saveSram(true);
+    crashStep(closing + "stopping " + core_->name());
     core_.reset();
+    crashStep(closing + "copying its saves to the Saves folder");
     syncSaves();  // the save the game just made goes to the Saves folder
+    crashStep(closing + "back to the home screen");
     wiiUTouchHint_ = false;
     input_.stopAllRumble();
     audio_.clear();
@@ -784,6 +805,7 @@ void App::stopGame() {
     paused_ = false;
     lan_ = Lan{};  // unloading the emulator ended the LAN game (it told the other players)
     if (video_.window()) SDL_SetWindowTitle(video_.window(), "Nintendall");
+    crashStep("on the home screen");
 }
 
 void App::addRecent(const fs::path& path) {
@@ -828,11 +850,15 @@ bool App::emulatorSaves(System s, SaveFolderSync& out) const {
 void App::syncSaves() {
     SaveFolderSync emu;
     if (saveSync_.system == System::Unknown || !emulatorSaves(saveSync_.system, emu)) return;
-    std::error_code ec;
-    fs::create_directories(saveSync_.folder, ec);
-    const SyncCount n = syncSaveFolders(saveSync_.folder, emu, saveSync_.id, saveSync_.title);
-    if (n.toSaves || n.toEmulator)
-        std::fprintf(stderr, "Saves folder: %d save(s) copied there, %d to the emulator\n", n.toSaves, n.toEmulator);
+    try {
+        std::error_code ec;
+        fs::create_directories(saveSync_.folder, ec);
+        const SyncCount n = syncSaveFolders(saveSync_.folder, emu, saveSync_.id, saveSync_.title);
+        if (n.toSaves || n.toEmulator)
+            std::fprintf(stderr, "Saves folder: %d save(s) copied there, %d to the emulator\n", n.toSaves, n.toEmulator);
+    } catch (const std::exception& e) {  // (a file name Windows can't convert...): the saves stay where they are
+        std::fprintf(stderr, "Saves folder: couldn't copy the saves: %s\n", e.what());
+    }
 }
 
 // The save folder an emulator gets: Nintendall's own data folder, except Mesen's, whose only files
@@ -843,7 +869,7 @@ fs::path App::saveDirFor(const char* coreName, System system, const fs::path& ga
     std::error_code ec;
     fs::create_directories(dir, ec);
     // Disk saves made by older versions move there (unless one with that name is there already).
-    for (const auto& e : fs::directory_iterator(paths_.saves, ec)) {
+    for (const auto& e : entriesIn(paths_.saves)) {
         std::error_code ec2;
         if (!e.is_regular_file(ec2) || e.path().extension() != ".ips") continue;
         const fs::path to = dir / e.path().filename();
@@ -967,7 +993,7 @@ fs::path App::gameCubeSaves() {
     if (cfg_.get("saves.gamecube_copied") != "1") {
         for (const auto& [from, to_dir] : {std::pair<const char*, const char*>{"USA", "USA"}, {"EUR", "EUR"}, {"JAP", "JPN"}}) {
             const fs::path old = paths_.saves / "User" / "GC" / from / "Card A";
-            for (const auto& e : fs::directory_iterator(old, ec)) {
+            for (const auto& e : entriesIn(old)) {
                 std::error_code ec2;
                 const fs::path to = dir / to_dir / e.path().filename();
                 if (e.is_regular_file(ec2) && !fs::exists(to, ec2)) fs::copy_file(e.path(), to, ec2);

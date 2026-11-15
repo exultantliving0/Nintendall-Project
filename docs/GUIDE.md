@@ -523,6 +523,7 @@ beside it instead.
 - `screenshots/`
 - `covers/`: lists of game names for finding covers, and notes of covers that don't exist (the covers themselves are in the Box Covers folder)
 - `nintendall.cfg`: settings, button mappings and recent games
+- `crash.txt`: if Nintendall ever closes unexpectedly, what it was doing (and, on Windows, where it crashed); the next start makes it
 
 Games go in the Games folder (`Documents/Nintendall/Games`, see Home screen), and
 saves are in the Saves folder next to it (see Saves).
@@ -539,6 +540,7 @@ saves are in the Saves folder next to it (see Saves).
 | `src/app.*` | main window, menu actions, game loop, saves |
 | `src/discord.*` | Discord status (Rich Presence, through the Discord app's local connection) |
 | `src/saves.*` | the Saves folder: other emulators' save files (conversion and Imported folder), Wii / Wii U / 3DS save sync |
+| `src/crashlog.*` | crash.txt: what Nintendall was doing when it closed unexpectedly, and where it crashed (Windows) |
 | `src/home.*`, `src/library.*`, `src/covers.*`, `src/http.*` | home screen, Games folder scanning (and game IDs), box cover downloads |
 | `src/update.*`, `src/selfupdate.*`, `src/sha256.*` | checks GitHub for a new version at startup; Update Now (download, check, install, restart) |
 | `src/menubar.*`, `src/buttonconfig.*`, `src/text.*`, `src/filedialog.*` | menu bar, Button Config window, font drawing, system Open dialog |

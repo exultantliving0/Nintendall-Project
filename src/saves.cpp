@@ -43,6 +43,13 @@ const char kDesmumeFooter[] = "|<--Snip above here to create a raw sav by exclud
 
 }  // namespace
 
+std::vector<fs::directory_entry> entriesIn(const fs::path& dir) {
+    std::vector<fs::directory_entry> entries;
+    std::error_code ec;
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) entries.push_back(*it);
+    return entries;
+}
+
 void createSaveFolders(const fs::path& savesRoot) {
     std::error_code ec;
     for (const HomeConsole& c : homeConsoles()) fs::create_directories(savesRoot / fs::u8path(c.folder), ec);
@@ -76,7 +83,7 @@ std::vector<fs::path> importSave(const fs::path& dir, const std::string& name, S
     }
     std::vector<fs::path> found;
     std::error_code ec;
-    for (const auto& e : fs::directory_iterator(dir, ec)) {
+    for (const auto& e : entriesIn(dir)) {
         std::error_code ec2;
         if (!e.is_regular_file(ec2)) continue;
         const fs::path& p = e.path();
@@ -178,7 +185,7 @@ FolderImport importSaveFolders(const fs::path& dir, System console, const Emulat
     std::error_code ec;
     const std::string gameName = lowerCase(fs::is_directory(game, ec) ? game.filename().u8string() : game.stem().u8string());
     std::vector<fs::path> folders;
-    for (const auto& e : fs::directory_iterator(dir, ec)) {
+    for (const auto& e : entriesIn(dir)) {
         std::error_code ec2;
         if (e.is_directory(ec2) && e.path().filename() != "Imported") folders.push_back(e.path());
     }
@@ -364,14 +371,14 @@ SyncCount syncSaveFolders(const fs::path& savesDir, const SaveFolderSync& emu, c
     std::error_code ec;
     // The games' folders on each side, by ID.
     std::map<std::string, fs::path> inEmu, inSaves;
-    for (const auto& e : fs::directory_iterator(emu.emulator, ec)) {
+    for (const auto& e : entriesIn(emu.emulator)) {
         std::error_code ec2;
         const std::string name = e.path().filename().u8string();
         if (e.is_directory(ec2) && isHex(name, emu.idLength) &&
             (emu.inner.empty() || fs::is_directory(e.path() / emu.inner, ec2)))
             inEmu[lowerCase(name)] = e.path();
     }
-    for (const auto& e : fs::directory_iterator(savesDir, ec)) {
+    for (const auto& e : entriesIn(savesDir)) {
         std::error_code ec2;
         const std::string id = e.is_directory(ec2) ? idInName(e.path().filename().u8string(), emu.idLength) : "";
         if (!id.empty() && !inSaves.count(id)) inSaves[id] = e.path();

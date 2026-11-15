@@ -12,6 +12,10 @@
 // Saves from other emulators can be put there with the game's name ("Pokemon Emerald.sav"): the
 // next time the game starts, Nintendall uses them.
 
+// The files and folders in a folder (none if it can't be read). Unlike a loop over a
+// directory_iterator, this never throws (an error thrown when a game closes would end Nintendall).
+std::vector<std::filesystem::directory_entry> entriesIn(const std::filesystem::path& dir);
+
 // Makes the Saves folder's console folders.
 void createSaveFolders(const std::filesystem::path& savesRoot);
 
