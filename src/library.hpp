@@ -61,6 +61,9 @@ int discInName(const std::string& fileName, std::string* rest = nullptr);
 
 // One game's name and ID, read from its file (or Wii U game folder).
 LibraryGame readGameInfo(const std::filesystem::path& path, System console);
+// A Wii channel's (.wad) title ID from its TMD: "0001000146414b45" (downloadable channels:
+// Virtual Console, WiiWare), "00010004..." (game channels). "" if it isn't a WAD.
+std::string wadTitleId(const std::filesystem::path& wad);
 
 // Every disc of the game a GameCube / Wii disc belongs to, starting with that one (the game's other
 // discs, from the same folder). Just the file itself for one-disc games.

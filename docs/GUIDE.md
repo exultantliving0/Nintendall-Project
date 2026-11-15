@@ -86,9 +86,10 @@ it, set `saves.folder` in `nintendall.cfg`. Each console's folder has two folder
 - **Wii, Wii U and 3DS:** one folder per game, named with the game's name and
   ID (`Saves/Wii/Saves/Mario Kart Wii [524d4345]`), holding just that game's save
   files, laid out like Dolphin's, Cemu's and Citra's own save folders. The
-  emulator works on its own copy; before a game starts and after it stops,
-  Nintendall brings the two in step, and the newer copy of each game's save
-  wins.
+  emulator works on its own copy; when Nintendall starts, before a game starts
+  and after it stops, Nintendall brings the two in step, and the newer copy of
+  each game's save wins. Wii channel games (`.wad`: Virtual Console, WiiWare)
+  have their save folder there too.
 
 **Saves from other emulators:** put the save file in the console's Saves
 folder (`Saves/<console>/Saves`), renamed to the game file's name, and start the game. Nintendall uses it
@@ -115,7 +116,7 @@ that console. Nintendall puts it where its emulator keeps that game's save:
 
 | Console | Folder to copy |
 |---|---|
-| Wii (Dolphin) | the game's folder in Dolphin's `Wii/title/00010000` (named like `524d4345`); or a folder named like the game file, or with its ID (`RMCE01`), holding the save's files |
+| Wii (Dolphin) | the game's folder in Dolphin's `Wii/title/00010000` (named like `524d4345`; Virtual Console and WiiWare: `Wii/title/00010001`); or a folder named like the game file, or with its ID (`RMCE01`), holding the save's files |
 | Wii U (Cemu) | the game's folder in Cemu's `mlc01/usr/save/00050000` (named like `101c9400`) |
 | 3DS (Citra, Azahar) | the game's folder in `sdmc/Nintendo 3DS/.../title/00040000` (named like `00030700`) |
 

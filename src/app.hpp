@@ -83,10 +83,13 @@ private:
         System system = System::Unknown;
         std::filesystem::path folder;  // Saves/<console>/Saves
         std::string id, title;         // the game's save ID and name ("" if not known)
+        std::filesystem::path emulatorFolder;  // where its save goes in the emulator ("" = the usual place)
     };
     SaveSyncGame saveSync_;
     bool emulatorSaves(System s, SaveFolderSync& out) const;
     void syncSaves();
+    void syncAllSaves();
+    std::filesystem::path wiiTitles(const std::string& type = "00010000") const;
     std::filesystem::path saveDirFor(const char* coreName, System system, const std::filesystem::path& game) const;
     std::filesystem::path snesSaveDir(const std::filesystem::path& game, const std::filesystem::path& launched,
                                       std::string& note);

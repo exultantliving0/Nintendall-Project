@@ -429,18 +429,21 @@ std::string saveFolderId(System console, const fs::path& game, const std::string
 }
 
 SyncCount syncSaveFolders(const fs::path& savesDir, const SaveFolderSync& emu, const std::string& currentId,
-                          const std::string& currentName) {
+                          const std::string& currentName, const std::map<std::string, std::string>& names) {
     SyncCount count;
     std::error_code ec;
     // The games' folders on each side, by ID.
     std::map<std::string, fs::path> inEmu, inSaves;
-    for (const auto& e : entriesIn(emu.emulator)) {
-        std::error_code ec2;
-        const std::string name = e.path().filename().u8string();
-        if (e.is_directory(ec2) && isHex(name, emu.idLength) &&
-            (emu.inner.empty() || fs::is_directory(e.path() / emu.inner, ec2)))
-            inEmu[lowerCase(name)] = e.path();
-    }
+    std::vector<fs::path> emuFolders{emu.emulator};
+    emuFolders.insert(emuFolders.end(), emu.alsoIn.begin(), emu.alsoIn.end());
+    for (const fs::path& folder : emuFolders)
+        for (const auto& e : entriesIn(folder)) {
+            std::error_code ec2;
+            const std::string name = e.path().filename().u8string();
+            if (e.is_directory(ec2) && isHex(name, emu.idLength) &&
+                (emu.inner.empty() || fs::is_directory(e.path() / emu.inner, ec2)) && !inEmu.count(lowerCase(name)))
+                inEmu[lowerCase(name)] = e.path();
+        }
     for (const auto& e : entriesIn(savesDir)) {
         std::error_code ec2;
         const std::string id = e.is_directory(ec2) ? idInName(e.path().filename().u8string(), emu.idLength) : "";
@@ -452,18 +455,23 @@ SyncCount syncSaveFolders(const fs::path& savesDir, const SaveFolderSync& emu, c
 
     const std::string current = lowerCase(currentId);
     for (const std::string& id : ids) {
-        // The Saves folder: named with the game's name too when it's the game being played.
+        // The Saves folder: named with the game's name too when it's the game being played, or
+        // when it's known and the folder has just the ID.
         fs::path saved = inSaves.count(id) ? inSaves[id] : fs::path();
-        const std::string wanted = id == current && !folderName(currentName).empty()
-                                       ? folderName(currentName) + " [" + id + "]"
-                                       : (saved.empty() ? id : saved.filename().u8string());
+        const auto known = names.find(id);
+        const std::string knownName = known == names.end() ? "" : folderName(known->second);
+        std::string wanted = saved.empty() ? id : saved.filename().u8string();
+        if (id == current && !folderName(currentName).empty()) wanted = folderName(currentName) + " [" + id + "]";
+        else if (!knownName.empty() && lowerCase(wanted) == id) wanted = knownName + " [" + id + "]";
         if (!saved.empty() && saved.filename().u8string() != wanted && !fs::exists(savesDir / fs::u8path(wanted), ec)) {
             std::error_code ec2;
             fs::rename(saved, savesDir / fs::u8path(wanted), ec2);
             if (!ec2) saved = savesDir / fs::u8path(wanted);
         }
         if (saved.empty()) saved = savesDir / fs::u8path(wanted);
-        const fs::path emuGame = inEmu.count(id) ? inEmu[id] : emu.emulator / id;
+        const fs::path emuGame = inEmu.count(id)                            ? inEmu[id]
+                                 : id == current && !emu.currentIn.empty() ? emu.currentIn / id
+                                                                           : emu.emulator / id;
         const fs::path a = emu.inner.empty() ? emuGame : emuGame / emu.inner;
         const fs::path b = emu.inner.empty() ? saved : saved / emu.inner;
         // A side counts only with save files in it (an empty folder isn't a save).

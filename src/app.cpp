@@ -335,6 +335,9 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
     }
     std::error_code ec;
     draw();  // show the window before any message box can pop up
+    crashStep("copying the Wii, Wii U and 3DS saves to the Saves folder");
+    syncAllSaves();
+    crashStep("on the home screen");
     if (!start.empty() && !fs::is_directory(start, ec)) startGame(start);
     else if (!start.empty() && detectGame(start).system != System::Unknown) startGame(start);  // Wii U folder
 
@@ -579,7 +582,9 @@ bool App::startGame(const fs::path& path) {
     // Save folders from other emulators in Saves/<console>/Saves (Wii, Wii U, 3DS).
     if (det.system == System::Wii || det.system == System::WiiU || det.system == System::N3DS) {
         EmulatorSaveFolders to;
-        to.wiiTitles = paths_.saves / "User" / "Wii" / "title" / "00010000";
+        // A Wii channel (.wad: Virtual Console, WiiWare) keeps its save with the channels.
+        const std::string wad = det.system == System::Wii ? wadTitleId(path) : "";
+        to.wiiTitles = wiiTitles(wad.empty() ? "00010000" : wad.substr(0, 8));
         to.cemuSaves = paths_.saves / "Cemu" / "mlc01" / "usr" / "save" / "00050000";
         const char* zeros = "00000000000000000000000000000000";
         to.n3dsTitles = paths_.saves / "Azahar" / "sdmc" / "Nintendo 3DS" / zeros / zeros / "title" / "00040000";
@@ -597,7 +602,8 @@ bool App::startGame(const fs::path& path) {
         // The game's saves in the Saves folder and the emulator's copy, brought in step (again
         // when the game stops: see stopGame).
         saveSync_ = SaveSyncGame{det.system, savesFolderFor(savesRoot_, home_.gamesRoot(), path, det.system),
-                                 saveFolderId(det.system, path, info.gameId), info.title};
+                                 saveFolderId(det.system, path, info.gameId), info.title,
+                                 wad.empty() ? fs::path() : to.wiiTitles};
         syncSaves();
     } else {
         saveSync_ = SaveSyncGame{};
@@ -845,7 +851,9 @@ std::vector<std::string> App::recentGames() const {
 bool App::emulatorSaves(System s, SaveFolderSync& out) const {
     switch (s) {
     case System::Wii:
-        out = {paths_.saves / "User" / "Wii" / "title" / "00010000", 8, "data"};
+        // Discs' saves, then channels' (Virtual Console and WiiWare; game channels).
+        out = {wiiTitles(), 8, "data"};
+        out.alsoIn = {wiiTitles("00010001"), wiiTitles("00010004")};
         return true;
     case System::WiiU:
         out = {paths_.saves / "Cemu" / "mlc01" / "usr" / "save" / "00050000", 8, ""};
@@ -865,11 +873,45 @@ void App::syncSaves() {
     try {
         std::error_code ec;
         fs::create_directories(saveSync_.folder, ec);
+        emu.currentIn = saveSync_.emulatorFolder;
         const SyncCount n = syncSaveFolders(saveSync_.folder, emu, saveSync_.id, saveSync_.title);
         if (n.toSaves || n.toEmulator)
             std::fprintf(stderr, "Saves folder: %d save(s) copied there, %d to the emulator\n", n.toSaves, n.toEmulator);
     } catch (const std::exception& e) {  // (a file name Windows can't convert...): the saves stay where they are
         std::fprintf(stderr, "Saves folder: couldn't copy the saves: %s\n", e.what());
+    }
+}
+
+// Dolphin's Wii saves: title/00010000 (discs), 00010001 (Virtual Console, WiiWare), 00010004 (game channels).
+fs::path App::wiiTitles(const std::string& type) const { return paths_.saves / "User" / "Wii" / "title" / type; }
+
+// At start: every Wii, Wii U and 3DS save the emulators have is copied to the Saves folder (and
+// the other way, the newer copy winning, like when a game starts), named with the game's name
+// when the game is in the Games folder. So saves made before are there too.
+void App::syncAllSaves() {
+    for (System console : {System::Wii, System::WiiU, System::N3DS}) {
+        SaveFolderSync emu;
+        if (!emulatorSaves(console, emu)) continue;
+        const fs::path folder = savesFolderFor(savesRoot_, {}, {}, console);
+        try {
+            std::map<std::string, std::string> names;
+            for (const HomeConsole& c : homeConsoles()) {
+                if (c.system != console || home_.gamesRoot().empty()) continue;
+                Library library;
+                for (const LibraryGame& g : library.scan(home_.gamesRoot() / fs::u8path(c.folder), console)) {
+                    const std::string id = saveFolderId(console, g.path, g.gameId);
+                    if (!id.empty() && !names.count(id)) names[id] = g.title;
+                }
+            }
+            std::error_code ec;
+            fs::create_directories(folder, ec);
+            const SyncCount n = syncSaveFolders(folder, emu, "", "", names);
+            if (n.toSaves || n.toEmulator)
+                std::fprintf(stderr, "Saves folder (%s): %d save(s) copied there, %d to the emulator\n",
+                             systemInfo(console).fullName, n.toSaves, n.toEmulator);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "Saves folder (%s): couldn't copy the saves: %s\n", systemInfo(console).fullName, e.what());
+        }
     }
 }
 

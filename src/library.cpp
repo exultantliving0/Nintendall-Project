@@ -368,7 +368,13 @@ LibraryGame readGame(const fs::path& path, System console, bool folder) {
 
     std::ifstream f(path, std::ios::binary);
     if (!f) return g;
-    if (console == System::GameCube || console == System::Wii) {
+    if (console == System::Wii && ext == ".wad") {
+        // A channel: its ID is the end of its title ID ("FAKE" from 0001000146414b45).
+        const std::string tid = wadTitleId(path);
+        std::string id;
+        for (size_t i = 8; i + 1 < tid.size(); i += 2) id += char(std::stoi(tid.substr(i, 2), nullptr, 16));
+        if (validId(id, 4)) g.gameId = id;
+    } else if (console == System::GameCube || console == System::Wii) {
         std::string name;
         gameCubeWiiId(f, g.gameId, name, g.disc);
         std::string base;
@@ -393,6 +399,20 @@ LibraryGame readGame(const fs::path& path, System console, bool folder) {
 }
 
 }  // namespace
+
+std::string wadTitleId(const fs::path& wad) {
+    std::ifstream f(wad, std::ios::binary);
+    const std::vector<uint8_t> h = readAt(f, 0, 0x20);
+    if (h.size() < 0x20 || be32(&h[0]) != 0x20) return {};
+    // Header, certificates, ticket and TMD, each starting on a 64-byte boundary.
+    auto align = [](uint64_t n) { return (n + 63) & ~uint64_t(63); };
+    const uint64_t tmd = align(0x20) + align(be32(&h[8])) + align(be32(&h[16]));
+    const std::vector<uint8_t> id = readAt(f, tmd + 0x18C, 8);
+    if (id.size() < 8) return {};
+    char hex[17];
+    for (int i = 0; i < 8; ++i) std::snprintf(hex + i * 2, 3, "%02x", unsigned(id[size_t(i)]));
+    return std::string(hex, 16).rfind("0001", 0) == 0 ? std::string(hex, 16) : std::string();
+}
 
 LibraryGame readGameInfo(const fs::path& path, System console) {
     std::error_code ec;

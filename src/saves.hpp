@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -62,14 +63,21 @@ struct SaveFolderSync {
     std::filesystem::path emulator;  // the emulator's folder of saves, one folder per game ID
     size_t idLength = 8;             // hex digits in a game's ID
     std::string inner;               // the part that is the save, inside a game's folder ("data", or "" for all)
+    // More folders of saves (Wii: Dolphin's channels, title/00010001 and 00010004). A game's save
+    // stays in whichever folder has it; a save only in the Saves folder goes to `emulator`, or to
+    // `currentIn` if it's the current game's (a channel's save goes in its own folder).
+    std::vector<std::filesystem::path> alsoIn;
+    std::filesystem::path currentIn;
 };
-// currentId / currentName: the game being started or stopped (named folder), "" if unknown.
-// Returns how many saves were copied each way.
+// currentId / currentName: the game being started or stopped, "" if unknown. names: game names by
+// ID (the games in the Games folder). A save folder named with just the ID gets the game's name in
+// front ("Mario Kart Wii [524d4345]"). Returns how many saves were copied each way.
 struct SyncCount {
     int toSaves = 0, toEmulator = 0;
 };
 SyncCount syncSaveFolders(const std::filesystem::path& savesDir, const SaveFolderSync& emulator,
-                          const std::string& currentId, const std::string& currentName);
+                          const std::string& currentId, const std::string& currentName,
+                          const std::map<std::string, std::string>& names = {});
 // The ID a game's saves have in the emulator (Wii: "524d4345" from RMCE01; Wii U: from the game
 // folder's meta.xml), "" if it isn't known.
 std::string saveFolderId(System console, const std::filesystem::path& game, const std::string& gameId);
