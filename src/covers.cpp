@@ -420,6 +420,11 @@ std::string bestMatch(const Index& idx, const std::string& fileName, const std::
 // ============================================================================
 // The download thread
 
+// The note of where a game's downloaded cover came from (its web address).
+static fs::path coverSourceFile(const fs::path& cacheDir, System system, const std::string& fileName) {
+    return cacheDir / systemInfo(system).key / ("from - " + safeFileName(fileName) + ".url");
+}
+
 struct Covers::Shared {
     std::mutex mutex;
     std::condition_variable wake;
@@ -439,6 +444,7 @@ struct Covers::Shared {
     void run();
     Image load(const Request& r);
     std::vector<uint8_t> download(const Request& r, bool& reached);
+    std::string downloadedFrom;  // the web address of the cover download() returned
     const Index& index(System s);
     int get(const std::string& url, std::vector<uint8_t>& body, bool& reached) {
         if (offline()) return 0;
@@ -524,7 +530,10 @@ std::vector<uint8_t> Covers::Shared::download(const Request& r, bool& reached) {
     }
     const std::string url = "https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/" + urlEncode(name) + ".png";
     const int status = get(url, body, reached);
-    if (status == 200 && isImage(body)) return body;
+    if (status == 200 && isImage(body)) {
+        downloadedFrom = url;
+        return body;
+    }
     if (status != 404) reached = false;  // offline, or the server had a problem: tried again later
     return {};
 }
@@ -562,6 +571,8 @@ Image Covers::Shared::load(const Request& r) {
                 if (!readFile(img.file, bytes)) return img;
             } else {
                 writeFile(img.file, bytes.data(), bytes.size());
+                // Where it came from (the Discord status shows the cover from there).
+                writeFile(coverSourceFile(cacheDir, r.system, r.fileName), downloadedFrom.data(), downloadedFrom.size());
             }
         }
     }
@@ -693,6 +704,15 @@ void Covers::clear() {
 }
 
 std::string coverUrl(const fs::path& cacheDir, System system, const std::string& fileName, const std::string& title) {
+    // Discord takes addresses of up to 256 characters.
+    auto fits = [](const std::string& url) { return url.size() <= 256 ? url : std::string(); };
+    // The address the game's cover was downloaded from.
+    {
+        std::ifstream f(coverSourceFile(cacheDir, system, fileName));
+        std::string url;
+        if (std::getline(f, url) && url.rfind("https://", 0) == 0) return fits(url);
+    }
+    // Covers downloaded before Nintendall noted that: found again in the list of names.
     const char* sys = libretroSystem(system);
     if (!sys) return {};
     std::ifstream f(cacheDir / "names" / (std::string(sys) + ".txt"));
@@ -704,5 +724,5 @@ std::string coverUrl(const fs::path& cacheDir, System system, const std::string&
     buildIndex(idx);
     const std::string best = bestMatch(idx, fileName, title);
     return best.empty() ? std::string()
-                        : "https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/" + urlEncode(best) + ".png";
+                        : fits("https://thumbnails.libretro.com/" + urlEncode(sys) + "/Named_Boxarts/" + urlEncode(best) + ".png");
 }
