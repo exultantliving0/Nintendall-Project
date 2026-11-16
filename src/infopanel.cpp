@@ -1155,7 +1155,7 @@ InfoPanel::Layout InfoPanel::layout(Text& t, const SDL_Rect& area) {
     L.next = {x + bh + int(110 * s), by, bh, bh};
     const int ow = t.width(manualLink_.empty() ? "Open File" : "Open in Browser") + int(28 * s);
     L.browser = {x + w - ow, by, ow, bh};
-    const int bottom = tab_ == Manual ? by - int(12 * s) : L.panel.y + L.panel.h - pad - t.lineHeight() - int(10 * s);
+    const int bottom = tab_ == Manual ? by - int(12 * s) : L.panel.y + L.panel.h - pad;
     L.content = {x, y, w, std::max(0, bottom - y)};
     return L;
 }
@@ -1291,7 +1291,6 @@ void InfoPanel::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
         else
             message({"No picture of the back of the box found.",
                      "Click Add Custom Back Cover to use your own picture."});
-        t.draw(L.content.x, creditY, "Pictures from LaunchBox and TheGamesDB", kDim);
     } else {
         if (manualState_ == State::Loading) {
             message({manualProgress_ >= 0 ? "Downloading the manual... " + std::to_string(manualProgress_) + "%"
