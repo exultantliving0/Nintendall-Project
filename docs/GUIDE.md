@@ -18,18 +18,24 @@ buttons beside Open Folder) make the covers bigger or smaller (remembered),
 **I**, or with a controller and press the top button) and a panel slides in from
 the right with:
 
-- **Add Custom Cover**: pick a picture on your computer (PNG, JPEG, BMP or GIF)
-  and it becomes the game's box cover. Nintendall names it like the game and puts
-  it in the console's Box Covers folder, replacing the cover that was there.
+- **Add Custom Cover**, **Add Custom Back Cover**: pick a picture on your
+  computer (PNG, JPEG, BMP or GIF) and it becomes the game's box cover or the
+  back of its box. Nintendall names it like the game and puts it in the
+  console's folder in Box Covers and Manuals (the back in its `Back` folder),
+  replacing the picture that was there.
+- **Import Game Manual**: pick a PDF on your computer and it becomes the game's
+  manual, put in the console's `Manuals` folder named like the game (replacing
+  the manual that was there).
 - **Back of Box**: a picture of the back of the box (click it to see it big).
-  It's downloaded once and kept in a `Back` folder in the console's Box Covers
-  folder (`Box Covers/NES/Back/Super Mario Bros. (World).jpg`). To use your own,
-  put a `.png` or `.jpg` named like the game there; a picture that's already
-  there is never replaced.
+  It's downloaded once and kept in the `Back` folder
+  (`Box Covers and Manuals/NES/Back/Super Mario Bros. (World).jpg`).
 - **Manual**: the game's instruction booklet, page by page. Click a page (or
   press Enter / A) to see it big; the arrows, arrow keys or D-pad turn the pages.
   **Open in Browser** opens it on the website it came from. A manual is
-  downloaded once and kept, so it opens straight away the next time.
+  downloaded once and kept as a PDF in the `Manuals` folder
+  (`Box Covers and Manuals/NES/Manuals/Super Mario Bros. (World).pdf`), so it
+  opens straight away the next time. If a PDF's pages can't be shown in
+  Nintendall, **Open File** opens it in your computer's PDF reader.
 
 Tab / Shift+Tab (L / R on a controller) switch between Back of Box and Manual;
 **C** is Add Custom Cover; Esc, B, a click beside the panel or the X close it.
@@ -54,16 +60,18 @@ missing folders when it starts. **File > Open Games Folder** or the **Open
 Folder** button go there. Games can be in subfolders, zipped (`.zip`), and
 Famicom Disk System games go in `NES/`. New games show up by themselves.
 To use another folder, set `games.folder = "D:/My Games"` in `nintendall.cfg`
-(and `covers.folder` for the Box Covers folder; portable mode uses `Games/` and
-`Box Covers/` next to the program).
+(and `covers.folder` for the Box Covers and Manuals folder; portable mode uses
+`Games/` and `Box Covers and Manuals/` next to the program).
 
-**Box covers** live in the **Box Covers** folder next to the Games folder
-(`Documents/Nintendall/Box Covers/<console>/`), named like the game file:
-`Box Covers/NES/Super Mario Bros. (World).png` is the cover of
-`Games/NES/Super Mario Bros. (World).nes`. To use your own cover, put a `.png`
-or `.jpg` with the game's name there (replacing the downloaded one if there is
-one); it shows up within a few seconds. Delete a cover to get the downloaded
-one back. **File > Open Box Covers Folder** goes there.
+**Box covers and manuals** live in the **Box Covers and Manuals** folder next to
+the Games folder (`Documents/Nintendall/Box Covers and Manuals/<console>/`), named
+like the game file: `Box Covers and Manuals/NES/Super Mario Bros. (World).png` is
+the cover of `Games/NES/Super Mario Bros. (World).nes`. Each console's folder also
+has a `Back` folder (backs of the boxes) and a `Manuals` folder (manuals, as PDFs).
+To use your own cover, back or manual, use the buttons in the game info panel, or
+put a file with the game's name there yourself; it shows up within a few seconds.
+**File > Open Box Covers and Manuals Folder** goes there. (Before 1.3.8 this
+folder was called Box Covers; Nintendall moves what's in it over by itself.)
 
 Every box on a console's row is the same size, in that console's box shape
 (tall for NES, GameCube, Wii and Wii U, wide for SNES and N64, square
@@ -565,7 +573,7 @@ beside it instead.
 - `system/`: BIOS / firmware files that some cores need
 - `config/`: per-core settings (`<core>.opt`, editable)
 - `screenshots/`
-- `covers/`: lists of game names for finding covers, and notes of covers that don't exist (the covers themselves are in the Box Covers folder)
+- `covers/`: lists of game names for finding covers, and notes of covers that don't exist (the covers themselves are in the Box Covers and Manuals folder)
 - `nintendall.cfg`: settings, button mappings and recent games
 - `crash.txt`: if Nintendall ever closes unexpectedly, what it was doing (and, on Windows, where it crashed); the next start makes it
 

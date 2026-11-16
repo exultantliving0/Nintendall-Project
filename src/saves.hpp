@@ -7,7 +7,7 @@
 
 #include "systems.hpp"
 
-// The Saves folder (Documents/Nintendall/Saves, next to Games and Box Covers) has a folder per
+// The Saves folder (Documents/Nintendall/Saves, next to Games and Box Covers and Manuals) has a folder per
 // console, and in each of them a Saves folder (the games' own saves) and a States folder (save
 // states). Battery saves (NES, SNES, N64, Game Boy, GBA, DS) are named like the game file:
 // "Saves/SNES/Saves/Super Mario World (USA).srm" (Famicom Disk System disk saves: "<game>.ips" in

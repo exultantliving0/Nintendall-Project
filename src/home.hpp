@@ -18,7 +18,7 @@
 // controller's top button) for its info panel: back of the box, manual and Add Custom Cover.
 class Home {
 public:
-    // gamesRoot: the Games folder; coversRoot: the Box Covers folder (both with a folder per console);
+    // gamesRoot: the Games folder; coversRoot: the Box Covers and Manuals folder (both with a folder per console);
     // coverCache: Nintendall's own cover notes; infoDir: the gameinfo folder shipped with the program;
     // infoCache: Nintendall's own notes for the info panel (manuals found, pages seen).
     void start(const std::filesystem::path& gamesRoot, const std::filesystem::path& coversRoot,

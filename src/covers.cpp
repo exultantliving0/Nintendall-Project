@@ -45,7 +45,7 @@ struct Request {
     std::string key;  // the game's path
     System system;
     std::string fileName, title;
-    fs::path folder;  // the console's Box Covers folder
+    fs::path folder;  // the console's Box Covers and Manuals folder
 };
 
 struct Image {
@@ -546,13 +546,13 @@ Image Covers::Shared::load(const Request& r) {
     std::vector<uint8_t> bytes;
     std::error_code ec;
 
-    // A picture in the Box Covers folder is always used as it is: never replaced or removed.
+    // A picture in the Box Covers and Manuals folder is always used as it is: never replaced or removed.
     const fs::path have = findCoverFile(r.folder, r.fileName);
     if (!have.empty()) {
         if (readFile(have, bytes)) img.file = have;
     } else {
         // No picture yet: download the USA cover in the best quality there is (unless it was
-        // looked for in the last week and doesn't exist), and save it in the Box Covers folder.
+        // looked for in the last week and doesn't exist), and save it in the Box Covers and Manuals folder.
         // ("usa2": notes from older versions don't count, their matching missed "(World)" covers.)
         const fs::path none = cacheDir / systemInfo(r.system).key / ("usa2 - " + safeFileName(r.fileName) + ".none");
         if (fs::exists(none, ec) && !olderThan(none, kRetryMissing)) return img;
@@ -664,7 +664,7 @@ std::string addCustomCover(const fs::path& dir, const std::string& fileName, con
         if (!f) {
             f.close();
             fs::remove(tmp, ec);
-            return "Couldn't save the cover in the Box Covers folder.";
+            return "Couldn't save the cover in the Box Covers and Manuals folder.";
         }
     }
     // The player asked for it: the game's old cover (any kind of picture) is replaced.
@@ -675,7 +675,7 @@ std::string addCustomCover(const fs::path& dir, const std::string& fileName, con
     fs::rename(tmp, dest, ec);
     if (ec) {
         fs::remove(tmp, ec);
-        return "Couldn't save the cover in the Box Covers folder.";
+        return "Couldn't save the cover in the Box Covers and Manuals folder.";
     }
     return "";
 }

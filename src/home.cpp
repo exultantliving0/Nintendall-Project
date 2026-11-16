@@ -98,6 +98,13 @@ void Home::start(const fs::path& gamesRoot, const fs::path& coversRoot, const fs
     coversRoot_ = coversRoot;
     createGameFolders(root_);
     createGameFolders(coversRoot_);
+    // Each console's folder in Box Covers and Manuals has a Back folder (backs of the boxes) and a
+    // Manuals folder (the games' manuals, as PDFs).
+    for (const HomeConsole& c : homeConsoles()) {
+        std::error_code ec;
+        fs::create_directories(coversRoot_ / fs::u8path(c.folder) / "Back", ec);
+        fs::create_directories(coversRoot_ / fs::u8path(c.folder) / "Manuals", ec);
+    }
     covers_.start(coverCache);
     panel_.start(infoDir, infoCache);
     const auto& list = homeConsoles();
@@ -123,7 +130,7 @@ void Home::refresh() {
     if (!fs::is_directory(consoleFolder(), ec)) createGameFolders(root_);
     games_ = library_.scan(consoleFolder(), homeConsoles()[size_t(console_)].system);
     if (selected_ >= int(games_.size())) selected_ = int(games_.size()) - 1;
-    covers_.recheck(games_);  // covers added or replaced in the Box Covers folder
+    covers_.recheck(games_);  // covers added or replaced in the Box Covers and Manuals folder
     lastScan_ = SDL_GetTicks();
 }
 

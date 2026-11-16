@@ -13,21 +13,24 @@
 #include "video.hpp"
 
 // The game info panel: right-click a box on the home screen and it slides in from the right with
-//   Add Custom Cover  pick a picture on the computer: it becomes the game's box cover
-//   Back of Box       a picture of the back of the box (click it to see it big), downloaded once (LaunchBox Games Database or TheGamesDB) and
-//                     kept in "Box Covers/<console>/Back" (a picture already there is used as it is, never replaced)
-//   Manual            the game's instruction booklet, page by page (click a page to see it big): from Digitpress
-//                     or the Internet Archive, downloaded once and kept with Nintendall's own files
+//   Add Custom Cover / Add Custom Back Cover / Import Game Manual
+//                     pick a file on the computer: it becomes the game's box cover, back cover or manual
+//                     (copied into the console's Box Covers and Manuals folder, named like the game)
+//   Back of Box       a picture of the back of the box (click it to see it big), downloaded once (LaunchBox Games
+//                     Database or TheGamesDB) and kept in "Box Covers and Manuals/<console>/Back"
+//   Manual            the game's instruction booklet, page by page (click a page to see it big): from Digitpress or the
+//                     Internet Archive, downloaded once and kept as a PDF in "Box Covers and Manuals/<console>/Manuals"
+// A picture or manual already in those folders is used as it is; downloads never replace one.
 // Downloads happen in the background; the panel shows what it has so far.
 class InfoPanel {
 public:
     ~InfoPanel();
-    // infoDir: the gameinfo folder; cacheDir: Nintendall's own files (the manuals downloaded).
+    // infoDir: the gameinfo folder; cacheDir: Nintendall's own files (notes of where manuals came from).
     void start(const std::filesystem::path& infoDir, const std::filesystem::path& cacheDir);
     // Frees the pictures (before the renderer goes away).
     void shutdown();
 
-    // Slides in with a game's info. coverFolder: this console's Box Covers folder.
+    // Slides in with a game's info. coverFolder: this console's folder in Box Covers and Manuals.
     void open(const LibraryGame& game, const std::filesystem::path& coverFolder);
     void close();
     bool shown() const { return open_ || anim_ > 0.0f; }  // open, or still sliding away
@@ -53,8 +56,8 @@ private:
     struct Shared;
     struct Layout {
         float s = 1;
-        SDL_Rect panel{}, close{}, cover{}, content{}, prev{}, next{}, browser{};
-        std::vector<SDL_Rect> tabs;
+        SDL_Rect panel{}, close{}, content{}, prev{}, next{}, browser{};
+        std::vector<SDL_Rect> tabs, buttons;
         std::vector<std::string> titleLines;
         std::string subtitle;
         int titleY = 0, subtitleY = 0;
@@ -66,7 +69,8 @@ private:
     void takeResults(SDL_Renderer* r);
     void requestPage(int page);
     void freePictures();
-    void addCover(SDL_Window* window);
+    void importFile(SDL_Window* window, int which);
+    std::string importManual(const std::filesystem::path& picked);
     void drawBig(Video& v, Text& t, const SDL_Rect& area, int mouseX, int mouseY);
     bool bigEvent(const SDL_Event& e, int mouseX, int mouseY, const SDL_Rect& area);
     const std::vector<std::string>& wrapped(Text& t, const std::string& text, int width);
@@ -81,7 +85,7 @@ private:
     int scroll_ = 0, maxScroll_ = 0;
     unsigned generation_ = 0;
 
-    // Add Custom Cover: what happened, shown under the button for a while.
+    // The buttons (Add Custom Cover...): what happened, shown under the title for a while.
     std::string coverNote_;
     bool coverNoteBad_ = false;
     Uint32 coverNoteUntil_ = 0;
@@ -93,6 +97,7 @@ private:
     SDL_Texture* back_ = nullptr;
     int backW_ = 0, backH_ = 0;
     std::string manualFrom_, manualLink_;  // where the manual is from ("Digitpress"), its web page
+    std::filesystem::path manualFile_;     // the PDF in the Manuals folder
     int manualPages_ = 0;                  // how many pages
     std::vector<std::string> manualUrls_;  // the pages' pictures on the Internet Archive (else they're in a PDF)
     int manualProgress_ = -1;              // downloading the manual: percent done (-1 = not known)

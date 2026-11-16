@@ -228,6 +228,33 @@ std::string configSafe(std::string s) {
 // ============================================================================
 // Main loop
 
+// Before 1.3.8 the box covers were in a "Box Covers" folder; it's now "Box Covers and Manuals" (the
+// manuals are there too). Moves what's in the old folder into the new one, never over a file that's
+// already there; the old folder goes once it's empty.
+static void moveOldCoversFolder(const fs::path& from, const fs::path& to) {
+    std::error_code ec;
+    if (!fs::is_directory(from, ec)) return;
+    if (!fs::exists(to, ec)) {
+        fs::rename(from, to, ec);
+        if (!ec) return;
+    }
+    std::vector<fs::path> files, dirs;
+    for (fs::recursive_directory_iterator it(from, ec), end; !ec && it != end; it.increment(ec)) {
+        if (it->is_directory(ec)) dirs.push_back(it->path());
+        else if (it->is_regular_file(ec)) files.push_back(it->path());
+    }
+    for (const fs::path& f : files) {
+        const fs::path dest = to / f.lexically_relative(from);
+        if (fs::exists(dest, ec)) continue;
+        fs::create_directories(dest.parent_path(), ec);
+        fs::rename(f, dest, ec);
+    }
+    // Empty folders are removed (fs::remove leaves a folder that still has something in it).
+    std::sort(dirs.begin(), dirs.end(), [](const fs::path& a, const fs::path& b) { return a.native().size() > b.native().size(); });
+    for (const fs::path& d : dirs) fs::remove(d, ec);
+    fs::remove(from, ec);
+}
+
 int App::run(const fs::path& start, const LaunchOptions& opt) {
     opt_ = opt;
     updateInputProfile();  // identity button mapping until a game says otherwise
@@ -281,11 +308,13 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         if (!fs::exists(db)) db = paths_.data / "gamecontrollerdb.txt";
         input_.init(fs::exists(db) ? db.u8string() : "");
         input_.load(cfg_);
-        // Home screen: Documents/Nintendall/Games and, next to it, Box Covers (or the folders set as
-        // games.folder / covers.folder in nintendall.cfg).
+        // Home screen: Documents/Nintendall/Games and, next to it, Box Covers and Manuals (or the
+        // folders set as games.folder / covers.folder in nintendall.cfg).
         const std::string games = cfg_.get("games.folder"), covers = cfg_.get("covers.folder");
         const fs::path gamesRoot = games.empty() ? defaultGamesFolder(paths_.base, paths_.portable) : fs::u8path(games);
-        const fs::path coversRoot = covers.empty() ? gamesRoot.parent_path() / "Box Covers" : fs::u8path(covers);
+        const fs::path coversRoot =
+            covers.empty() ? gamesRoot.parent_path() / "Box Covers and Manuals" : fs::u8path(covers);
+        if (covers.empty()) moveOldCoversFolder(gamesRoot.parent_path() / "Box Covers", coversRoot);
         home_.start(gamesRoot, coversRoot, paths_.data / "covers", paths_.base / "gameinfo", paths_.data / "game info",
                     cfg_.get("home.console"));
         home_.setCoverSize(std::atoi(cfg_.get("home.cover_size").c_str()));
@@ -2091,7 +2120,7 @@ void App::buildMenus() {
     Menu file{"File", {}};
     file.items.push_back({"Open...", "Ctrl+O", ActOpen});
     file.items.push_back({"Open Games Folder", "", ActGamesFolder});
-    file.items.push_back({"Open Box Covers Folder", "", ActCoversFolder});
+    file.items.push_back({"Open Box Covers and Manuals Folder", "", ActCoversFolder});
     file.items.push_back({"Open Saves Folder", "", ActSavesFolder});
     file.items.push_back({"Close Game", "Ctrl+W", ActCloseGame, game});
     const auto recent = recentGames();

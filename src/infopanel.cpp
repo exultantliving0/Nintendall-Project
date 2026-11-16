@@ -16,6 +16,7 @@
 #include "filedialog.hpp"
 #include "http.hpp"
 #include "json.hpp"
+#include "library.hpp"
 #include "pdfpages.hpp"
 
 namespace fs = std::filesystem;
@@ -42,6 +43,7 @@ constexpr uint64_t kMaxCache = 1ull << 30, kCacheAfterTrim = 800ull << 20;  // d
 constexpr int kPageThreads = 3;  // pages downloaded at the same time
 
 const char* kTabNames[] = {"Back of Box", "Manual"};
+const char* kButtonNames[] = {"Add Custom Cover", "Add Custom Back Cover", "Import Game Manual"};
 
 bool inside(const SDL_Rect& r, int x, int y) { return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h; }
 
@@ -254,15 +256,15 @@ struct InfoPanel::Shared {
         std::string from, link;
         int pages = 0;
         std::vector<std::string> urls;
-        fs::path pageFolder;
+        fs::path pageFolder, file;
         int page = 0;  // Page: which; Progress: percent
     };
     // The manual found: where it came from and its pages.
     struct Found {
         std::string from, link;
         std::vector<std::string> urls;  // the Internet Archive's page pictures, or...
-        fs::path pdfFile;               // ...a PDF whose pages are JPEG pictures
-        std::vector<uint8_t> pdf;
+        fs::path file;                  // ...the PDF in the Manuals folder (its pages are JPEG pictures, or
+        std::vector<uint8_t> pdf;       //    they can't be shown here: pdfPages empty)
         std::vector<PdfPicture> pdfPages;
     };
 
@@ -287,12 +289,19 @@ struct InfoPanel::Shared {
         std::lock_guard<std::mutex> lock(mutex);
         return gen == generation && !stop;
     }
+    // The game's manual in the Manuals folder: "Box Covers and Manuals/<console>/Manuals/<game file name>.pdf".
+    static fs::path manualFile(const Job& j) {
+        return j.coverFolder / "Manuals" / fs::u8path(j.game.fileName + ".pdf");
+    }
     void doInfo(const Job& j);
     void doManual(const Job& j);
     void doPage(const Job& j);
     State findManual(const Job& j, const GameInfo& info, bool known, Found& found);
     // Downloads a PDF into `file` and finds its pages. False if it couldn't (offline: `offline` set).
-    bool getPdf(const Job& j, const std::string& url, const fs::path& file, Found& found, bool& offline);
+    bool getPdf(const Job& j, const std::string& url, const fs::path& local, Found& found, bool& offline);
+    // Downloads the pages not downloaded yet; when all are there, makes them into a PDF in the Manuals folder.
+    void downloadAllPages(const Job& j, const std::vector<std::string>& urls, const fs::path& pageFolder,
+                          const fs::path& local, const Found& found);
 };
 
 void InfoPanel::Shared::run(bool pageJobs) {
@@ -372,6 +381,10 @@ void InfoPanel::Shared::doManual(const Job& j) {
     manual.state = findManual(j, j.info, j.known, found);
     manual.from = found.from;
     manual.link = found.link;
+    manual.file = found.file;
+    const fs::path local = manualFile(j);
+    const fs::path pageFolder = cacheDir / "manuals" / systemInfo(j.game.system).key / safeName(j.game.fileName);
+    std::vector<std::string> urls;
     if (manual.state == State::Ready) {
         if (!found.pdfPages.empty()) {
             manual.pages = int(found.pdfPages.size());
@@ -379,86 +392,240 @@ void InfoPanel::Shared::doManual(const Job& j) {
             pdfGen = j.gen;
             pdf = std::move(found.pdf);
             pdfPages = std::move(found.pdfPages);
-        } else {
+        } else if (!found.urls.empty()) {
             manual.pages = int(found.urls.size());
-            manual.urls = std::move(found.urls);
-            manual.pageFolder = cacheDir / "manuals" / systemInfo(j.game.system).key / safeName(j.game.fileName);
+            manual.urls = urls = found.urls;
+            manual.pageFolder = pageFolder;
         }
     }
-    const fs::path keep = found.pdfFile.empty() ? manual.pageFolder : found.pdfFile;
     post(std::move(manual));
-    trimCache(cacheDir / "manuals", keep);
+    trimCache(cacheDir / "manuals", pageFolder);
+    if (!urls.empty()) downloadAllPages(j, urls, pageFolder, local, found);
 }
 
-bool InfoPanel::Shared::getPdf(const Job& j, const std::string& url, const fs::path& file, Found& found, bool& offline) {
-    std::error_code ec;
-    if (!fs::is_regular_file(file, ec)) {
-        fs::create_directories(file.parent_path(), ec);
-        int last = -1;
-        const int status = httpDownload(url, file, [&](uint64_t done, uint64_t total) {
-            if (total > 0) {
-                const int pct = int(done * 100 / total);
-                if (pct != last) {
-                    last = pct;
-                    Result r;
-                    r.kind = Result::Progress;
-                    r.gen = j.gen;
-                    r.page = pct;
-                    post(std::move(r));
-                }
+// A PDF of JPEG pictures, one per page (each page the picture's size at 150 dpi).
+static std::vector<uint8_t> makePdf(const std::vector<std::vector<uint8_t>>& jpegs) {
+    std::string out = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
+    std::vector<size_t> offsets(3 + jpegs.size() * 3, 0);
+    auto begin = [&](size_t n) {
+        offsets[n] = out.size();
+        out += std::to_string(n) + " 0 obj\n";
+    };
+    begin(1);
+    out += "<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+    begin(2);
+    out += "<< /Type /Pages /Count " + std::to_string(jpegs.size()) + " /Kids [";
+    for (size_t i = 0; i < jpegs.size(); ++i) out += std::to_string(3 + i * 3) + " 0 R ";
+    out += "] >>\nendobj\n";
+    for (size_t i = 0; i < jpegs.size(); ++i) {
+        const std::vector<uint8_t>& jpg = jpegs[i];
+        // The picture's size and colors, from its frame header.
+        int w = 0, h = 0, comps = 3;
+        for (size_t at = 2; at + 9 < jpg.size();) {
+            if (jpg[at] != 0xFF) break;
+            const uint8_t m = jpg[at + 1];
+            const size_t len = size_t(jpg[at + 2]) << 8 | jpg[at + 3];
+            if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
+                h = jpg[at + 5] << 8 | jpg[at + 6];
+                w = jpg[at + 7] << 8 | jpg[at + 8];
+                comps = jpg[at + 9];
+                break;
             }
-            return current(j.gen);
-        });
-        if (status == 0 && current(j.gen)) offline = true;
-        if (status != 200) {
-            fs::remove(file, ec);
-            return false;
+            at += 2 + len;
         }
+        if (w <= 0 || h <= 0) w = h = 1;
+        const double pw = w * 72.0 / 150.0, ph = h * 72.0 / 150.0;
+        char size[64];
+        std::snprintf(size, sizeof size, "%.2f %.2f", pw, ph);
+        const size_t page = 3 + i * 3, content = page + 1, image = page + 2;
+        begin(page);
+        out += std::string("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ") + size + "] /Resources << /XObject << /Im0 " +
+               std::to_string(image) + " 0 R >> >> /Contents " + std::to_string(content) + " 0 R >>\nendobj\n";
+        char draw[128];
+        std::snprintf(draw, sizeof draw, "q %.2f 0 0 %.2f 0 0 cm /Im0 Do Q", pw, ph);
+        begin(content);
+        out += "<< /Length " + std::to_string(std::strlen(draw)) + " >>\nstream\n" + draw + "\nendstream\nendobj\n";
+        begin(image);
+        out += "<< /Type /XObject /Subtype /Image /Width " + std::to_string(w) + " /Height " + std::to_string(h) +
+               " /ColorSpace " + (comps == 1 ? "/DeviceGray" : comps == 4 ? "/DeviceCMYK" : "/DeviceRGB") +
+               " /BitsPerComponent 8 /Filter /DCTDecode /Length " + std::to_string(jpg.size()) + " >>\nstream\n";
+        out.append(reinterpret_cast<const char*>(jpg.data()), jpg.size());
+        out += "\nendstream\nendobj\n";
     }
-    fs::last_write_time(file, fs::file_time_type::clock::now(), ec);  // looked at now: kept longest
-    if (readFile(file, found.pdf) && pdfJpegPages(found.pdf, found.pdfPages)) {
-        found.pdfFile = file;
+    const size_t xref = out.size();
+    out += "xref\n0 " + std::to_string(offsets.size()) + "\n0000000000 65535 f \n";
+    for (size_t n = 1; n < offsets.size(); ++n) {
+        char line[32];
+        std::snprintf(line, sizeof line, "%010zu 00000 n \n", offsets[n]);
+        out += line;
+    }
+    out += "trailer\n<< /Size " + std::to_string(offsets.size()) + " /Root 1 0 R >>\nstartxref\n" + std::to_string(xref) +
+           "\n%%EOF\n";
+    return std::vector<uint8_t>(out.begin(), out.end());
+}
+
+// Moves a file (also to another drive: copied, then removed). Never over a file that's there.
+static bool moveNewFile(const fs::path& from, const fs::path& to) {
+    std::error_code ec;
+    if (fs::exists(to, ec)) return false;
+    fs::create_directories(to.parent_path(), ec);
+    fs::rename(from, to, ec);
+    if (!ec) return true;
+    const fs::path tmp = to.u8string() + ".part";
+    if (!fs::copy_file(from, tmp, fs::copy_options::overwrite_existing, ec) || fs::exists(to, ec)) {
+        fs::remove(tmp, ec);
+        return false;
+    }
+    fs::rename(tmp, to, ec);
+    if (ec) {
+        fs::remove(tmp, ec);
+        return false;
+    }
+    fs::remove(from, ec);
+    return true;
+}
+
+void InfoPanel::Shared::downloadAllPages(const Job& j, const std::vector<std::string>& urls, const fs::path& pageFolder,
+                                         const fs::path& local, const Found& found) {
+    std::vector<std::vector<uint8_t>> jpegs(urls.size());
+    for (size_t i = 0; i < urls.size(); ++i) {
+        if (!current(j.gen)) return;  // the panel was closed: the rest is downloaded next time
+        const fs::path file = pageFolder / (std::to_string(i + 1) + ".jpg");
+        if (readFile(file, jpegs[i]) && isJpeg(jpegs[i])) continue;
+        jpegs[i].clear();
+        for (const std::string& url : splitTabs(urls[i])) {
+            if (url.empty()) continue;
+            std::vector<uint8_t> bytes;
+            if (httpGet(url, bytes) == 200 && isJpeg(bytes)) {
+                writeNewFile(file, bytes.data(), bytes.size());
+                jpegs[i] = std::move(bytes);
+                break;
+            }
+            if (!current(j.gen)) return;
+        }
+        if (jpegs[i].empty()) return;  // couldn't: tried again next time
+    }
+    // Every page is there: the manual goes into the Manuals folder as one PDF.
+    std::error_code ec;
+    if (!fs::exists(local, ec)) {
+        const std::vector<uint8_t> made = makePdf(jpegs);
+        writeNewFile(local, made.data(), made.size());
+    }
+    if (!fs::is_regular_file(local, ec)) return;
+    fs::remove_all(pageFolder, ec);
+    // From now on its pages are read from the PDF.
+    Result r;
+    r.kind = Result::Manual;
+    r.gen = j.gen;
+    r.state = State::Ready;
+    r.from = found.from;
+    r.link = found.link;
+    r.file = local;
+    std::vector<uint8_t> bytes;
+    std::vector<PdfPicture> pages;
+    if (!readFile(local, bytes) || !pdfJpegPages(bytes, pages) || pages.size() != urls.size()) return;
+    r.pages = int(pages.size());
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (j.gen != generation) return;
+        pdfGen = j.gen;
+        pdf = std::move(bytes);
+        pdfPages = std::move(pages);
+    }
+    post(std::move(r));
+}
+
+bool InfoPanel::Shared::getPdf(const Job& j, const std::string& url, const fs::path& local, Found& found, bool& offline) {
+    // Downloaded into Nintendall's own files first; kept in the Manuals folder only if its pages can be shown.
+    std::error_code ec;
+    const fs::path tmp = cacheDir / "manuals" / "downloads" / (safeName(j.game.fileName) + ".pdf");
+    fs::create_directories(tmp.parent_path(), ec);
+    int last = -1;
+    const int status = httpDownload(url, tmp, [&](uint64_t done, uint64_t total) {
+        if (total > 0) {
+            const int pct = int(done * 100 / total);
+            if (pct != last) {
+                last = pct;
+                Result r;
+                r.kind = Result::Progress;
+                r.gen = j.gen;
+                r.page = pct;
+                post(std::move(r));
+            }
+        }
+        return current(j.gen);
+    });
+    if (status == 0 && current(j.gen)) offline = true;
+    if (status == 200 && readFile(tmp, found.pdf) && pdfJpegPages(found.pdf, found.pdfPages) &&
+        (fs::exists(local, ec) || moveNewFile(tmp, local))) {
+        fs::remove(tmp, ec);
+        found.file = local;
         return true;
     }
     found.pdf.clear();
-    fs::remove(file, ec);  // pages that can't be shown: not kept
+    found.pdfPages.clear();
+    fs::remove(tmp, ec);
     return false;
 }
 
 InfoPanel::State InfoPanel::Shared::findManual(const Job& j, const GameInfo& info, bool known, Found& found) {
     const LibraryGame& game = j.game;
     const fs::path dir = cacheDir / "manuals" / systemInfo(game.system).key;
-    const std::string base = safeName(game.fileName);
-    const fs::path note = dir / (base + ".txt"), pdfFile = dir / (base + ".pdf");
+    const fs::path note = dir / (safeName(game.fileName) + ".txt");
+    const fs::path local = manualFile(j);
     std::error_code ec;
     bool offline = false;
 
-    // Found before:
-    //   "pdf TAB from TAB web page TAB the PDF's address"   (the PDF is kept next to it)
+    // Where the manual came from (Nintendall's own notes):
+    //   "pdf TAB from TAB web page TAB the PDF's address"
     //   "pages TAB from TAB web page", then a page picture's address per line
     //   "-" = none was found (looked for again after a week)
+    std::vector<std::string> head;
+    std::vector<std::string> lines;
     {
         std::ifstream f(note, std::ios::binary);
         std::string first;
-        if (std::getline(f, first)) {
-            const std::vector<std::string> p = splitTabs(first);
-            if (first == "-") {
-                const auto age = fs::file_time_type::clock::now() - fs::last_write_time(note, ec);
-                if (!ec && age < kRetryNoManual) return State::None;
-            } else if (p.size() == 4 && p[0] == "pdf") {
-                found.from = p[1];
-                found.link = p[2];
-                if (getPdf(j, p[3], pdfFile, found, offline)) return State::Ready;
-                if (offline) return State::Offline;
-            } else if (p.size() == 3 && p[0] == "pages" && !p[2].empty()) {
-                found.from = p[1];
-                found.link = p[2];
-                for (std::string line; std::getline(f, line);)
-                    if (!line.empty()) found.urls.push_back(line);
-                if (!found.urls.empty()) return State::Ready;
-            }
-            found = Found{};
+        if (std::getline(f, first)) head = splitTabs(first);
+        for (std::string line; std::getline(f, line);)
+            if (!line.empty()) lines.push_back(line);
+    }
+    const bool pdfNote = head.size() == 4 && head[0] == "pdf";
+    const bool pagesNote = head.size() == 3 && head[0] == "pages" && !head[2].empty() && !lines.empty();
+
+    // Test builds of 1.3.8 kept downloaded manuals with Nintendall's own files: into the Manuals folder.
+    const fs::path older = dir / (safeName(game.fileName) + ".pdf");
+    if (fs::is_regular_file(older, ec) && !fs::exists(local, ec)) moveNewFile(older, local);
+
+    // A manual in the Manuals folder (downloaded before, or put there by the player) is used as it is.
+    if (fs::is_regular_file(local, ec)) {
+        if (pdfNote || pagesNote) {
+            found.from = head[1];
+            found.link = head[2];
+        } else {
+            found.from = "your Manuals folder";
         }
+        found.file = local;
+        if (!readFile(local, found.pdf) || !pdfJpegPages(found.pdf, found.pdfPages)) {
+            found.pdf.clear();  // its pages can't be shown here: Open File opens it
+            found.pdfPages.clear();
+        }
+        return State::Ready;
+    }
+
+    if (head.size() == 1 && head[0] == "-") {
+        const auto age = fs::file_time_type::clock::now() - fs::last_write_time(note, ec);
+        if (!ec && age < kRetryNoManual) return State::None;
+    } else if (pdfNote) {
+        found.from = head[1];
+        found.link = head[2];
+        if (getPdf(j, head[3], local, found, offline)) return State::Ready;
+        if (offline) return State::Offline;
+        found = Found{};
+    } else if (pagesNote) {
+        found.from = head[1];
+        found.link = head[2];
+        found.urls = lines;
+        return State::Ready;
     }
     if (!current(j.gen)) return State::None;
 
@@ -469,7 +636,7 @@ InfoPanel::State InfoPanel::Shared::findManual(const Job& j, const GameInfo& inf
     if (!digitpress.empty()) {
         found.from = "Digitpress";
         found.link = digitpress;
-        if (getPdf(j, digitpress, pdfFile, found, offline)) {
+        if (getPdf(j, digitpress, local, found, offline)) {
             writeFile(note, "pdf\tDigitpress\t" + digitpress + "\t" + digitpress + "\n");
             return State::Ready;
         }
@@ -544,7 +711,7 @@ InfoPanel::State InfoPanel::Shared::findManual(const Job& j, const GameInfo& inf
     }
     if (!pdfName.empty()) {
         const std::string url = "https://archive.org/download/" + id + "/" + urlEncode(pdfName);
-        if (getPdf(j, url, pdfFile, found, offline)) {
+        if (getPdf(j, url, local, found, offline)) {
             writeFile(note, "pdf\t" + found.from + "\t" + found.link + "\t" + url + "\n");
             return State::Ready;
         }
@@ -667,6 +834,7 @@ void InfoPanel::open(const LibraryGame& game, const fs::path& coverFolder) {
     info_ = GameInfo{};
     manualFrom_.clear();
     manualLink_.clear();
+    manualFile_.clear();
     manualPages_ = 0;
     manualUrls_.clear();
     manualProgress_ = -1;
@@ -753,6 +921,7 @@ void InfoPanel::takeResults(SDL_Renderer* r) {
             manualState_ = res.state;
             manualFrom_ = res.from;
             manualLink_ = res.link;
+            manualFile_ = res.file;
             manualPages_ = res.pages;
             manualUrls_ = std::move(res.urls);
             manualProgress_ = -1;
@@ -772,26 +941,80 @@ void InfoPanel::takeResults(SDL_Renderer* r) {
     }
 }
 
-// Add Custom Cover: the player picks a picture; it's copied into the Box Covers folder, named like the game.
-void InfoPanel::addCover(SDL_Window* window) {
+// The buttons under the title: the player picks a file, and it's copied into the console's Box Covers and
+// Manuals folder, named like the game (replacing the one that was there: the player chose it).
+//   0 Add Custom Cover       a picture: the box cover
+//   1 Add Custom Back Cover  a picture: the back of the box ("Back" folder)
+//   2 Import Game Manual     a PDF: the manual ("Manuals" folder)
+void InfoPanel::importFile(SDL_Window* window, int which) {
     bool unavailable = false;
-    const std::string picked = openFileDialog(window, "Choose a box cover for " + game_.title, "Pictures",
-                                              {"png", "jpg", "jpeg", "bmp", "gif"}, unavailable);
+    const std::string picked =
+        which == 2 ? openFileDialog(window, "Choose the manual of " + game_.title, "PDF files", {"pdf"}, unavailable)
+                   : openFileDialog(window,
+                                    (which == 0 ? "Choose a box cover for " : "Choose a back cover for ") + game_.title,
+                                    "Pictures", {"png", "jpg", "jpeg", "bmp", "gif"}, unavailable);
     lastTick_ = SDL_GetTicks();  // the window was waiting: don't jump the slide animation
-    coverNoteUntil_ = SDL_GetTicks() + 6000;
+    auto note = [&](const std::string& text, bool bad) {
+        coverNote_ = text;
+        coverNoteBad_ = bad;
+        coverNoteUntil_ = SDL_GetTicks() + 6000;
+    };
     if (unavailable) {
-        coverNote_ = "No file window on this computer: put the picture in the Box Covers folder yourself.";
-        coverNoteBad_ = true;
+        note("No file window on this computer: put the file in the Box Covers and Manuals folder yourself.", true);
         return;
     }
-    if (picked.empty()) {
-        coverNoteUntil_ = 0;
+    if (picked.empty()) return;
+
+    std::string error;
+    if (which == 0) {
+        error = addCustomCover(coverFolder_, game_.fileName, fs::u8path(picked));
+        if (error.empty()) coverAdded_ = true;
+    } else if (which == 1) {
+        error = addCustomCover(coverFolder_ / "Back", game_.fileName, fs::u8path(picked));
+    } else {
+        error = importManual(fs::u8path(picked));
+    }
+    if (!error.empty()) {
+        note(error, true);
         return;
     }
-    const std::string error = addCustomCover(coverFolder_, game_.fileName, fs::u8path(picked));
-    coverNoteBad_ = !error.empty();
-    coverNote_ = error.empty() ? "Cover added." : error;
-    if (error.empty()) coverAdded_ = true;
+    // Shows the new back cover / manual: the panel loads the game again, on the same page.
+    if (which != 0) {
+        const int tab = which == 1 ? Back : Manual;
+        open(game_, coverFolder_);
+        tab_ = tab;
+    }
+    note(which == 0 ? "Cover added." : which == 1 ? "Back cover added." : "Manual imported.", false);
+}
+
+std::string InfoPanel::importManual(const fs::path& picked) {
+    std::error_code ec;
+    std::vector<uint8_t> bytes;
+    if (!readFile(picked, bytes)) return "Couldn't open that file.";
+    if (bytes.size() < 5 || std::memcmp(bytes.data(), "%PDF", 4) != 0) return "That isn't a PDF file.";
+    const fs::path dest = coverFolder_ / "Manuals" / fs::u8path(game_.fileName + ".pdf");
+    if (fs::equivalent(dest, picked, ec)) return "That's already this game's manual.";
+    fs::create_directories(dest.parent_path(), ec);
+    const fs::path tmp = dest.u8string() + ".part";
+    {
+        std::ofstream f(tmp, std::ios::binary);
+        f.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+        if (!f) {
+            f.close();
+            fs::remove(tmp, ec);
+            return "Couldn't save the manual in the Manuals folder.";
+        }
+    }
+    fs::remove(dest, ec);  // the player chose it: the manual that was there is replaced
+    fs::rename(tmp, dest, ec);
+    if (ec) {
+        fs::remove(tmp, ec);
+        return "Couldn't save the manual in the Manuals folder.";
+    }
+    // It's the player's own manual now, not one Nintendall downloaded.
+    if (shared_)
+        fs::remove(shared_->cacheDir / "manuals" / systemInfo(game_.system).key / (safeName(game_.fileName) + ".txt"), ec);
+    return "";
 }
 
 // ============================================================================
@@ -897,13 +1120,23 @@ InfoPanel::Layout InfoPanel::layout(Text& t, const SDL_Rect& area) {
             L.subtitle += players == 1 ? std::string("1 player") : "Up to " + std::to_string(players) + " players";
         }
     }
+    if (!coverNote_.empty() && !SDL_TICKS_PASSED(SDL_GetTicks(), coverNoteUntil_)) L.subtitle = coverNote_;
     L.subtitleY = y + int(4 * s);
     if (!L.subtitle.empty()) y = L.subtitleY + t.lineHeight();
     y += int(12 * s);
 
-    // Add Custom Cover (what happened is written beside it)
-    const int bh = t.lineHeight() + int(14 * s);
-    L.cover = {x, y, t.width("Add Custom Cover") + int(28 * s), bh};
+    // Add Custom Cover, Add Custom Back Cover, Import Game Manual (on two lines if they don't fit on one)
+    const int bh = t.lineHeight() + int(14 * s), gap = int(8 * s);
+    int bx = x;
+    for (const char* name : kButtonNames) {
+        const int bw = t.width(name) + int(24 * s);
+        if (bx > x && bx + bw > x + w) {
+            bx = x;
+            y += bh + gap;
+        }
+        L.buttons.push_back({bx, y, bw, bh});
+        bx += bw + gap;
+    }
     y += bh + int(14 * s);
 
     // Tabs
@@ -920,7 +1153,7 @@ InfoPanel::Layout InfoPanel::layout(Text& t, const SDL_Rect& area) {
     const int by = L.panel.y + L.panel.h - pad - bh;
     L.prev = {x, by, bh, bh};
     L.next = {x + bh + int(110 * s), by, bh, bh};
-    const int ow = t.width("Open in Browser") + int(28 * s);
+    const int ow = t.width(manualLink_.empty() ? "Open File" : "Open in Browser") + int(28 * s);
     L.browser = {x + w - ow, by, ow, bh};
     const int bottom = tab_ == Manual ? by - int(12 * s) : L.panel.y + L.panel.h - pad - t.lineHeight() - int(10 * s);
     L.content = {x, y, w, std::max(0, bottom - y)};
@@ -967,25 +1200,25 @@ void InfoPanel::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
         t.draw(L.content.x, y, line, kText, Text::Large);
         y += t.lineHeight(Text::Large);
     }
-    if (!L.subtitle.empty()) t.draw(L.content.x, L.subtitleY, L.subtitle, kDim);
-
-    // Add Custom Cover, and what happened when it was last used.
-    {
-        const SDL_Rect& b = L.cover;
-        v.fillRect(b.x, b.y, b.w, b.h, inside(b, mx, my) ? kButtonHover : kButton);
-        t.draw(b.x + (b.w - t.width("Add Custom Cover")) / 2, b.y + (b.h - t.lineHeight()) / 2, "Add Custom Cover", kText);
-        if (!coverNote_.empty() && SDL_TICKS_PASSED(now, coverNoteUntil_)) coverNote_.clear();
-        if (!coverNote_.empty()) {
-            const int nx = b.x + b.w + int(12 * s), room = L.content.x + L.content.w - nx;
-            std::string note = coverNote_;
-            while (note.size() > 3 && t.width(note) > room) {  // cut to fit, with "..."
-                note.resize(note.size() - 4);
-                while (!note.empty() && (static_cast<unsigned char>(note.back()) & 0xC0) == 0x80) note.pop_back();
-                note += "...";
-            }
-            t.draw(nx, b.y + (b.h - t.lineHeight()) / 2, note, coverNoteBad_ ? kBad : kGood);
+    // Release date and players, or what happened when a button below was last used.
+    const bool noted = !coverNote_.empty() && L.subtitle == coverNote_;
+    if (!L.subtitle.empty()) {
+        std::string line = L.subtitle;
+        while (line.size() > 3 && t.width(line) > L.content.w) {  // cut to fit, with "..."
+            line.resize(line.size() - 4);
+            while (!line.empty() && (static_cast<unsigned char>(line.back()) & 0xC0) == 0x80) line.pop_back();
+            line += "...";
         }
+        t.draw(L.content.x, L.subtitleY, line, noted ? (coverNoteBad_ ? kBad : kGood) : kDim);
     }
+
+    // The buttons
+    for (size_t i = 0; i < L.buttons.size(); ++i) {
+        const SDL_Rect& b = L.buttons[i];
+        v.fillRect(b.x, b.y, b.w, b.h, inside(b, mx, my) ? kButtonHover : kButton);
+        t.draw(b.x + (b.w - t.width(kButtonNames[i])) / 2, b.y + (b.h - t.lineHeight()) / 2, kButtonNames[i], kText);
+    }
+    if (!coverNote_.empty() && SDL_TICKS_PASSED(now, coverNoteUntil_)) coverNote_.clear();
 
     // Tabs
     for (size_t i = 0; i < L.tabs.size(); ++i) {
@@ -1057,7 +1290,7 @@ void InfoPanel::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
         else if (backState_ == State::Offline) message({"Couldn't download the back of the box.", "Check your internet connection."});
         else
             message({"No picture of the back of the box found.",
-                     "You can add your own: a picture named like the game, in the Back folder inside this console's Box Covers folder."});
+                     "Click Add Custom Back Cover to use your own picture."});
         t.draw(L.content.x, creditY, "Pictures from LaunchBox and TheGamesDB", kDim);
     } else {
         if (manualState_ == State::Loading) {
@@ -1068,7 +1301,8 @@ void InfoPanel::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
         } else if (manualState_ == State::None) {
             message({"No manual found for this game."});
         } else if (!have) {
-            message({"The manual can't be shown here.", "Click Open in Browser to read it."});
+            message({"The manual's pages can't be shown here.",
+                     manualLink_.empty() ? "Click Open File to read it." : "Click Open in Browser to read it."});
         } else {
             const auto it = pages_.find(page_);
             pageRect_ = {};
@@ -1094,10 +1328,11 @@ void InfoPanel::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
             const int gap = L.next.x - (L.prev.x + L.prev.w);
             t.draw(L.prev.x + L.prev.w + (gap - t.width(label)) / 2, L.prev.y + (L.prev.h - t.lineHeight()) / 2, label, kText);
         }
-        if (manualState_ == State::Ready && !manualLink_.empty()) {
+        if (manualState_ == State::Ready && (!manualLink_.empty() || !manualFile_.empty())) {
             const SDL_Rect& b = L.browser;
+            const char* label = manualLink_.empty() ? "Open File" : "Open in Browser";
             v.fillRect(b.x, b.y, b.w, b.h, inside(b, mx, my) ? kButtonHover : kButton);
-            t.draw(b.x + (b.w - t.width("Open in Browser")) / 2, b.y + (b.h - t.lineHeight()) / 2, "Open in Browser", kText);
+            t.draw(b.x + (b.w - t.width(label)) / 2, b.y + (b.h - t.lineHeight()) / 2, label, kText);
         }
         if (!have)
             t.draw(L.content.x, creditY,
@@ -1254,16 +1489,20 @@ bool InfoPanel::handleEvent(const SDL_Event& e, int mx, int my, Text& t, const S
             close();
             return true;
         }
-        if (inside(L.cover, mx, my)) {
-            addCover(SDL_GetWindowFromID(e.button.windowID));
-            return true;
+        for (size_t i = 0; i < L.buttons.size(); ++i) {
+            if (inside(L.buttons[i], mx, my)) {
+                importFile(SDL_GetWindowFromID(e.button.windowID), int(i));
+                return true;
+            }
         }
         for (size_t i = 0; i < L.tabs.size(); ++i)
             if (inside(L.tabs[i], mx, my)) setTab(int(i));
         if (manualShown && inside(L.prev, mx, my)) setPage(page_ - 1);
         if (manualShown && inside(L.next, mx, my)) setPage(page_ + 1);
-        if (tab_ == Manual && manualState_ == State::Ready && !manualLink_.empty() && inside(L.browser, mx, my))
-            SDL_OpenURL(manualLink_.c_str());
+        if (tab_ == Manual && manualState_ == State::Ready && inside(L.browser, mx, my)) {
+            if (!manualLink_.empty()) SDL_OpenURL(manualLink_.c_str());
+            else if (!manualFile_.empty()) openFolder(manualFile_);  // opens the PDF in the computer's PDF reader
+        }
         if ((manualShown || (tab_ == Back && back_)) && inside(pageRect_, mx, my) && inside(L.content, mx, my)) big_ = true;
         return true;
     case SDL_MOUSEBUTTONUP:
@@ -1281,7 +1520,7 @@ bool InfoPanel::handleEvent(const SDL_Event& e, int mx, int my, Text& t, const S
         case SDLK_BACKSPACE:
         case SDLK_i:
         case SDLK_APPLICATION: close(); return true;
-        case SDLK_c: addCover(SDL_GetWindowFromID(e.key.windowID)); return true;
+        case SDLK_c: importFile(SDL_GetWindowFromID(e.key.windowID), 0); return true;
         case SDLK_TAB: setTab(tab_ + ((mod & KMOD_SHIFT) ? -1 : 1)); return true;
         case SDLK_LEFT:
             if (manualShown) setPage(page_ - 1);

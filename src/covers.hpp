@@ -9,8 +9,9 @@
 
 #include "library.hpp"
 
-// Box covers for the home screen. They live in the Box Covers folder (next to the Games folder,
-// one folder per console), named like the game file: "Box Covers/NES/Super Mario Bros. (World).png".
+// Box covers for the home screen. They live in the Box Covers and Manuals folder (next to the Games
+// folder, one folder per console), named like the game file:
+// "Box Covers and Manuals/NES/Super Mario Bros. (World).png".
 // A picture already there is used as it is, so players can add or replace covers with their own
 // (.png or .jpg). Missing ones are downloaded in the background and saved there, from the libretro
 // thumbnail library (thumbnails.libretro.com): the USA release's cover, found by matching the
@@ -20,7 +21,7 @@ public:
     ~Covers();
     // cacheDir: Nintendall's own files (name lists, notes of covers that don't exist).
     void start(const std::filesystem::path& cacheDir);
-    // The Box Covers folder of the console being shown.
+    // The Box Covers and Manuals folder of the console being shown.
     void setFolder(const std::filesystem::path& dir) { folder_ = dir; }
     // The space a cover is shown in (pixels): covers are made exactly that size (stretched a little
     // if their shape is different), so they're sharp and all the same size.
@@ -30,7 +31,7 @@ public:
     SDL_Texture* get(const LibraryGame& game);
     // Makes textures from finished downloads. Call once per frame, before drawing.
     void update(SDL_Renderer* renderer);
-    // Picks up covers added, replaced or deleted in the Box Covers folder (call every few seconds).
+    // Picks up covers added, replaced or deleted in the Box Covers and Manuals folder (call every few seconds).
     void recheck(const std::vector<LibraryGame>& games);
     // Loads a game's cover again (a custom cover was just added).
     void reload(const LibraryGame& game);
@@ -55,7 +56,7 @@ private:
 std::filesystem::path findCoverFile(const std::filesystem::path& dir, const std::string& fileName);
 
 // Add Custom Cover: makes `picture` (a file the player picked) a game's cover, saved in `dir` (the
-// console's Box Covers folder) named like the game file. PNG and JPEG pictures are copied as they
+// console's Box Covers and Manuals folder) named like the game file. PNG and JPEG pictures are copied as they
 // are, BMP and GIF ones saved as PNG. The game's cover already there is replaced (the player chose
 // to). Returns "" if it worked, else what went wrong (to show the player).
 std::string addCustomCover(const std::filesystem::path& dir, const std::string& fileName,

@@ -24,7 +24,7 @@ Needs Windows 10 or 11.
 2. Open Nintendall, click a console at the top, then click a game's box to play.
 
 New games show up by themselves, with their box covers. Right-click a box to see
-the back of its box and its manual, or to pick your own cover picture. You need your own
+the back of its box and its manual, or to use your own cover, back cover or manual. You need your own
 game files; none are included.
 
 ## Consoles
