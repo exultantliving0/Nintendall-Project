@@ -56,8 +56,8 @@ std::filesystem::path findCoverFile(const std::filesystem::path& dir, const std:
 
 // Add Custom Cover: makes `picture` (a file the player picked) a game's cover, saved in `dir` (the
 // console's Box Covers folder) named like the game file. PNG and JPEG pictures are copied as they
-// are, BMP and GIF ones saved as PNG. A cover already there isn't lost: it's moved into the "Old Covers"
-// folder inside `dir`. Returns "" if it worked, else what went wrong (to show the player).
+// are, BMP and GIF ones saved as PNG. The game's cover already there is replaced (the player chose
+// to). Returns "" if it worked, else what went wrong (to show the player).
 std::string addCustomCover(const std::filesystem::path& dir, const std::string& fileName,
                            const std::filesystem::path& picture);
 

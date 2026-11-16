@@ -655,26 +655,22 @@ std::string addCustomCover(const fs::path& dir, const std::string& fileName, con
     const fs::path old = findCoverFile(dir, fileName);
     if (!old.empty() && fs::equivalent(old, picture, ec)) return "That picture is already this game's cover.";
 
-    // The cover that was there isn't lost: it's moved into "Old Covers".
     fs::create_directories(dir, ec);
-    if (!old.empty()) {
-        const fs::path keep = dir / "Old Covers";
-        fs::create_directories(keep, ec);
-        fs::path dest = keep / old.filename();
-        for (int i = 2; fs::exists(dest, ec); ++i)
-            dest = keep / fs::u8path(fileName + " (" + std::to_string(i) + ")" + old.extension().u8string());
-        fs::rename(old, dest, ec);
-        if (ec) return "Couldn't move the old cover out of the way.";
-    }
     const fs::path dest = dir / fs::u8path(fileName + ext);
     const fs::path tmp = dest.u8string() + ".part";
     {
         std::ofstream f(tmp, std::ios::binary);
         f.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
         if (!f) {
+            f.close();
             fs::remove(tmp, ec);
             return "Couldn't save the cover in the Box Covers folder.";
         }
+    }
+    // The player asked for it: the game's old cover (any kind of picture) is replaced.
+    for (const char* e : kCoverExts) {
+        const fs::path old = dir / fs::u8path(fileName + e);
+        if (fs::is_regular_file(old, ec)) fs::remove(old, ec);
     }
     fs::rename(tmp, dest, ec);
     if (ec) {

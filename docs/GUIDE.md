@@ -20,8 +20,7 @@ the right with:
 
 - **Add Custom Cover**: pick a picture on your computer (PNG, JPEG, BMP or GIF)
   and it becomes the game's box cover. Nintendall names it like the game and puts
-  it in the console's Box Covers folder. The cover that was there before is kept
-  in an `Old Covers` folder next to it.
+  it in the console's Box Covers folder, replacing the cover that was there.
 - **Back of Box**: a picture of the back of the box (click it to see it big).
   It's downloaded once and kept in a `Back` folder in the console's Box Covers
   folder (`Box Covers/NES/Back/Super Mario Bros. (World).jpg`). To use your own,
