@@ -1282,7 +1282,6 @@ void InfoPanel::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
     }
 
     maxScroll_ = 0;
-    const int creditY = L.panel.y + L.panel.h - int(20 * s) - t.lineHeight();
     if (tab_ == Back) {
         pageRect_ = {};
         if (back_) picture(back_, backW_, backH_, false);
@@ -1333,10 +1332,6 @@ void InfoPanel::draw(Video& v, Text& t, const SDL_Rect& area, int mx, int my) {
             v.fillRect(b.x, b.y, b.w, b.h, inside(b, mx, my) ? kButtonHover : kButton);
             t.draw(b.x + (b.w - t.width(label)) / 2, b.y + (b.h - t.lineHeight()) / 2, label, kText);
         }
-        if (!have)
-            t.draw(L.content.x, creditY,
-                   manualFrom_.empty() ? "Manuals from Digitpress and the Internet Archive" : "Manual from " + manualFrom_,
-                   kDim);
     }
     // Scroll bar beside the page, when there's more than fits.
     if (maxScroll_ > 0 && L.content.h > 0) {
