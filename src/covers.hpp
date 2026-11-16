@@ -32,6 +32,8 @@ public:
     void update(SDL_Renderer* renderer);
     // Picks up covers added, replaced or deleted in the Box Covers folder (call every few seconds).
     void recheck(const std::vector<LibraryGame>& games);
+    // Loads a game's cover again (a custom cover was just added).
+    void reload(const LibraryGame& game);
     // Frees every texture and drops waiting requests (switching consoles, closing).
     void clear();
 
@@ -51,6 +53,13 @@ private:
 
 // The cover picture in `dir` for a game file name (.png, .jpg or .jpeg), or "" if there's none.
 std::filesystem::path findCoverFile(const std::filesystem::path& dir, const std::string& fileName);
+
+// Add Custom Cover: makes `picture` (a file the player picked) a game's cover, saved in `dir` (the
+// console's Box Covers folder) named like the game file. PNG and JPEG pictures are copied as they
+// are, BMP and GIF ones saved as PNG. A cover already there isn't lost: it's moved into the "Old Covers"
+// folder inside `dir`. Returns "" if it worked, else what went wrong (to show the player).
+std::string addCustomCover(const std::filesystem::path& dir, const std::string& fileName,
+                           const std::filesystem::path& picture);
 
 // Reads a PNG or JPEG picture into RGBA pixels (4 bytes each), made no bigger than maxW x maxH
 // (shrunk, keeping its shape). False if it isn't a picture.

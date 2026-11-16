@@ -15,7 +15,7 @@
 // The home screen shown when no game is running: a row of consoles (NES ... Wii U) and, under it,
 // the games in that console's folder with their box covers. Click a game (or pick it with the
 // arrow keys / a controller and press Enter / A) to play it. Right-click a game (or press I / the
-// controller's top button) for its info panel: description, back of the box and manual.
+// controller's top button) for its info panel: back of the box, manual and Add Custom Cover.
 class Home {
 public:
     // gamesRoot: the Games folder; coversRoot: the Box Covers folder (both with a folder per console);

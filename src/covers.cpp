@@ -16,10 +16,13 @@
 #include <vector>
 
 #include "http.hpp"
+#include "png.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
+#define STBI_ONLY_BMP  // custom covers (made into PNG pictures)
+#define STBI_ONLY_GIF
 #define STBI_NO_STDIO
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -626,6 +629,66 @@ fs::path findCoverFile(const fs::path& dir, const std::string& fileName) {
         if (fs::is_regular_file(p, ec)) return p;
     }
     return {};
+}
+
+std::string addCustomCover(const fs::path& dir, const std::string& fileName, const fs::path& picture) {
+    std::error_code ec;
+    std::vector<uint8_t> bytes;
+    {
+        std::ifstream f(picture, std::ios::binary);
+        if (!f) return "Couldn't open that picture.";
+        bytes.assign(std::istreambuf_iterator<char>(f), {});
+    }
+    // PNG and JPEG pictures are copied as they are; others (BMP, GIF) are made into PNG pictures.
+    const bool png = bytes.size() > 8 && bytes[0] == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G';
+    const bool jpg = bytes.size() > 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
+    std::string ext = png ? ".png" : ".jpg";
+    if (!png && !jpg) {
+        int w = 0, h = 0, n = 0;
+        stbi_uc* px = bytes.empty() ? nullptr : stbi_load_from_memory(bytes.data(), int(bytes.size()), &w, &h, &n, 3);
+        if (!px) return "That isn't a picture Nintendall can use: pick a PNG or JPEG picture.";
+        bytes = encodePng(w, h, px);
+        stbi_image_free(px);
+        if (bytes.empty()) return "Couldn't use that picture.";
+        ext = ".png";
+    }
+    const fs::path old = findCoverFile(dir, fileName);
+    if (!old.empty() && fs::equivalent(old, picture, ec)) return "That picture is already this game's cover.";
+
+    // The cover that was there isn't lost: it's moved into "Old Covers".
+    fs::create_directories(dir, ec);
+    if (!old.empty()) {
+        const fs::path keep = dir / "Old Covers";
+        fs::create_directories(keep, ec);
+        fs::path dest = keep / old.filename();
+        for (int i = 2; fs::exists(dest, ec); ++i)
+            dest = keep / fs::u8path(fileName + " (" + std::to_string(i) + ")" + old.extension().u8string());
+        fs::rename(old, dest, ec);
+        if (ec) return "Couldn't move the old cover out of the way.";
+    }
+    const fs::path dest = dir / fs::u8path(fileName + ext);
+    const fs::path tmp = dest.u8string() + ".part";
+    {
+        std::ofstream f(tmp, std::ios::binary);
+        f.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+        if (!f) {
+            fs::remove(tmp, ec);
+            return "Couldn't save the cover in the Box Covers folder.";
+        }
+    }
+    fs::rename(tmp, dest, ec);
+    if (ec) {
+        fs::remove(tmp, ec);
+        return "Couldn't save the cover in the Box Covers folder.";
+    }
+    return "";
+}
+
+void Covers::reload(const LibraryGame& game) {
+    const auto it = textures_.find(game.path.u8string());
+    if (it == textures_.end()) return;
+    if (it->second.tex) SDL_DestroyTexture(it->second.tex);
+    textures_.erase(it);
 }
 
 Covers::~Covers() {

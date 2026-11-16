@@ -251,8 +251,7 @@ void Home::showInfo(int i) {
         panel_.close();
         return;
     }
-    // Pictures of the backs of the boxes are kept beside the covers: "Box Covers/NES/Back".
-    panel_.open(g, coversRoot_ / fs::u8path(homeConsoles()[size_t(console_)].folder) / "Back");
+    panel_.open(g, coversRoot_ / fs::u8path(homeConsoles()[size_t(console_)].folder));
 }
 
 void Home::moveSelection(const Layout& L, int dx, int dy) {
@@ -420,6 +419,10 @@ bool Home::handleEvent(const SDL_Event& e, int mx, int my, Text& t, const SDL_Re
     if (panel_.isOpen() && (panel_.bigPage() || !(rightClick && !inside(panel_.rect(t, area), mx, my)))) {
         if (panel_.handleEvent(e, mx, my, t, area)) {
             pressed_ = -1;
+            if (panel_.takeCoverAdded()) {  // Add Custom Cover: show the new cover now
+                for (const LibraryGame& g : games_)
+                    if (g.path == panel_.game()) covers_.reload(g);
+            }
             return true;
         }
         // Keys and buttons the panel doesn't use go to the program (F11...), not to the games behind it.

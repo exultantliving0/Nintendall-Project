@@ -39,20 +39,6 @@ struct ConsoleInfo {
     std::unordered_map<std::string, std::string> lines;  // name key -> the rest of its line
 };
 
-std::string unescape(const std::string& s) {
-    std::string out;
-    out.reserve(s.size());
-    for (size_t i = 0; i < s.size(); ++i) {
-        if (s[i] == '\\' && i + 1 < s.size()) {
-            ++i;
-            out += s[i] == 'n' ? '\n' : s[i];
-        } else {
-            out += s[i];
-        }
-    }
-    return out;
-}
-
 const ConsoleInfo& consoleInfo(const fs::path& dir, const std::string& key) {
     static std::map<std::string, ConsoleInfo> loaded;
     const auto it = loaded.find(key);
@@ -120,11 +106,11 @@ bool findGameInfo(const fs::path& dir, const LibraryGame& game, GameInfo& out) {
         if (it != info.lines.end() && it->second.rfind('=', 0) == 0) it = info.lines.find(it->second.substr(1));
         if (key.empty() || it == info.lines.end()) continue;
 
-        // title TAB released TAB players TAB back picture TAB description
-        std::string parts[5];
+        // title TAB released TAB players TAB back picture
+        std::string parts[4];
         size_t a = 0;
-        for (int i = 0; i < 5; ++i) {
-            const size_t b = i == 4 ? std::string::npos : it->second.find('\t', a);
+        for (int i = 0; i < 4; ++i) {
+            const size_t b = it->second.find('\t', a);
             parts[i] = it->second.substr(a, b == std::string::npos ? std::string::npos : b - a);
             if (b == std::string::npos) break;
             a = b + 1;
@@ -132,9 +118,32 @@ bool findGameInfo(const fs::path& dir, const LibraryGame& game, GameInfo& out) {
         out.title = parts[0];
         out.released = parts[1];
         out.players = parts[2];
-        out.backUrl = parts[3].empty() ? "" : "https://cdn.thegamesdb.net/images/large/" + parts[3];
-        out.overview = unescape(parts[4]);
+        // "lb:<file>": from the LaunchBox Games Database; else a picture on TheGamesDB.
+        if (parts[3].rfind("lb:", 0) == 0) out.backUrl = "https://images.launchbox-app.com/" + parts[3].substr(3);
+        else if (!parts[3].empty()) out.backUrl = "https://cdn.thegamesdb.net/images/large/" + parts[3];
+        else out.backUrl.clear();
         return true;
     }
     return false;
+}
+
+std::string findDigitpressManual(const fs::path& dir, System system, const std::vector<std::string>& names) {
+    // console TAB name key TAB address, read once.
+    static std::map<std::string, std::string> manuals = [&] {
+        std::map<std::string, std::string> m;
+        std::ifstream f(dir / "manuals.txt", std::ios::binary);
+        for (std::string line; std::getline(f, line);) {
+            const size_t a = line.find('\t'), b = a == std::string::npos ? a : line.find('\t', a + 1);
+            if (b != std::string::npos) m.emplace(line.substr(0, b), line.substr(b + 1));
+        }
+        return m;
+    }();
+    const std::string console = systemInfo(system == System::FDS ? System::NES : system).key;
+    for (const std::string& name : names) {
+        const std::string key = gameInfoKey(name);
+        if (key.empty()) continue;
+        const auto it = manuals.find(console + "\t" + key);
+        if (it != manuals.end()) return it->second;
+    }
+    return "";
 }

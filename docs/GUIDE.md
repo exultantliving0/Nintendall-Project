@@ -16,9 +16,12 @@ buttons beside Open Folder) make the covers bigger or smaller (remembered),
 
 **Game info:** right-click a game's box (or choose it with the keyboard and press
 **I**, or with a controller and press the top button) and a panel slides in from
-the left with three pages:
+the right with:
 
-- **About**: what the game is about, when it came out and how many can play.
+- **Add Custom Cover**: pick a picture on your computer (PNG, JPEG, BMP or GIF)
+  and it becomes the game's box cover. Nintendall names it like the game and puts
+  it in the console's Box Covers folder. The cover that was there before is kept
+  in an `Old Covers` folder next to it.
 - **Back of Box**: a picture of the back of the box (click it to see it big).
   It's downloaded once and kept in a `Back` folder in the console's Box Covers
   folder (`Box Covers/NES/Back/Super Mario Bros. (World).jpg`). To use your own,
@@ -26,15 +29,18 @@ the left with three pages:
   there is never replaced.
 - **Manual**: the game's instruction booklet, page by page. Click a page (or
   press Enter / A) to see it big; the arrows, arrow keys or D-pad turn the pages.
-  **Open in Browser** opens it on the Internet Archive's site.
+  **Open in Browser** opens it on the website it came from. A manual is
+  downloaded once and kept, so it opens straight away the next time.
 
-Tab / Shift+Tab (L / R on a controller) switch pages; Esc, B, a click beside the
-panel or the X close it. Descriptions and back covers come from
-[TheGamesDB](https://thegamesdb.net) (the descriptions are installed with
-Nintendall, so they work without internet); manuals are scans from the
-[Internet Archive](https://archive.org), looked up by the game's name, so a game
-can be missing one or, rarely, get another game's. Games are found by name like
-box covers, so a game whose file has an unusual name may have no info.
+Tab / Shift+Tab (L / R on a controller) switch between Back of Box and Manual;
+**C** is Add Custom Cover; Esc, B, a click beside the panel or the X close it.
+Backs of boxes come from the [LaunchBox Games Database](https://gamesdb.launchbox-app.com)
+or [TheGamesDB](https://thegamesdb.net). Manuals come from
+[Digitpress](https://www.digitpress.com/library/manuals/) (most NES games and
+some SNES and Game Boy ones) or are scans from the [Internet Archive](https://archive.org),
+looked up by the game's name, so a game can be missing one or, rarely, get
+another game's. Games are found by name like box covers, so a game whose file
+has an unusual name may have no info.
 
 The games come from the **Games folder**, which has one folder per console:
 

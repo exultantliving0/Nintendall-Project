@@ -34,6 +34,7 @@ add_executable(nintendall
   src/aes.cpp
   src/gameinfo.cpp
   src/infopanel.cpp
+  src/pdfpages.cpp
   src/crashlog.cpp
   src/detect.cpp
   src/filedialog.cpp
