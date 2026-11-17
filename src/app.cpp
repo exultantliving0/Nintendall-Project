@@ -1275,15 +1275,7 @@ void App::loadState() {
         return;
     }
     std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    if (core_->loadState(data)) {
-        osd("State loaded (slot " + std::to_string(slot_) + ")");
-    } else if (system_ == System::GB || system_ == System::GBC) {
-        // Before 1.3.9, Game Boy games ran on another emulator (SameBoy), whose states Gambatte can't read.
-        osd("Old Game Boy states (before 1.3.9) can't be loaded; the game's own save still works",
-            6000);
-    } else {
-        osd("Loading the state failed");
-    }
+    osd(core_->loadState(data) ? "State loaded (slot " + std::to_string(slot_) + ")" : std::string("Loading the state failed"));
 }
 
 void App::takeScreenshot() {
