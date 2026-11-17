@@ -239,6 +239,10 @@ uint8_t* LibretroCore::saveRamData() {
     return gameLoaded_ ? static_cast<uint8_t*>(api_.get_memory_data(RETRO_MEMORY_SAVE_RAM)) : nullptr;
 }
 size_t LibretroCore::saveRamSize() { return gameLoaded_ ? api_.get_memory_size(RETRO_MEMORY_SAVE_RAM) : 0; }
+uint8_t* LibretroCore::rtcData() {
+    return gameLoaded_ ? static_cast<uint8_t*>(api_.get_memory_data(RETRO_MEMORY_RTC)) : nullptr;
+}
+size_t LibretroCore::rtcSize() { return gameLoaded_ ? api_.get_memory_size(RETRO_MEMORY_RTC) : 0; }
 
 // ---------------------------------------------------------------------------
 // Core options

@@ -113,22 +113,37 @@ std::vector<SettingGroup> snes() {
 }
 
 std::vector<SettingGroup> gameBoy() {
+    // Colors for original Game Boy games: Gambatte's colorization, and its palette when that's "internal".
+    Setting colors;
+    colors.label = "Game Boy Palette";
+    colors.keys = {"gambatte_gb_colorization", "gambatte_gb_internal_palette"};
+    colors.hint = "Colors for original Game Boy games";
+    auto palette = [&](const std::string& text, const std::string& colorization, const std::string& internal) {
+        colors.choices.push_back(
+            {text, {{"gambatte_gb_colorization", colorization}, {"gambatte_gb_internal_palette", internal}}});
+    };
+    palette("Grey", "disabled", "GB - DMG");
+    palette("Green (original)", "internal", "GB - DMG");
+    palette("Game Boy Pocket", "internal", "GB - Pocket");
+    palette("Game Boy Light", "internal", "GB - Light");
+    palette("Game Boy Color colors", "GBC", "GB - DMG");
+    palette("Super Game Boy colors", "SGB", "GB - DMG");
+    palette("Best colors for each game", "auto", "GB - DMG");
     return {
         {"Picture",
-         {opt("Game Boy Palette", "sameboy_mono_palette",
-              {{"greyscale", "Grey"}, {"lime", "Green (original)"}, {"olive", "Olive"}, {"teal", "Teal"}}, false,
-              "Colors for original Game Boy games"),
-          raw("Color Correction", "sameboy_color_correction_mode", false, "How Game Boy Color colors are shown"),
-          opt("Border", "sameboy_border",
-              {{"Super Game Boy only", "Super Game Boy games"}, {"always", "Always"}, {"never", "Never"}})}},
+         {colors,
+          opt("Color Correction", "gambatte_gbc_color_correction",
+              {{"GBC only", "Game Boy Color games"}, {"always", "Always"}, {"disabled", "Off"}}, false,
+              "Colors like a real Game Boy Color screen"),
+          opt("LCD Ghosting", "gambatte_mix_frames",
+              {{"disabled", "Off"}, {"mix", "Simple"}, {"lcd_ghosting", "Like a real screen"}}, false,
+              "Some games flicker on purpose and need this to look right")}},
         {"Console",
-         {opt("Console", "sameboy_model",
-              {{"Auto", "Auto"}, {"Auto (SGB)", "Super Game Boy (colors + borders)"}, {"Game Boy", "Game Boy"},
-               {"Game Boy Pocket", "Game Boy Pocket"}, {"Game Boy Color", "Game Boy Color"},
-               {"Game Boy Advance", "Game Boy Advance"}},
-              true),
-          opt("Rumble", "sameboy_rumble",
-              {{"rumble-enabled games", "Games with rumble"}, {"all games", "All games"}, {"never", "Off"}})}},
+         {opt("Console", "gambatte_gb_hwmode",
+              {{"Auto", "Auto"}, {"GB", "Game Boy"}, {"GBC", "Game Boy Color"},
+               {"GBA", "Game Boy Advance"}},
+              true, "Game Boy Advance unlocks extras in a few Game Boy Color games (Shantae, Zelda: Oracle)"),
+          opt("Rumble", "gambatte_rumble_level", {{"10", "On"}, {"5", "Half"}, {"0", "Off"}})}},
     };
 }
 

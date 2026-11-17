@@ -11,9 +11,8 @@ available from the projects below.
 | NES, Famicom Disk System | Mesen (`mesen_libretro`) | GPL-3.0 | https://github.com/libretro/Mesen |
 | SNES | bsnes (`bsnes_libretro`) | GPL-3.0 | https://github.com/libretro/bsnes |
 | Nintendo 64 | Mupen64Plus-Next (`mupen64plus_next_libretro`) | GPL-2.0 | https://github.com/libretro/mupen64plus-libretro-nx |
-| Game Boy / Game Boy Color | SameBoy (`sameboy_libretro`) | MIT | https://github.com/libretro/SameBoy |
+| Game Boy / Game Boy Color (also their LAN games: link cable) | Gambatte (`gambatte_libretro`) | GPL-2.0 | https://github.com/libretro/gambatte-libretro |
 | Game Boy Advance | mGBA (`mgba_libretro`) | MPL-2.0 | https://github.com/libretro/mgba |
-| Game Boy / Game Boy Color LAN games (link cable) | Gambatte (`gambatte_libretro`) | GPL-2.0 | https://github.com/libretro/gambatte-libretro |
 | Game Boy Advance LAN games (link cable) | gpSP (`gpsp_libretro`) | GPL-2.0 | https://github.com/libretro/gpsp |
 | Nintendo DS | melonDS DS (`melondsds_libretro`) | GPL-3.0-or-later | https://github.com/JesseTG/melonds-ds |
 | GameCube / Wii | Dolphin (`dolphin_libretro`), with changes by Nintendall | GPL-2.0-or-later | https://github.com/libretro/dolphin + `third_party/dolphin/` |

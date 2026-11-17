@@ -116,7 +116,9 @@ it, set `saves.folder` in `nintendall.cfg`. Each console's folder has two folder
   game's save is a file named like the game file:
   `Saves/SNES/Saves/Super Mario World (USA).srm` is the save of
   `Games/SNES/Super Mario World (USA).sfc`. Famicom Disk System games keep
-  their disk changes as `Saves/NES/Saves/<game>.ips`.
+  their disk changes as `Saves/NES/Saves/<game>.ips`. Game Boy / Color games
+  with a clock (Pokemon Gold, Silver and Crystal...) keep it next to the save,
+  as `<game>.rtc`.
 - **GameCube:** the memory card's saves (`.gci` files) are in
   `Saves/GameCube/Saves/USA`, `EUR` and `JPN`, like in Dolphin's own `GC` folder.
 - **Wii, Wii U and 3DS:** one folder per game, named with the game's name and
@@ -186,7 +188,7 @@ controller support (via SDL), saves and save states.
 | NES / Famicom | Mesen | **plays** |
 | Famicom Disk System | Mesen | plays (needs `disksys.rom` in the system folder) |
 | SNES | bsnes | runs (tested with test files only) |
-| Game Boy / Game Boy Color | SameBoy | runs (tested with test files only) |
+| Game Boy / Game Boy Color | Gambatte | runs (tested with test files only) |
 | Game Boy Advance | mGBA | runs (tested with test files only) |
 | Nintendo DS | melonDS DS | runs (tested with homebrew) |
 | Nintendo 64 | Mupen64Plus-Next | runs, drawn on the GPU (tested with homebrew test ROMs) |
@@ -320,7 +322,7 @@ Highlights:
 | DS | OpenGL renderer with 3D upscaling (to 8x), gap between screens, stylus cursor, sound smoothing |
 | SNES | HD Mode 7, run-ahead (less input lag), CPU and Super FX overclock, TV filters, no sprite limit |
 | NES / FDS | Palettes, TV filters, no sprite limit, hide screen edges, overclock, region, fast disk loading |
-| Game Boy / Color | Palettes, Super Game Boy mode with borders, color correction, rumble |
+| Game Boy / Color | Palettes (Game Boy Color and Super Game Boy colors too), color correction, LCD ghosting, console, rumble |
 | GBA | LCD ghosting, color correction, solar sensor, skip BIOS intro |
 
 The list lives in `src/consolesettings.cpp`; values are saved per emulator in
@@ -466,9 +468,8 @@ same game file in their Games folder by itself.
 **Game Boy, Game Boy Color and Game Boy Advance** games link like real
 handhelds: everyone plays their own game with their own save (it can be another
 game, such as the other version of Pokemon), and only what goes over the link
-cable is sent. For these, Nintendall runs the game on an emulator with a network
-link cable: Gambatte for Game Boy / Color (two players), gpSP for Game Boy
-Advance (up to four). gpSP's link cable works with the Pokemon games (link cable
+cable is sent. Game Boy / Color games use Gambatte's network link cable (two
+players); Game Boy Advance games run on gpSP, which has one (up to four). gpSP's link cable works with the Pokemon games (link cable
 and wireless adapter), other wireless adapter games and Advance Wars. Friends join
 with the host's address, like NES / SNES / N64, and can also join after the game
 started. Game Boy links send every byte back and forth, so they are fastest on

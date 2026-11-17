@@ -61,6 +61,9 @@ public:
 
     uint8_t* saveRamData();
     size_t saveRamSize();
+    // The cartridge clock (Game Boy games with a clock, such as Pokemon Gold): empty if the game has none.
+    uint8_t* rtcData();
+    size_t rtcSize();
 
     const retro_system_av_info& avInfo() const { return av_; }
     const std::string& name() const { return libraryName_; }

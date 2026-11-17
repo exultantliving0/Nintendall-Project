@@ -8,6 +8,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <set>
@@ -1118,6 +1119,7 @@ void App::updateDiscord() {
 
 void App::loadSram() {
     lastSram_.clear();
+    loadRtc();
     uint8_t* mem = core_ ? core_->saveRamData() : nullptr;
     const size_t size = core_ ? core_->saveRamSize() : 0;
     if (!mem || size == 0 || saveFile_.empty()) return;
@@ -1168,6 +1170,7 @@ void App::saveSram(bool force) {
     const Uint32 now = SDL_GetTicks();
     if (!force && now - lastSramCheck_ < 3000) return;  // check a few times a minute
     lastSramCheck_ = now;
+    saveRtc();
     uint8_t* mem = core_->saveRamData();
     const size_t size = core_->saveRamSize();
     if (!mem || size == 0) return;
@@ -1176,6 +1179,40 @@ void App::saveSram(bool force) {
     std::error_code ec;
     fs::create_directories(saveFile_.parent_path(), ec);
     std::ofstream f(saveFile_, std::ios::binary);
+    f.write(reinterpret_cast<const char*>(mem), std::streamsize(size));
+}
+
+// The clock of Game Boy / Color games that have one (Pokemon Gold, Silver and Crystal...): Gambatte
+// keeps it apart from the save, so it's kept next to it as <game>.rtc. Without it, the game's clock
+// would be wrong every time the game starts.
+void App::loadRtc() {
+    lastRtc_.clear();
+    if (!core_ || saveFile_.empty() || (system_ != System::GB && system_ != System::GBC)) return;
+    uint8_t* mem = core_->rtcData();
+    const size_t size = core_->rtcSize();
+    if (!mem || size == 0) return;
+    fs::path file = saveFile_;
+    file.replace_extension(".rtc");
+    std::vector<char> data(size);
+    std::ifstream f(file, std::ios::binary);
+    if (f && f.read(data.data(), std::streamsize(size)) && f.gcount() == std::streamsize(size)) {
+        std::memcpy(mem, data.data(), size);
+        lastRtc_.assign(mem, mem + size);
+    }  // else: none yet, so it's written at the next save check
+}
+
+void App::saveRtc() {
+    if (!core_ || saveFile_.empty() || (system_ != System::GB && system_ != System::GBC)) return;
+    uint8_t* mem = core_->rtcData();
+    const size_t size = core_->rtcSize();
+    if (!mem || size == 0) return;
+    if (lastRtc_.size() == size && std::equal(mem, mem + size, lastRtc_.begin())) return;
+    lastRtc_.assign(mem, mem + size);
+    fs::path file = saveFile_;
+    file.replace_extension(".rtc");
+    std::error_code ec;
+    fs::create_directories(file.parent_path(), ec);
+    std::ofstream f(file, std::ios::binary);
     f.write(reinterpret_cast<const char*>(mem), std::streamsize(size));
 }
 
@@ -1238,7 +1275,15 @@ void App::loadState() {
         return;
     }
     std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    osd(core_->loadState(data) ? "State loaded (slot " + std::to_string(slot_) + ")" : std::string("Loading the state failed"));
+    if (core_->loadState(data)) {
+        osd("State loaded (slot " + std::to_string(slot_) + ")");
+    } else if (system_ == System::GB || system_ == System::GBC) {
+        // Before 1.3.9, Game Boy games ran on another emulator (SameBoy), whose states Gambatte can't read.
+        osd("Old Game Boy states (before 1.3.9) can't be loaded; the game's own save still works",
+            6000);
+    } else {
+        osd("Loading the state failed");
+    }
 }
 
 void App::takeScreenshot() {

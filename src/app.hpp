@@ -78,6 +78,8 @@ private:
     void runFrames();
     void saveSram(bool force);
     void loadSram();
+    void loadRtc();
+    void saveRtc();
     // Wii, Wii U and 3DS saves in the Saves folder: the running game's console and its folders.
     struct SaveSyncGame {
         System system = System::Unknown;
@@ -252,6 +254,7 @@ private:
     std::filesystem::path extracted_;  // temp file pulled out of a zip
     std::string gameTitle_;
     std::vector<uint8_t> lastSram_;
+    std::vector<uint8_t> lastRtc_;  // the game's clock, as last written to <game>.rtc
     Uint32 lastSramCheck_ = 0;
     int slot_ = 1;
     bool paused_ = false;
