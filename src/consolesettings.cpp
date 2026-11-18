@@ -109,6 +109,10 @@ std::vector<SettingGroup> snes() {
               "Reduces slowdown (Gradius III, Super R-Type)"),
           opt("Super FX Overclock", "bsnes_cpu_sfx_overclock", percent({100, 200, 300, 400, 800}, 100), false,
               "Smoother Star Fox, Stunt Race FX, Yoshi's Island")}},
+        {"Controls",
+         {opt("SNES Mouse", kSnesMouseOption,
+              {{"auto", "Mouse games (Mario Paint...)"}, {"on", "Always, for player 1"}, {"off", "Off"}}, true,
+              "Your mouse moves the game's cursor; Esc lets go of the mouse")}},
     };
 }
 

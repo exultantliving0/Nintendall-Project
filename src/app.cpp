@@ -347,7 +347,10 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         std::signal(SIGTERM, [](int) { g_stopRequested = 1; });
         if (!startGame(start)) return 1;
         const double t0 = nowSeconds();
-        for (int i = 0; i < opt.frames && core_ && !g_stopRequested; ++i) core_->run();
+        for (int i = 0; i < opt.frames && core_ && !g_stopRequested; ++i) {
+            if (snesMouse_) snesMouseFrame();
+            core_->run();
+        }
         const double dt = nowSeconds() - t0;
         std::printf("Ran %d frames in %.2fs (%.0f fps, %.1fx real time)\n", opt.frames, dt, opt.frames / dt,
                     opt.frames / dt / core_->avInfo().timing.fps);
@@ -414,6 +417,7 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         if (wasRunning_ && !running) audio_.clear();  // silence while paused / in menus
         if (running && !wasRunning_) nextFrame_ = nowSeconds();
         wasRunning_ = running;
+        updateMouseGrab(running);
 
         if (running) runFrames();
         text_.setScale(uiScale());
@@ -486,7 +490,10 @@ void App::runFrames() {
             netReplay_ = false;
         }
     } else {
-        for (int i = 0; i < runs && core_; ++i) core_->run();
+        for (int i = 0; i < runs && core_; ++i) {
+            if (snesMouse_) snesMouseFrame();
+            core_->run();
+        }
     }
     if (core_ && core_->shutdownRequested()) {
         stopGame();
@@ -691,6 +698,9 @@ bool App::startGame(const fs::path& path) {
             renderers.push_back(Renderer::OpenGL);
             if (hasSoftwareFallback(det.system)) renderers.push_back(Renderer::Software);
         }
+        if (coreLoaded && det.system == System::SNES)
+            core_->addAppOption(kSnesMouseOption, "SNES Mouse", "auto", {"auto", "on", "off"},
+                                {"Mouse games", "Always", "Off"});
         if (coreLoaded && canUseVulkan(det.system) && attempt > 0)  // keep the user's choice in the file
             core_->addAppOption(kGraphicsApiOption, "Graphics API", "vulkan", {"vulkan", "opengl"}, {"Vulkan", "OpenGL"});
         if (coreLoaded) chooseRenderer(*core_, det.system, renderers[attempt]);
@@ -798,6 +808,23 @@ bool App::startGame(const fs::path& path) {
     audio_.setInputRate(av.timing.sample_rate);
     input_.setStickAsDpad(usesStickAsDpad(system_));
     updateInputProfile();
+    // SNES Mouse: for the games that need it (or every game, or none: Console Settings). Not in
+    // LAN games, which send only controller buttons.
+    snesMouse_ = false;
+    mouseFree_ = false;
+    mouseFracX_ = mouseFracY_ = 0;
+    if (system_ == System::SNES && !lanPending_ && !lan_.active) {
+        const std::string mode = core_->optionValue(kSnesMouseOption);
+        if (mode == "on") {
+            snesMouse_ = true;
+        } else if (mode != "off") {
+            std::string name = home_.titleFor(path);
+            if (name.empty()) name = cleanTitle(gameTitle_);
+            for (char& c : name) c = char(std::tolower(static_cast<unsigned char>(c)));
+            for (const char* game : {"mario paint", "mario & wario", "mario and wario", "sound fantasy"})
+                if (name.find(game) != std::string::npos) snesMouse_ = true;
+        }
+    }
     connectPorts();
     if (realWiimotes()) {
         // SDL's own Wii Remote driver would talk to the remotes too and confuse them: let Dolphin have them.
@@ -811,6 +838,7 @@ bool App::startGame(const fs::path& path) {
     playedSinceLaunch_ = true;  // no "new version" popup from now on
     nextFrame_ = nowSeconds();
     if (startNote.empty()) startNote = saveNote;
+    if (startNote.empty() && snesMouse_) startNote = "SNES Mouse: your mouse moves the cursor (Esc lets go of it)";
     if (!startNote.empty()) osd(startNote, 6000);
     addRecent(path);
     if (video_.window()) SDL_SetWindowTitle(video_.window(), ("Nintendall - " + gameTitle_).c_str());
@@ -847,6 +875,8 @@ void App::stopGame() {
     crashStep(closing + "saving");
     saveSram(true);
     crashStep(closing + "stopping " + core_->name());
+    snesMouse_ = false;
+    updateMouseGrab(false);
     core_.reset();
     crashStep(closing + "copying its saves to the Saves folder");
     syncSaves();  // the save the game just made goes to the Saves folder
@@ -1342,6 +1372,16 @@ int16_t App::onInputState(unsigned port, unsigned device, unsigned index, unsign
 // This computer's controllers (port = player on this computer).
 int16_t App::localInputState(unsigned port, unsigned device, unsigned index, unsigned id) {
     if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_POINTER) return port == 0 && index == 0 ? pointerState(id) : 0;
+    if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_MOUSE) {
+        if (port != 0 || !snesMouse_) return 0;
+        switch (id) {
+        case RETRO_DEVICE_ID_MOUSE_X: return mouseDX_;
+        case RETRO_DEVICE_ID_MOUSE_Y: return mouseDY_;
+        case RETRO_DEVICE_ID_MOUSE_LEFT: return mouseLeft_;
+        case RETRO_DEVICE_ID_MOUSE_RIGHT: return mouseRight_;
+        default: return 0;
+        }
+    }
     if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_JOYPAD) {
         // Some systems get their face buttons rearranged (e.g. GameCube A on the bottom button).
         if (id == RETRO_DEVICE_ID_JOYPAD_MASK) {
@@ -1391,8 +1431,56 @@ void App::connectPorts() {
         // Wii U: player 1 is the GamePad; players 2-4 are Pro Controllers (Cemu's device id for one).
         const unsigned pad = system_ == System::WiiU && p > 0 ? RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 2)
                                                               : RETRO_DEVICE_JOYPAD;
+        if (p == 0 && snesMouse_) {
+            core_->setPortDevice(0, RETRO_DEVICE_MOUSE);
+            continue;
+        }
         core_->setPortDevice(unsigned(p), present ? pad : RETRO_DEVICE_NONE);
     }
+}
+
+// Holds the mouse in the game window (relative mode: the pointer is hidden and can't leave)
+// while a SNES Mouse game is playing, unless the player let go of it with Esc.
+void App::updateMouseGrab(bool running) {
+    const bool want = snesMouse_ && core_ && running && !mouseFree_ && !focusLost_;
+    if (want == mouseGrabbed_) return;
+    mouseGrabbed_ = want;
+    SDL_SetRelativeMouseMode(want ? SDL_TRUE : SDL_FALSE);
+    SDL_GetRelativeMouseState(nullptr, nullptr);  // movement from before doesn't count
+}
+
+// This frame's SNES Mouse: the PC mouse's movement (one PC pixel on the picture = one SNES
+// pixel, so the cursor follows the hand) and buttons, or player 1's controller (the stick or
+// D-pad moves the cursor, B clicks, A is the right button).
+void App::snesMouseFrame() {
+    int rx = 0, ry = 0;
+    const Uint32 buttons = SDL_GetRelativeMouseState(&rx, &ry);
+    float dx = 0, dy = 0;
+    mouseLeft_ = mouseRight_ = false;
+    if (mouseGrabbed_) {
+        const SDL_Rect& r = video_.gameRect();
+        const float scale = r.w > 0 ? float(r.w) / 256.0f : 1.0f;  // the SNES picture is 256 pixels wide
+        dx = float(rx) * video_.pixelRatio() / scale;
+        dy = float(ry) * video_.pixelRatio() / scale;
+        mouseLeft_ = (buttons & SDL_BUTTON_LMASK) != 0;
+        mouseRight_ = (buttons & SDL_BUTTON_RMASK) != 0;
+    }
+    auto pad = [&](unsigned id) { return input_.state(0, RETRO_DEVICE_JOYPAD, 0, id) != 0; };
+    constexpr float kPadSpeed = 2.5f;  // SNES pixels per frame
+    if (pad(RETRO_DEVICE_ID_JOYPAD_LEFT)) dx -= kPadSpeed;
+    if (pad(RETRO_DEVICE_ID_JOYPAD_RIGHT)) dx += kPadSpeed;
+    if (pad(RETRO_DEVICE_ID_JOYPAD_UP)) dy -= kPadSpeed;
+    if (pad(RETRO_DEVICE_ID_JOYPAD_DOWN)) dy += kPadSpeed;
+    mouseLeft_ = mouseLeft_ || pad(RETRO_DEVICE_ID_JOYPAD_B);
+    mouseRight_ = mouseRight_ || pad(RETRO_DEVICE_ID_JOYPAD_A);
+    mouseFracX_ += dx;
+    mouseFracY_ += dy;
+    mouseDX_ = int16_t(std::clamp(int(mouseFracX_), -127, 127));
+    mouseDY_ = int16_t(std::clamp(int(mouseFracY_), -127, 127));
+    mouseFracX_ -= float(mouseDX_);
+    mouseFracY_ -= float(mouseDY_);
+    if (std::abs(mouseFracX_) >= 1.0f) mouseFracX_ = 0;  // faster than the SNES Mouse can go: dropped
+    if (std::abs(mouseFracY_) >= 1.0f) mouseFracY_ = 0;
 }
 
 bool App::realWiimotes() const {
@@ -1701,6 +1789,11 @@ void App::handleEvent(const SDL_Event& e) {
         }
     }
 
+    // The window holds the mouse for a SNES Mouse game: its movement and clicks are the game's.
+    if (mouseGrabbed_ && (e.type == SDL_MOUSEMOTION || e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP ||
+                          e.type == SDL_MOUSEWHEEL))
+        return;
+
     // Mouse position in renderer pixels.
     const float pr = video_.pixelRatio();
     if (e.type == SDL_MOUSEMOTION) {
@@ -1782,6 +1875,15 @@ void App::handleEvent(const SDL_Event& e) {
         }
     }
 
+    // SNES Mouse let go of with Esc: a click on the game takes it again.
+    if (snesMouse_ && mouseFree_ && e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+        const SDL_Rect& r = video_.gameRect();
+        if (mouseX_ >= r.x && mouseX_ < r.x + r.w && mouseY_ >= r.y && mouseY_ < r.y + r.h) {
+            mouseFree_ = false;
+            return;
+        }
+    }
+
     // LAN game lobby (waiting for players, or why it couldn't start): its buttons, Enter and Esc.
     if (lanLobbyShown()) {
         switch (lanLobby_.handleEvent(e, mouseX_, mouseY_, lan_.status, lanLobbyInfo())) {
@@ -1830,6 +1932,11 @@ void App::handleEvent(const SDL_Event& e) {
         switch (k.sym) {
         case SDLK_F10: menu_.openFirst(); return;
         case SDLK_ESCAPE:
+            if (mouseGrabbed_) {  // SNES Mouse: let go of the mouse first
+                mouseFree_ = true;
+                osd("Mouse released - click the game to use the SNES Mouse again");
+                return;
+            }
             if (video_.isFullscreen()) video_.toggleFullscreen();
             return;
         case SDLK_PAUSE: doAction(ActPause); return;
@@ -2332,6 +2439,9 @@ void App::openHomeSettings(System system) {
     // The same options of Nintendall's own as when a game starts.
     if (canUseVulkan(system))
         settingsCore_->addAppOption(kGraphicsApiOption, "Graphics API", "vulkan", {"vulkan", "opengl"}, {"Vulkan", "OpenGL"});
+    if (system == System::SNES)
+        settingsCore_->addAppOption(kSnesMouseOption, "SNES Mouse", "auto", {"auto", "on", "off"},
+                                    {"Mouse games", "Always", "Off"});
     if (system == System::GameCube || system == System::Wii) {  // 0.13.4's Ultrawide: back to Stretch
         const std::string aspect = settingsCore_->optionValue("dolphin_aspect_ratio");
         if (aspect == "4" || aspect == "5") settingsCore_->setOption("dolphin_aspect_ratio", "3");

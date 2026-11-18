@@ -38,7 +38,8 @@ Wii U disc images need keys from your own console: add them with
 ## What you can do
 
 - **Play with any controller:** Xbox, PlayStation, Switch Pro, 8BitDo and more.
-  Change the buttons in **Options > Button Config**.
+  Change the buttons in **Options > Button Config**. Mario Paint gets the SNES
+  Mouse: your mouse moves its cursor.
 - **Play with friends** on other computers: **Multiplayer > Host Game** and
   **Join Game**.
 - **Keep your saves** in **Documents\Nintendall\Saves**. You can bring saves from

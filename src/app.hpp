@@ -170,6 +170,17 @@ private:
     std::filesystem::path wiiUShaderCache() const;
     void clearWiiUShaderCache();
     bool sdlWiiDriverOff_ = false;
+
+    // SNES Mouse (Mario Paint...): the PC mouse moves the game's cursor. The mouse is held by the
+    // game window while playing (Esc lets go of it, a click on the game takes it again).
+    void updateMouseGrab(bool running);
+    void snesMouseFrame();
+    bool snesMouse_ = false;     // the SNES Mouse is in player 1's port
+    bool mouseGrabbed_ = false;  // the window holds the mouse (relative mode)
+    bool mouseFree_ = false;     // the player let go of it with Esc
+    int16_t mouseDX_ = 0, mouseDY_ = 0;  // this frame's movement, in SNES pixels
+    bool mouseLeft_ = false, mouseRight_ = false;
+    float mouseFracX_ = 0, mouseFracY_ = 0;  // movement smaller than a pixel, kept for the next frame
     // Shaders menu: chosen per console (the running game's, or the one shown on the home screen).
     System shaderSystem() const { return core_ ? system_ : home_.consoleSystem(); }
     Shader shaderFor(System s) const;

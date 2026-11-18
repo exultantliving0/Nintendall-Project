@@ -320,7 +320,7 @@ Highlights:
 | Wii U | Graphics API (Vulkan / OpenGL), Resolution (from the game's own resolution graphic pack, like standalone Cemu, so shadows and effects stay right; shown for the ~50 games that have one), smoother frame rate, accurate shader math, Clear Shader Cache, and more. Without a pack, games draw at their native resolution (Cemu's generic resize broke shadows) |
 | 3DS | Resolution upscaling (to 10x), texture filters (Anime4K, ScaleForce, xBRZ), stereoscopic 3D, New / Old 3DS, region, language, CPU speed |
 | DS | OpenGL renderer with 3D upscaling (to 8x), gap between screens, stylus cursor, sound smoothing |
-| SNES | HD Mode 7, run-ahead (less input lag), CPU and Super FX overclock, TV filters, no sprite limit |
+| SNES | HD Mode 7, run-ahead (less input lag), CPU and Super FX overclock, TV filters, no sprite limit, SNES Mouse |
 | NES / FDS | Palettes, TV filters, no sprite limit, hide screen edges, overclock, region, fast disk loading |
 | Game Boy / Color | Palettes (Game Boy Color and Super Game Boy colors too), color correction, LCD ghosting, console, rumble |
 | GBA | LCD ghosting, color correction, solar sensor, skip BIOS intro |
@@ -348,6 +348,17 @@ They are drawn with the same renderer as the rest of Nintendall (Direct3D,
 OpenGL, ...), so they work on any graphics card. Scanlines follow the console's
 own line count, also for games the emulator draws at a higher resolution, and
 fade out when the window is too small to show them cleanly.
+
+### SNES Mouse
+
+Mario Paint and Mario & Wario get the SNES Mouse by themselves: your mouse
+moves the game's cursor, and its left and right buttons are the SNES Mouse's.
+While the game plays, the window holds the mouse pointer; **Esc** lets go of it
+(to use the menus), and a click on the game takes it again. Player 1's
+controller works too: the stick or D-pad moves the cursor, B clicks and A is the
+right button. **Console Settings > Controls > SNES Mouse** can give every SNES
+game the mouse (for games that also take it, such as Lemmings 2 or Civilization)
+or turn it off. Not in LAN games.
 
 ### Nintendo DS screens
 

@@ -33,6 +33,8 @@ const std::vector<SettingGroup>& consoleSettings(System s);
 // Offered for Wii U, where Vulkan is the default (Cemu on some drivers, e.g. Intel's, draws parts
 // of games black with OpenGL).
 inline constexpr const char* kGraphicsApiOption = "nintendall_graphics_api";
+// SNES: plug the SNES Mouse into player 1's port ("auto" = for the games that need it).
+inline constexpr const char* kSnesMouseOption = "nintendall_snes_mouse";
 bool canUseVulkan(System s);
 
 // Friendly label for a raw core option value ("enabled" -> "On", ...).
