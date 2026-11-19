@@ -329,8 +329,8 @@ Highlights:
 sound wrong: for example Dolphin's Store EFB/XFB Copies to Texture Only, Bounding
 Box (Paper Mario) and MMU (Rogue Squadron), N64 framebuffer emulation and
 screen effects, accurate 3DS sound and shader math, SNES accuracy and SA-1
-overclock, and Wii U background shader compiling. The note under each one says
-when it helps.
+overclock, and Wii U background shader compiling. Point at one to see when it
+helps (at the bottom of the window).
 
 The list lives in `src/consolesettings.cpp`; values are saved per emulator in
 the `config/` folder.
