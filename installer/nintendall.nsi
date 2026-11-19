@@ -141,6 +141,11 @@ Section "${APPNAME} (required)" SecMain
   RMDir /r "$INSTDIR\gameinfo"
   SetOutPath "$INSTDIR\gameinfo"
   File "${SRCDIR}\gameinfo\*.txt"
+  ; The settings of emulators that only list them with a game loaded (melonDS), so Console
+  ; Settings works from the home screen before a game of that console has been played
+  RMDir /r "$INSTDIR\settings"
+  SetOutPath "$INSTDIR\settings"
+  File "${SRCDIR}\settings\*.optlist"
   SetOutPath "$INSTDIR"
 
   ; Games folder (Documents\Nintendall\Games) with a folder for each console: put games in
@@ -225,6 +230,7 @@ Section "Uninstall"
   RMDir /r "$INSTDIR\fonts"
   RMDir /r "$INSTDIR\system"
   RMDir /r "$INSTDIR\gameinfo"
+  RMDir /r "$INSTDIR\settings"
   Delete "$INSTDIR\nintendall.exe"
   Delete "$INSTDIR\SDL2.dll"
   Delete "$INSTDIR\SDL2_ttf.dll"
