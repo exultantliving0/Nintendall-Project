@@ -387,6 +387,12 @@ Large + Small Screen, Single Screen, Separate Windows and Swap Screens for 3DS
 on the keyboard, the C-Stick is the right stick, ZL / ZR are the triggers (1 / 3),
 and the mouse is the stylus. Games must be decrypted dumps (.3ds / .cci / .cxi / .3dsx).
 
+The 3DS's username (games such as Majora's Mask 3D name your save after it) is
+your player name: the one in the Multiplayer window, or your Windows user name
+(up to 10 letters). The emulator's own name ("AZAHAR") is replaced when a 3DS
+game starts, from the second 3DS game you ever start on. Saves made before keep
+the name they were made with.
+
 ### Nintendo 64
 
 N64 games are drawn on the graphics card (GLideN64, OpenGL 3.3 or newer). On

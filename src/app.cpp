@@ -617,6 +617,8 @@ bool App::startGame(const fs::path& path) {
     }
     if (det.system == System::WiiU) writeWiiUGamePaths();
     std::string saveNote;  // shown when the game starts
+    if (det.system == System::N3DS) setN3dsUsername();
+
     // Save folders from other emulators in Saves/<console>/Saves (Wii, Wii U, 3DS).
     if (det.system == System::Wii || det.system == System::WiiU || det.system == System::N3DS) {
         EmulatorSaveFolders to;
@@ -1244,6 +1246,76 @@ void App::saveRtc() {
     fs::create_directories(file.parent_path(), ec);
     std::ofstream f(file, std::ios::binary);
     f.write(reinterpret_cast<const char*>(mem), std::streamsize(size));
+}
+
+// The emulated 3DS's username (games such as Majora's Mask 3D name the save after it) is
+// Azahar's "AZAHAR" unless it's changed: before a 3DS game starts, it becomes the player's name
+// (the one in the LAN game window, else the computer's user name). A name set some other way is
+// kept: only Azahar's and Citra's own, or one Nintendall wrote, is replaced. It's in the 3DS's
+// settings file (config: a list of blocks; 0x000A0000 is the username, 14 UTF-16 characters).
+// The file is made the first time a 3DS game starts, so the very first game still sees "AZAHAR".
+void App::setN3dsUsername() {
+    const fs::path file = paths_.saves / "Azahar" / "nand" / "data" / "00000000000000000000000000000000" / "sysdata" /
+                          "00010017" / "00000000" / "config";
+    std::vector<uint8_t> data;
+    {
+        std::ifstream f(file, std::ios::binary);
+        if (!f) return;
+        data.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    }
+    if (data.size() < 4) return;
+    const size_t count = size_t(data[0] | data[1] << 8);
+    auto u32 = [&](size_t at) { return uint32_t(data[at] | data[at + 1] << 8 | data[at + 2] << 16 | uint32_t(data[at + 3]) << 24); };
+    size_t at = 0;
+    for (size_t i = 0; i < count && 4 + i * 12 + 12 <= data.size(); ++i) {
+        const size_t e = 4 + i * 12;
+        if (u32(e) == 0x000A0000 && (data[e + 8] | data[e + 9] << 8) == 0x1C) at = u32(e + 4);
+    }
+    if (at == 0 || at + 0x1C > data.size()) return;
+
+    auto read = [&] {  // the name in the file (ASCII is enough to compare)
+        std::string s;
+        for (size_t i = 0; i < 0x1C; i += 2) {
+            const unsigned c = data[at + i] | data[at + i + 1] << 8;
+            if (c == 0) break;
+            s += c < 0x80 ? char(c) : '?';
+        }
+        return s;
+    };
+    std::string want = cfg_.get("lan.name");
+    if (want.empty()) want = defaultPlayerName();
+    // UTF-8 to UTF-16 (the 3DS allows 10 characters).
+    std::vector<uint16_t> name;
+    for (size_t i = 0; i < want.size() && name.size() < 10;) {
+        const unsigned char c = static_cast<unsigned char>(want[i]);
+        unsigned cp = c, n = 0;
+        if (c >= 0xF0) { cp = c & 0x07; n = 3; }
+        else if (c >= 0xE0) { cp = c & 0x0F; n = 2; }
+        else if (c >= 0xC0) { cp = c & 0x1F; n = 1; }
+        ++i;
+        for (; n > 0 && i < want.size(); --n, ++i) cp = cp << 6 | (static_cast<unsigned char>(want[i]) & 0x3F);
+        if (cp >= 0x20 && cp < 0x10000) name.push_back(uint16_t(cp));
+    }
+    while (!name.empty() && name.back() == ' ') name.pop_back();
+    if (name.empty()) return;
+
+    const std::string now = read();
+    const std::string ours = cfg_.get("3ds.username");
+    if (now != "AZAHAR" && now != "CITRA" && now != ours) return;  // the player's own name: kept
+    std::vector<uint8_t> block(0x1C, 0);
+    for (size_t i = 0; i < name.size(); ++i) {
+        block[i * 2] = uint8_t(name[i] & 0xFF);
+        block[i * 2 + 1] = uint8_t(name[i] >> 8);
+    }
+    if (std::equal(block.begin(), block.end(), data.begin() + std::ptrdiff_t(at))) return;
+    std::copy(block.begin(), block.end(), data.begin() + std::ptrdiff_t(at));
+    {
+        std::ofstream f(file, std::ios::binary | std::ios::trunc);
+        f.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));
+        if (!f) return;
+    }
+    cfg_.set("3ds.username", read());
+    saveConfig();
 }
 
 // GameCube saves (.gci files, memory card A): Saves/GameCube/Saves/USA, EUR and JPN. The first time,

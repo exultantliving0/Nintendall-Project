@@ -90,6 +90,7 @@ private:
     SaveSyncGame saveSync_;
     bool emulatorSaves(System s, SaveFolderSync& out) const;
     void syncSaves();
+    void setN3dsUsername();
     void syncAllSaves();
     std::filesystem::path wiiTitles(const std::string& type = "00010000") const;
     std::filesystem::path saveDirFor(const char* coreName, System system, const std::filesystem::path& game) const;
