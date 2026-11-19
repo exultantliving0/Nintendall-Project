@@ -20,6 +20,7 @@
 #include "landialog.hpp"
 #include "netplay.hpp"
 #include "menubar.hpp"
+#include "namedialog.hpp"
 #include "paths.hpp"
 #include "saves.hpp"
 #include "settingsdialog.hpp"
@@ -62,7 +63,7 @@ private:
         ActPause = 30, ActReset, ActFastForward,
         ActSaveState = 40, ActLoadState,
         ActSlot = 50,  // + slot number
-        ActButtonConfig = 70, ActFullscreen, ActConsoleSettings, ActWiiUKeys, ActPairWiimotes,
+        ActButtonConfig = 70, ActFullscreen, ActConsoleSettings, ActWiiUKeys, ActPairWiimotes, ActN3dsName,
         ActControls = 90, ActAbout, ActCoffee,
         ActLayout = 100,  // + layout index
         ActLayoutSwap = 120,
@@ -233,6 +234,10 @@ private:
     Lan lan_;
     const LanDialog::Request* lanPending_ = nullptr;  // while startGame loads a LAN game
     LanDialog lanDialog_;
+    // The 3DS username window (the first 3DS game asks; Options > 3DS Username...), and the game
+    // to start once it's answered ("" = opened from the menu).
+    NameDialog nameDialog_;
+    std::filesystem::path nameDialogGame_;
     LanLobby lanLobby_;
     Library lanLibrary_;
 

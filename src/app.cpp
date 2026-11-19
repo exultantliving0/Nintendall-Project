@@ -410,7 +410,8 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         if (settingsCore_ && !settings_.isOpen()) settingsCore_.reset();  // saves its settings
         settingsWasOpen_ = settings_.isOpen();
 
-        const bool modal = menu_.isOpen() || buttonConfig_.isOpen() || settings_.isOpen() || lanDialog_.isOpen();
+        const bool modal = menu_.isOpen() || buttonConfig_.isOpen() || settings_.isOpen() || lanDialog_.isOpen() ||
+                           nameDialog_.isOpen();
         // A LAN game never stops: the other players' games wait for this one.
         const bool running = core_ && (lan_.active || (!paused_ && !focusLost_ && !modal));
         input_.setKeyboardEnabled(!modal);
@@ -542,6 +543,16 @@ bool App::startGame(const fs::path& path) {
     const SystemInfo& sys = systemInfo(det.system);
     std::fprintf(stderr, "Detected %s (%s)\n", sys.fullName, det.detail.c_str());
     crashStep(std::string("starting ") + sys.fullName + " game " + path.filename().u8string());
+
+    // The first 3DS game: ask for the 3DS's username first (the game starts once it's answered).
+    if (det.system == System::N3DS && !opt_.headless && cfg_.get("3ds.name").empty()) {
+        nameDialogGame_ = path;
+        nameDialog_.open("3DS Username",
+                         "Some 3DS games, such as The Legend of Zelda: Majora's Mask 3D, name your save after "
+                         "the 3DS's username. Type the name you want (up to 10 letters):",
+                         "Nintendall", 10);
+        return false;
+    }
 
     if (sys.needsGpu) {
         showMessage("Coming soon", std::string(sys.fullName) +
@@ -1249,8 +1260,8 @@ void App::saveRtc() {
 }
 
 // The emulated 3DS's username (games such as Majora's Mask 3D name the save after it) is
-// Azahar's "AZAHAR" unless it's changed: before a 3DS game starts, it becomes the player's name
-// (the one in the LAN game window, else the computer's user name). A name set some other way is
+// Azahar's "AZAHAR" unless it's changed: before a 3DS game starts, it becomes the name the player
+// chose in the 3DS Username window ("Nintendall" unless they typed another). A name set some other way is
 // kept: only Azahar's and Citra's own, or one Nintendall wrote, is replaced. It's in the 3DS's
 // settings file (config: a list of blocks; 0x000A0000 is the username, 14 UTF-16 characters).
 // The file is made the first time a 3DS game starts, so the very first game still sees "AZAHAR".
@@ -1282,8 +1293,8 @@ void App::setN3dsUsername() {
         }
         return s;
     };
-    std::string want = cfg_.get("lan.name");
-    if (want.empty()) want = defaultPlayerName();
+    std::string want = cfg_.get("3ds.name");  // chosen in the 3DS Username window
+    if (want.empty()) want = "Nintendall";
     // UTF-8 to UTF-16 (the 3DS allows 10 characters).
     std::vector<uint16_t> name;
     for (size_t i = 0; i < want.size() && name.size() < 10;) {
@@ -1928,6 +1939,21 @@ void App::handleEvent(const SDL_Event& e) {
         if (lanDialog_.takeRequest(req)) startLanGame(req);
         return;
     }
+    if (nameDialog_.isOpen()) {
+        nameDialog_.handleEvent(e, mouseX_, mouseY_);
+        std::string name;
+        if (nameDialog_.takeName(name)) {
+            cfg_.set("3ds.name", name);
+            saveConfig();
+            const fs::path game = nameDialogGame_;
+            nameDialogGame_.clear();
+            if (!game.empty()) startGame(game);
+            else osd("3DS username: " + name + (system_ == System::N3DS ? " (from the next time a 3DS game starts)" : ""), 5000);
+        } else if (nameDialog_.takeCancel()) {
+            nameDialogGame_.clear();
+        }
+        return;
+    }
 
     // Fullscreen toggle works everywhere.
     if (e.type == SDL_KEYDOWN && !e.key.repeat &&
@@ -2134,6 +2160,15 @@ void App::doAction(int a) {
                     false);
         break;
     case ActWiiUKeys: importWiiUKeys(); break;
+    case ActN3dsName: {
+        const std::string now = cfg_.get("3ds.name");
+        nameDialogGame_.clear();
+        nameDialog_.open("3DS Username",
+                         "Some 3DS games, such as The Legend of Zelda: Majora's Mask 3D, name your save after the "
+                         "3DS's username. Saves made before keep their name. Up to 10 letters:",
+                         now.empty() ? "Nintendall" : now, 10);
+        break;
+    }
     case ActPairWiimotes: startWiimotePairing(); break;
     case ActFullscreen: video_.toggleFullscreen(); break;
     case ActControls:
@@ -2400,6 +2435,7 @@ void App::buildMenus() {
     options.items.push_back({"Button Config...", "", ActButtonConfig});
     options.items.push_back({"Console Settings...", "", ActConsoleSettings, !lan_.active});
     options.items.push_back({"Wii U Keys...", "", ActWiiUKeys});
+    options.items.push_back({"3DS Username...", "", ActN3dsName});
     options.items.push_back({pairJob_ ? "Pairing Wii Remotes..." : "Pair Wii Remotes", "", ActPairWiimotes, !pairJob_});
     options.items.push_back({});
     options.items.push_back({"Fullscreen", "F11", ActFullscreen, true, video_.isFullscreen()});
@@ -2467,6 +2503,7 @@ void App::draw() {
     drawUpdateDownload();
     if (LibretroCore* c = settingsCore()) settings_.draw(video_, text_, *c, W, H);
     lanDialog_.draw(video_, text_, W, H);
+    nameDialog_.draw(video_, text_, W, H);
     video_.present();
 
     if (screen2_.window()) {

@@ -44,6 +44,7 @@ add_executable(nintendall
   src/input.cpp
   src/lan.cpp
   src/landialog.cpp
+  src/namedialog.cpp
   src/library.cpp
   src/menubar.cpp
   src/netplay.cpp
