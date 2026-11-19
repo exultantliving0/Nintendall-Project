@@ -56,11 +56,15 @@ bool managedByNintendall(const std::string& key) {
         "cemu_gpu_api", "cemu_internal_resolution", "cemu_number_of_screen_layouts", "cemu_next_screen_layout_button",
         "cemu_drc_position", "mupen64plus-rdp-plugin", "mupen64plus-rsp-plugin", "melonds_show_current_layout",
         "melonds_number_of_screen_layouts", "dolphin_osd_enabled", "dolphin_main_cpu_thread",
-        "gambatte_show_gb_link_settings"};
+        "gambatte_show_gb_link_settings",
+        // Can't work in Nintendall: need files it doesn't have (a GBA BIOS, HD packs, DSi system
+        // files), turbo buttons (Button Config has none), or a network card set up for melonDS.
+        "mgba_use_bios", "mesen_hdpacks", "mesen_controllerturbospeed", "gambatte_turbo_period",
+        "melonds_console_mode", "melonds_direct_network_interface"};
     for (const char* k : exact)
         if (key == k) return true;
     static const char* const prefixes[] = {"nintendall_", "cemu_zgp_", "melonds_screen_layout", "cemu_screen_layout",
-                                           "gambatte_gb_link"};
+                                           "gambatte_gb_link", "melonds_dsi"};
     for (const char* p : prefixes)
         if (key.rfind(p, 0) == 0) return true;
     for (const char* part : {"_path", "savepath", "virtual_sd", "dump", "log_level", "_logging"})
