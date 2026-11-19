@@ -49,9 +49,14 @@ std::string packListPath(const std::filesystem::path& rules) {
 }
 
 // Options the More Settings group leaves out: ones Nintendall sets itself (renderer, screen
-// layouts, link cable, Wii U graphic packs, on-screen text), and ones that would move the saves
-// or write debug files.
-bool managedByNintendall(const std::string& key) {
+// layouts, link cable, Wii U graphic packs, on-screen text), ones that would move the saves or
+// write debug files, ones only RetroArch uses, network ones (Nintendall's Multiplayer menu does that),
+// and the Wiimote ones (the few Wii games need are in the Wii groups above).
+bool managedByNintendall(const std::string& key, const std::string& description) {
+    std::string desc = description;
+    for (char& c : desc) c = char(std::tolower(static_cast<unsigned char>(c)));
+    for (const char* word : {"retroarch", "network", "netplay", "server ip", "server port", "dns", "wiimote", "wii remote", "bluetooth"})
+        if (desc.find(word) != std::string::npos) return true;
     static const char* const exact[] = {
         "citra_graphics_api", "citra_layout_option", "citra_swap_screen", "citra_swap_screen_mode",
         "cemu_gpu_api", "cemu_internal_resolution", "cemu_number_of_screen_layouts", "cemu_next_screen_layout_button",
@@ -61,14 +66,16 @@ bool managedByNintendall(const std::string& key) {
         // Can't work in Nintendall: need files it doesn't have (a GBA BIOS, HD packs, DSi system
         // files), turbo buttons (Button Config has none), or a network card set up for melonDS.
         "mgba_use_bios", "mesen_hdpacks", "mesen_controllerturbospeed", "gambatte_turbo_period",
-        "melonds_console_mode", "melonds_direct_network_interface"};
+        "melonds_console_mode", "melonds_direct_network_interface", "melonds_mac_address_mode",
+        "melonds_firmware_wfc_dns", "dolphin_debug_mode_enabled"};
     for (const char* k : exact)
         if (key == k) return true;
     static const char* const prefixes[] = {"nintendall_", "cemu_zgp_", "melonds_screen_layout", "cemu_screen_layout",
-                                           "gambatte_gb_link", "melonds_dsi"};
+                                           "gambatte_gb_link", "melonds_dsi",
+                                           "dolphin_dsu_"};
     for (const char* p : prefixes)
         if (key.rfind(p, 0) == 0) return true;
-    for (const char* part : {"_path", "savepath", "virtual_sd", "dump", "log_level", "_logging"})
+    for (const char* part : {"_path", "savepath", "virtual_sd", "dump", "log_level", "_logging", "_log_"})
         if (key.find(part) != std::string::npos) return true;
     return false;
 }
@@ -174,7 +181,7 @@ void SettingsDialog::open(System system, LibretroCore& core, bool gameRunning) {
         for (const auto& st : group.settings) shown.insert(st.keys.begin(), st.keys.end());
     std::vector<Row> more;
     for (const auto& [key, o] : options) {
-        if (shown.count(key) || managedByNintendall(key) || core.forcedOptions().count(key) || o.values.size() < 2)
+        if (shown.count(key) || managedByNintendall(key, o.description) || core.forcedOptions().count(key) || o.values.size() < 2)
             continue;
         Row r;
         r.setting.label = o.description.empty() ? key : o.description;
