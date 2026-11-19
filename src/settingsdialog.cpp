@@ -6,6 +6,7 @@
 #include <fstream>
 #include <set>
 
+#include "landialog.hpp"  // wrapText
 #include "uistyle.hpp"
 
 using namespace ui;
@@ -303,22 +304,33 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
     rowH_ = lh + int(12 * s);
     const int footerH = lh + int(16 * s) + lh + int(14 * s);
 
-    const int dw = std::min(W - int(16 * s), int(640 * s));
-    const int valueW = int(dw * 0.46);
-    // A row's note goes beside its label when there's room, otherwise on a second line under it.
+    // Wide enough for the emulators' long setting names; the value boxes get what their choices need.
+    const int dw = std::min(W - int(16 * s), int(900 * s));
+    const int valueW = std::clamp(int(dw * 0.38), int(150 * s), int(330 * s));
     const int gap = int(10 * s);
+    const int labelW = dw - pad * 2 - valueW - gap;
     auto labelText = [&](const Row& r) { return r.setting.label + (r.setting.restart && gameRunning_ ? " *" : ""); };
-    auto noteBelow = [&](const Row& r) {
-        return !r.setting.note.empty() &&
-               t.width(labelText(r)) + gap + t.width(r.setting.note) > dw - pad * 2 - valueW - gap;
+    // A label too long for its space goes on two (or more) lines.
+    auto linesOf = [&](Row& r) -> const std::vector<std::string>& {
+        if (r.linesWidth != labelW) {
+            r.lines = wrapText(t, labelText(r), labelW);
+            if (r.lines.empty()) r.lines.push_back(labelText(r));
+            r.linesWidth = labelW;
+        }
+        return r.lines;
     };
-    auto heightOf = [&](const Row& r) {
+    // A row's note goes beside its label when there's room, otherwise on a line under it.
+    auto noteBelow = [&](Row& r) {
+        return !r.setting.note.empty() && t.width(linesOf(r).back()) + gap + t.width(r.setting.note) > labelW;
+    };
+    auto heightOf = [&](Row& r) {
         if (!r.header.empty()) return rowH_ + int(4 * s);
-        return noteBelow(r) ? rowH_ + lh : rowH_;
+        const int extra = int(linesOf(r).size()) - 1 + (noteBelow(r) ? 1 : 0);
+        return rowH_ + extra * lh;
     };
 
     int contentH = 0;
-    for (const auto& r : rows_) contentH += heightOf(r);
+    for (auto& r : rows_) contentH += heightOf(r);
     if (rows_.empty()) contentH = rowH_ * 2;
     const int maxListH = H - int(24 * s) - titleH - footerH - pad;
     const int listH = std::max(rowH_, std::min(contentH, maxListH));
@@ -359,13 +371,15 @@ void SettingsDialog::draw(Video& v, Text& t, LibretroCore& core, int W, int H) {
         const int thisH = heightOf(r);
         const bool rowHover = mouseY_ >= y && mouseY_ < y + thisH && inside(list_, mouseX_, mouseY_);
         if (rowHover && !r.setting.hint.empty()) hoverHint = r.setting.hint;
-        const std::string labelStr = labelText(r);
-        t.draw(dialog_.x + pad, y + (rowH_ - lh) / 2, labelStr, kTextC);
+        const auto& lines = linesOf(r);
+        for (size_t i = 0; i < lines.size(); ++i)
+            t.draw(dialog_.x + pad, y + (rowH_ - lh) / 2 + int(i) * lh, lines[i], kTextC);
         if (!r.setting.note.empty()) {
+            const int lastY = y + (rowH_ - lh) / 2 + int(lines.size() - 1) * lh;
             if (noteBelow(r))
-                t.draw(dialog_.x + pad, y + (rowH_ - lh) / 2 + lh, r.setting.note, kDim);
+                t.draw(dialog_.x + pad, lastY + lh, r.setting.note, kDim);
             else
-                t.draw(dialog_.x + pad + t.width(labelStr) + gap, y + (rowH_ - lh) / 2, r.setting.note, kDim);
+                t.draw(dialog_.x + pad + t.width(lines.back()) + gap, lastY, r.setting.note, kDim);
         }
 
         r.valueBox = {valueX, y + int(3 * s), valueW, rowH_ - int(6 * s)};

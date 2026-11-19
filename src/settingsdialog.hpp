@@ -49,6 +49,8 @@ private:
         Setting setting;                     // for setting rows
         std::vector<SettingChoice> choices;  // resolved against the core's options
         SDL_Rect valueBox{}, prevBox{}, nextBox{};
+        std::vector<std::string> lines;  // the label, wrapped to fit beside the value box
+        int linesWidth = -1;             // the width it was wrapped for (measuring text is slow)
     };
     int currentChoice(const Row& r, LibretroCore& core) const;
     void findResolutionPack(std::map<std::string, CoreOption>& options, std::string& enableKey,
