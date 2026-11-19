@@ -86,6 +86,18 @@ std::vector<SettingGroup> nes(bool fds) {
     return g;
 }
 
+// bsnes's fast modes, together: Fast (its normal) or Accurate.
+Setting snesAccuracy() {
+    Setting s;
+    s.label = "Accuracy";
+    s.keys = {"bsnes_ppu_fast", "bsnes_dsp_fast", "bsnes_coprocessor_delayed_sync"};
+    s.choices = {{"Fast (normal)", {{"bsnes_ppu_fast", "ON"}, {"bsnes_dsp_fast", "ON"}, {"bsnes_coprocessor_delayed_sync", "ON"}}},
+                 {"Accurate", {{"bsnes_ppu_fast", "OFF"}, {"bsnes_dsp_fast", "OFF"}, {"bsnes_coprocessor_delayed_sync", "OFF"}}}};
+    s.restart = true;
+    s.hint = "Accurate fixes rare graphics and sound glitches; needs a faster PC";
+    return s;
+}
+
 std::vector<SettingGroup> snes() {
     return {
         {"Picture",
@@ -108,7 +120,12 @@ std::vector<SettingGroup> snes() {
           opt("CPU Overclock", "bsnes_cpu_overclock", percent({100, 120, 150, 200, 300}, 100), false,
               "Reduces slowdown (Gradius III, Super R-Type)"),
           opt("Super FX Overclock", "bsnes_cpu_sfx_overclock", percent({100, 200, 300, 400, 800}, 100), false,
-              "Smoother Star Fox, Stunt Race FX, Yoshi's Island")}},
+              "Smoother Star Fox, Stunt Race FX, Yoshi's Island"),
+          opt("SA-1 Overclock", "bsnes_cpu_sa1_overclock", percent({100, 150, 200, 300, 400}, 100), false,
+              "Less slowdown in Kirby Super Star and Super Mario RPG")}},
+        {"Fixes and Speed", {snesAccuracy(),
+                             opt("Hotfixes", "bsnes_hotfixes", kOffOnCaps, false,
+                                 "Fixes a few games that have bugs of their own")}},
         {"Controls",
          {opt("SNES Mouse", kSnesMouseOption,
               {{"auto", "Mouse games (Mario Paint...)"}, {"on", "Always, for player 1"}, {"off", "Off"}}, true,
@@ -164,6 +181,9 @@ std::vector<SettingGroup> gba() {
           opt("Skip BIOS Intro", "mgba_skip_bios", kOffOnCaps, true),
           opt("Game Boy Player Rumble", "mgba_force_gbp", kOffOnCaps, true)}},
         {"Sound", {opt("Smooth Sound", "mgba_audio_low_pass_filter", kOnOff)}},
+        {"Fixes and Speed",
+         {opt("Frame Skip", "mgba_frameskip", {{"disabled", "Off"}, {"auto", "When the PC is too slow"}}, false,
+              "Keeps the game at full speed on a slow PC (the picture is less smooth)")}},
     };
 }
 
@@ -181,6 +201,9 @@ std::vector<SettingGroup> ds() {
           opt("Stylus Cursor", "melonds_show_cursor",
               {{"timeout", "Briefly after moving"}, {"touching", "While touching"}, {"always", "Always"}, {"disabled", "Hidden"}})}},
         {"Console", {opt("Speed Boost (JIT)", "melonds_jit_enable", kOnOff, true)}},
+        {"Fixes and Speed",
+         {opt("Threaded 3D", "melonds_threaded_renderer", kOnOff, true,
+              "Faster 3D with the Software renderer; turn off if 3D looks wrong")}},
         {"Sound",
          {opt("Sound Smoothing", "melonds_audio_interpolation",
               {{"disabled", "Off"}, {"linear", "Linear"}, {"cosine", "Cosine"}, {"cubic", "Cubic"}, {"gaussian", "Gaussian"}})}},
@@ -213,6 +236,14 @@ std::vector<SettingGroup> n3ds() {
           raw("System Language", "citra_language_value", true),
           opt("CPU Speed", "citra_cpu_clock_percentage", percent({50, 75, 100, 125, 150, 200, 300, 400}, 100), true,
               "Higher can fix slowdown; too high can break games")}},
+        {"Fixes and Speed",
+         {opt("Sound Emulation", "citra_audio_emulation",
+              {{"hle", "Fast (normal)"}, {"lle", "Accurate"}, {"lle_multithread", "Accurate, multi-core"}}, true,
+              "Accurate fixes missing or broken sound in some games; needs a faster PC"),
+          opt("Accurate Shader Math", "citra_shaders_accurate_mul", kOnOff, true,
+              "Fixes graphics glitches in some games; off is a little faster"),
+          opt("Hardware Shaders", "citra_use_hw_shader", kOnOff, true,
+              "Much faster; turn off only if a game's graphics are broken")}},
         {"Controls",
          {opt("Right Stick", "citra_analog_function",
               {{"c_stick_and_touchscreen", "C-Stick + touch pointer"}, {"c_stick", "C-Stick"}, {"touchscreen_pointer", "Touch pointer"}},
@@ -263,6 +294,19 @@ std::vector<SettingGroup> n64() {
               "Needed by Majora's Mask, Donkey Kong 64, Perfect Dark"),
           opt("Player 1 Accessory", "mupen64plus-pak1", pak, true),
           opt("Player 2 Accessory", "mupen64plus-pak2", pak, true)}},
+        {"Fixes and Speed",
+         {opt("Framebuffer Emulation", "mupen64plus-EnableFBEmulation", kFalseTrue, true,
+              "Needed for effects such as pause screens and the Lens of Truth; off is faster but breaks them"),
+          opt("Screen Effects", "mupen64plus-EnableCopyColorToRDRAM",
+              {{"Async", "Fast (normal)"}, {"Sync", "Accurate"}, {"Off", "Off (fastest)"}}, true,
+              "Accurate fixes effects that reuse the picture (some menus, blur, photos)"),
+          opt("Depth Compare", "mupen64plus-EnableN64DepthCompare", {{"False", "Off"}, {"True", "Fast"}, {"Compatible", "Compatible"}},
+              true, "Fixes decals and shadows drawn wrong in a few games"),
+          opt("Frame Rate Boost", "mupen64plus-virefresh", {{"Auto", "Off"}, {"1500", "Some"}, {"2200", "More"}}, true,
+              "Can make games that ran slow on a real N64 smoother; may break some"),
+          opt("CPU Core", "mupen64plus-cpucore",
+              {{"dynamic_recompiler", "Fast (normal)"}, {"cached_interpreter", "Compatible (slower)"}}, true,
+              "If a game crashes or freezes, Compatible may fix it")}},
         {"Controls",
          {opt("Stick Sensitivity", "mupen64plus-astick-sensitivity", percent({50, 75, 90, 100, 110, 125, 150}, 100)),
           opt("Stick Deadzone", "mupen64plus-astick-deadzone", percent({0, 5, 10, 15, 20, 25, 30}))}},
@@ -299,6 +343,22 @@ std::vector<SettingGroup> dolphin(bool wii) {
           opt("Faster Disc Loading", "dolphin_fast_disc_speed", kOnOff, true),
           raw("System Language", "dolphin_language", true),
           opt("Rumble", "dolphin_enable_rumble", kOnOff, true)}},
+        {"Fixes and Speed",
+         {opt("Store EFB Copies to Texture Only", "dolphin_efb_to_texture", kOnOff, true,
+              "On is faster; turn off if effects such as reflections or heat haze are missing"),
+          opt("Store XFB Copies to Texture Only", "dolphin_xfb_to_texture_enable", kOnOff, true,
+              "On is faster; turn off if videos or the picture show wrong"),
+          opt("EFB Access from CPU", "dolphin_efb_access_enable", kOnOff, true,
+              "Some games need it for lens flares and similar effects; slower"),
+          opt("Bounding Box", "dolphin_bbox_enabled", kOnOff, true,
+              "Needed by Paper Mario: The Thousand-Year Door and Super Paper Mario"),
+          opt("Texture Cache Accuracy", "dolphin_texture_cache_accuracy",
+              {{"128", "Fast (normal)"}, {"512", "Middle"}, {"0", "Safe"}}, true,
+              "Safe fixes missing or wrong text and textures in some games"),
+          opt("Synchronize GPU Thread", "dolphin_sync_gpu", kOnOff, true, "Fixes crashes or freezes in a few games; slower"),
+          opt("MMU", "dolphin_main_mmu", kOnOff, true, "A few games need it (Star Wars Rogue Squadron II and III)"),
+          opt("Sound Emulation", "dolphin_dsp_hle", {{"enabled", "Fast (normal)"}, {"disabled", "Accurate"}}, true,
+              "Accurate fixes sound problems in some games; needs a faster PC")}},
     };
     if (wii)
         g.push_back({"Wii",
@@ -326,6 +386,11 @@ std::vector<SettingGroup> wiiU() {
           opt("Shader Cache", "cemu_precompiled_shaders",
               {{"auto", "Game decides"}, {"enabled", "On"}, {"disabled", "Off"}}, false,
               "Keeps compiled shaders so games stutter less the next time")}},
+        {"Fixes and Speed",
+         {opt("Compile Shaders in the Background", "cemu_async_shader_compile", kOnOff, true,
+              "Less stutter when new effects appear (Vulkan); they may show a moment late"),
+          opt("Accurate Barriers", "cemu_vk_accurate_barriers", kOnOff, true,
+              "Fixes flickering and broken graphics in some games (Vulkan); off is faster")}},
         {"Console",
          {opt("CPU Mode", "cemu_cpu_mode",
               {{"auto", "Automatic"}, {"multicore_recompiler", "Multi-core (fastest)"},

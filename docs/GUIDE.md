@@ -325,11 +325,12 @@ Highlights:
 | Game Boy / Color | Palettes (Game Boy Color and Super Game Boy colors too), color correction, LCD ghosting, console, rumble |
 | GBA | LCD ghosting, color correction, solar sensor, skip BIOS intro |
 
-Below those, **More Settings** lists every other setting the console's emulator
-has, with the emulator's own names (Mesen, bsnes, Gambatte, mGBA, melonDS,
-Azahar, Dolphin, Cemu, Mupen64Plus-Next). Settings Nintendall sets itself
-(screen layouts, the renderer, link cable) and ones that would move your saves
-are left out. These apply after the game restarts (marked \*).
+**Fixes and Speed** has settings that help games that run slowly or look or
+sound wrong: for example Dolphin's Store EFB/XFB Copies to Texture Only, Bounding
+Box (Paper Mario) and MMU (Rogue Squadron), N64 framebuffer emulation and
+screen effects, accurate 3DS sound and shader math, SNES accuracy and SA-1
+overclock, and Wii U background shader compiling. The note under each one says
+when it helps.
 
 The list lives in `src/consolesettings.cpp`; values are saved per emulator in
 the `config/` folder.

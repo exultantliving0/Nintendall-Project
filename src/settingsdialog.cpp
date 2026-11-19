@@ -4,7 +4,6 @@
 #include <cctype>
 #include <cstdio>
 #include <fstream>
-#include <set>
 
 #include "landialog.hpp"  // wrapText
 #include "uistyle.hpp"
@@ -46,38 +45,6 @@ std::string packListPath(const std::filesystem::path& rules) {
         return v;
     }
     return {};
-}
-
-// Options the More Settings group leaves out: ones Nintendall sets itself (renderer, screen
-// layouts, link cable, Wii U graphic packs, on-screen text), ones that would move the saves or
-// write debug files, ones only RetroArch uses, network ones (Nintendall's Multiplayer menu does that),
-// and the Wiimote ones (the few Wii games need are in the Wii groups above).
-bool managedByNintendall(const std::string& key, const std::string& description) {
-    std::string desc = description;
-    for (char& c : desc) c = char(std::tolower(static_cast<unsigned char>(c)));
-    for (const char* word : {"retroarch", "network", "netplay", "server ip", "server port", "dns", "wiimote", "wii remote", "bluetooth"})
-        if (desc.find(word) != std::string::npos) return true;
-    static const char* const exact[] = {
-        "citra_graphics_api", "citra_layout_option", "citra_swap_screen", "citra_swap_screen_mode",
-        "cemu_gpu_api", "cemu_internal_resolution", "cemu_number_of_screen_layouts", "cemu_next_screen_layout_button",
-        "cemu_drc_position", "mupen64plus-rdp-plugin", "mupen64plus-rsp-plugin", "melonds_show_current_layout",
-        "melonds_number_of_screen_layouts", "dolphin_osd_enabled", "dolphin_main_cpu_thread",
-        "gambatte_show_gb_link_settings",
-        // Can't work in Nintendall: need files it doesn't have (a GBA BIOS, HD packs, DSi system
-        // files), turbo buttons (Button Config has none), or a network card set up for melonDS.
-        "mgba_use_bios", "mesen_hdpacks", "mesen_controllerturbospeed", "gambatte_turbo_period",
-        "melonds_console_mode", "melonds_direct_network_interface", "melonds_mac_address_mode",
-        "melonds_firmware_wfc_dns", "dolphin_debug_mode_enabled"};
-    for (const char* k : exact)
-        if (key == k) return true;
-    static const char* const prefixes[] = {"nintendall_", "cemu_zgp_", "melonds_screen_layout", "cemu_screen_layout",
-                                           "gambatte_gb_link", "melonds_dsi",
-                                           "dolphin_dsu_"};
-    for (const char* p : prefixes)
-        if (key.rfind(p, 0) == 0) return true;
-    for (const char* part : {"_path", "savepath", "virtual_sd", "dump", "log_level", "_logging", "_log_"})
-        if (key.find(part) != std::string::npos) return true;
-    return false;
 }
 
 }  // namespace
@@ -175,38 +142,6 @@ void SettingsDialog::open(System system, LibretroCore& core, bool gameRunning) {
         for (auto& r : groupRows) rows_.push_back(std::move(r));
     }
 
-    // More Settings: every other option the emulator has, with its own names and choices.
-    std::set<std::string> shown;
-    for (const auto& group : groups)
-        for (const auto& st : group.settings) shown.insert(st.keys.begin(), st.keys.end());
-    std::vector<Row> more;
-    for (const auto& [key, o] : options) {
-        if (shown.count(key) || managedByNintendall(key, o.description) || core.forcedOptions().count(key) || o.values.size() < 2)
-            continue;
-        Row r;
-        r.setting.label = o.description.empty() ? key : o.description;
-        r.setting.keys = {key};
-        r.setting.restart = true;  // the emulator may only use it after a restart
-        for (size_t i = 0; i < o.values.size(); ++i) {
-            // "enabled" / "disabled" read "On" / "Off", like the rest of the window.
-            const std::string label = prettyValue(i < o.labels.size() && !o.labels[i].empty() ? o.labels[i] : o.values[i]);
-            r.choices.push_back({label, {{key, o.values[i]}}});
-        }
-        more.push_back(std::move(r));
-    }
-    std::sort(more.begin(), more.end(), [](const Row& x, const Row& y) {
-        return std::lexicographical_compare(x.setting.label.begin(), x.setting.label.end(), y.setting.label.begin(),
-                                            y.setting.label.end(), [](char a, char b) {
-                                                return std::tolower(static_cast<unsigned char>(a)) <
-                                                       std::tolower(static_cast<unsigned char>(b));
-                                            });
-    });
-    if (!more.empty()) {
-        Row header;
-        header.header = "More Settings (all of the emulator's own)";
-        rows_.push_back(header);
-        for (auto& r : more) rows_.push_back(std::move(r));
-    }
     open_ = true;
 }
 
