@@ -325,6 +325,12 @@ Highlights:
 | Game Boy / Color | Palettes (Game Boy Color and Super Game Boy colors too), color correction, LCD ghosting, console, rumble |
 | GBA | LCD ghosting, color correction, solar sensor, skip BIOS intro |
 
+Below those, **More Settings** lists every other setting the console's emulator
+has, with the emulator's own names (Mesen, bsnes, Gambatte, mGBA, melonDS,
+Azahar, Dolphin, Cemu, Mupen64Plus-Next). Settings Nintendall sets itself
+(screen layouts, the renderer, link cable) and ones that would move your saves
+are left out. These apply after the game restarts (marked \*).
+
 The list lives in `src/consolesettings.cpp`; values are saved per emulator in
 the `config/` folder.
 
