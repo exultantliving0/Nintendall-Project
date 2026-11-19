@@ -2126,7 +2126,27 @@ void App::doAction(int a) {
     case ActLoadState:
         if (!lanBlocks("Save states")) loadState();
         break;
-    case ActButtonConfig: buttonConfig_.open(system_, core_ ? buttonRows_ : systemButtons(System::Unknown)); break;
+    case ActButtonConfig:
+        if (core_) {
+            buttonConfig_.open(system_, buttonRows_);
+        } else {
+            // From the home screen: the buttons of the console shown (Wii: of the controller chosen
+            // in its Console Settings, saved in Dolphin's settings file).
+            const System s = home_.consoleSystem();
+            std::vector<ButtonLabel> rows = systemButtons(s);
+            if (s == System::Wii) {
+                std::string device = "nunchuk";
+                std::ifstream f(paths_.config / "dolphin.opt");
+                for (std::string line; std::getline(f, line);) {
+                    const std::string key = "dolphin_wiimote_default_device = \"";
+                    if (line.rfind(key, 0) == 0 && line.size() > key.size() + 1)
+                        device = line.substr(key.size(), line.find('"', key.size()) - key.size());
+                }
+                rows = wiiButtons(device);
+            }
+            buttonConfig_.open(s, rows);
+        }
+        break;
     case ActConsoleSettings:
         if (lanBlocks("Console Settings")) break;
         if (core_) settings_.open(system_, *core_);
