@@ -535,8 +535,12 @@ Console Settings has resolution (up to 4K), CPU mode, smoother frame rate,
 shader cache and more. Save states aren't possible (Cemu can't save them), so use
 the game's own saves.
 
-Disc images (.wud / .wux) are encrypted with keys from your own console: add your
-`keys.txt` with **Options > Wii U Keys...** (or put `game.key` next to `game.wux`).
+Disc images (.wud / .wux) are encrypted with keys from your own console: put your
+`keys.txt` (or `game.key` files) in `Documents/Nintendall/Keys and Firmware/Wii U`
+(**File > Open Keys and Firmware Folder**), or add it with **Options > Wii U
+Keys...**, which saves it there. A `game.key` next to `game.wux` works too.
+Nintendall gives the keys in that folder to Cemu when it starts and before a
+Wii U game starts; keys you added before are copied there once.
 Decrypted games (.wua, unpacked folders with `code/`, `content/`, `meta/`) and
 homebrew (.rpx, .wuhb) don't need keys.
 

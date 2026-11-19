@@ -58,7 +58,7 @@ public:
 private:
     // Menu actions
     enum Action {
-        ActOpen = 1, ActCloseGame, ActExit, ActGamesFolder, ActCoversFolder, ActSavesFolder,
+        ActOpen = 1, ActCloseGame, ActExit, ActGamesFolder, ActCoversFolder, ActSavesFolder, ActKeysFolder,
         ActRecent = 10,  // + index
         ActPause = 30, ActReset, ActFastForward,
         ActSaveState = 40, ActLoadState,
@@ -146,6 +146,11 @@ private:
     struct DownloadJob;
     std::shared_ptr<DownloadJob> download_;
     std::filesystem::path wiiUKeysFile() const;
+    // Documents/Nintendall/Keys and Firmware: the player's keys (and firmware), one folder per
+    // console. Nintendall gives what's there to the emulators.
+    std::filesystem::path keysFolder() const;
+    void createKeyFolders();
+    void syncWiiUKeys();
     void writeWiiUGamePaths() const;  // tells Cemu where to look for updates and DLC
     bool needsWiiUKeys(const std::filesystem::path& game) const;
     void showMessage(const std::string& title, const std::string& text, bool error);

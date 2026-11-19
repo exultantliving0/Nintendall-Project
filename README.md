@@ -32,8 +32,9 @@ game files; none are included.
 NES, SNES, Nintendo 64, Game Boy, Game Boy Color, Game Boy Advance, Nintendo DS,
 Nintendo 3DS, GameCube, Wii and Wii U.
 
-Wii U disc images need keys from your own console: add them with
-**Options > Wii U Keys...**.
+Wii U disc images need keys from your own console: put your `keys.txt` in
+**Documents\Nintendall\Keys and Firmware\Wii U** (**File > Open Keys and
+Firmware Folder**), or add it with **Options > Wii U Keys...**.
 
 ## What you can do
 

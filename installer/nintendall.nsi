@@ -175,6 +175,8 @@ Section "${APPNAME} (required)" SecMain
   CreateDirectory "$DOCUMENTS\Nintendall\Box Covers and Manuals\Wii"
   CreateDirectory "$DOCUMENTS\Nintendall\Box Covers and Manuals\Nintendo 3DS"
   CreateDirectory "$DOCUMENTS\Nintendall\Box Covers and Manuals\Wii U"
+  ; Keys (and firmware) from the player's own consoles: Nintendall gives them to the emulators.
+  CreateDirectory "$DOCUMENTS\Nintendall\Keys and Firmware\Wii U"
   ; Saves (battery and GameCube saves; saves from other emulators go here too). Uninstalling leaves it.
   CreateDirectory "$DOCUMENTS\Nintendall\Saves\NES"
   CreateDirectory "$DOCUMENTS\Nintendall\Saves\Game Boy"

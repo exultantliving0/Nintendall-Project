@@ -319,6 +319,8 @@ int App::run(const fs::path& start, const LaunchOptions& opt) {
         home_.start(gamesRoot, coversRoot, paths_.data / "covers", paths_.base / "gameinfo", paths_.data / "game info",
                     cfg_.get("home.console"));
         home_.setCoverSize(std::atoi(cfg_.get("home.cover_size").c_str()));
+        createKeyFolders();
+        syncWiiUKeys();
         settings_.setWiiUPackFolders(paths_.systemDirFor("cemu") / "Cemu" / "graphicPacks",
                                      paths_.systemDirFor("cemu") / "Cemu" / "customGraphicPacks");
         // After Update Now: say whether the new version is running, and tidy the temp folder.
@@ -560,12 +562,13 @@ bool App::startGame(const fs::path& path) {
                     false);
         return false;
     }
+    if (det.system == System::WiiU) syncWiiUKeys();
     if (det.system == System::WiiU && needsWiiUKeys(det.launchPath.empty() ? path : det.launchPath)) {
         showMessage("Wii U keys needed",
                     path.filename().u8string() +
                         "\n\nWii U disc images are encrypted with keys from your own console. Add your keys.txt "
-                        "with Options > Wii U Keys..., then open the game again.\n\n(A game.key file next to the "
-                        "game works too.)",
+                        "with Options > Wii U Keys... (or put it in " + (keysFolder() / "Wii U").u8string() +
+                        "), then open the game again.\n\n(A game.key file next to the game works too.)",
                     true);
         return false;
     }
@@ -2098,6 +2101,10 @@ void App::doAction(int a) {
         createSaveFolders(savesRoot_);
         openFolder(savesRoot_);
         break;
+    case ActKeysFolder:
+        createKeyFolders();
+        openFolder(keysFolder());
+        break;
     case ActCloseGame: stopGame(); break;
     case ActExit: quit_ = true; break;
     case ActPause:
@@ -2260,6 +2267,66 @@ void App::writeWiiUGamePaths() const {
 
 fs::path App::wiiUKeysFile() const { return paths_.systemDirFor("cemu") / "Cemu" / "keys.txt"; }
 
+fs::path App::keysFolder() const { return home_.gamesRoot().parent_path() / "Keys and Firmware"; }
+
+void App::createKeyFolders() {
+    std::error_code ec;
+    fs::create_directories(keysFolder() / "Wii U", ec);
+}
+
+namespace {
+// The Wii U keys in a file of the Keys and Firmware folder: keys.txt lines, or a 16-byte game.key.
+std::vector<std::string> wiiUKeyLines(const fs::path& file) {
+    std::vector<std::string> out;
+    std::error_code ec;
+    if (fs::file_size(file, ec) == 16 && lowerExt(file) == ".key") {
+        std::ifstream f(file, std::ios::binary);
+        unsigned char b[16] = {};
+        if (f.read(reinterpret_cast<char*>(b), 16)) {
+            static const char* hex = "0123456789abcdef";
+            std::string k;
+            for (unsigned char c : b) k += {hex[c >> 4], hex[c & 15]};
+            out.push_back(k + " # " + file.stem().u8string());
+        }
+        return out;
+    }
+    for (const auto& l : readLines(file))
+        if (!keyFromLine(l).empty()) out.push_back(l);
+    return out;
+}
+}  // namespace
+
+// Keys and Firmware/Wii U: every key in its files (keys.txt, other .txt files, game.key files) is
+// added to Cemu's keys.txt. The keys Cemu already had are copied there once, so the folder shows them.
+void App::syncWiiUKeys() {
+    const fs::path folder = keysFolder() / "Wii U", dest = wiiUKeysFile();
+    std::error_code ec;
+    std::vector<fs::path> files;
+    for (const auto& e : fs::directory_iterator(folder, ec)) {
+        const std::string ext = lowerExt(e.path());
+        if (e.is_regular_file(ec) && (ext == ".txt" || ext == ".key")) files.push_back(e.path());
+    }
+    std::set<std::string> have;
+    std::vector<std::string> cemuLines;
+    for (const auto& l : readLines(dest))
+        if (const std::string k = keyFromLine(l); !k.empty() && have.insert(k).second) cemuLines.push_back(l);
+    bool folderHasKeys = false;
+    for (const auto& f : files) folderHasKeys = folderHasKeys || !wiiUKeyLines(f).empty();
+    if (!folderHasKeys && !cemuLines.empty() && fs::is_directory(folder, ec)) {
+        std::ofstream out(folder / "keys.txt");
+        for (const auto& l : cemuLines) out << l << "\n";
+        return;
+    }
+    std::vector<std::string> add;
+    for (const auto& f : files)
+        for (const auto& l : wiiUKeyLines(f))
+            if (have.insert(keyFromLine(l)).second) add.push_back(l);
+    if (add.empty()) return;
+    fs::create_directories(dest.parent_path(), ec);
+    std::ofstream out(dest, std::ios::app);
+    for (const auto& l : add) out << l << "\n";
+}
+
 bool App::needsWiiUKeys(const fs::path& game) const {
     std::string ext = game.extension().u8string();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
@@ -2278,25 +2345,27 @@ void App::importWiiUKeys() {
     const std::string chosen =
         ::openFileDialog(video_.window(), "Choose your Wii U keys file", "Key files", {"txt", "key"}, unavailable);
     nextFrame_ = nowSeconds();
+    createKeyFolders();
     if (unavailable) {
-        showMessage("Wii U Keys", "Put your keys.txt in this folder:\n" + wiiUKeysFile().parent_path().u8string(),
-                    false);
+        showMessage("Wii U Keys", "Put your keys.txt in this folder:\n" + (keysFolder() / "Wii U").u8string(), false);
         return;
     }
     if (chosen.empty()) return;
 
-    // Add every key that isn't there yet; keep the notes ("# Game name") that come with them.
-    const fs::path dest = wiiUKeysFile();
+    // Add every key that isn't there yet to keys.txt in Keys and Firmware/Wii U (keeping the notes,
+    // "# Game name", that come with them); syncWiiUKeys gives them to Cemu.
+    syncWiiUKeys();
+    const fs::path dest = keysFolder() / "Wii U" / "keys.txt";
     std::set<std::string> have;
+    for (const auto& l : readLines(wiiUKeysFile()))
+        if (const std::string k = keyFromLine(l); !k.empty()) have.insert(k);
     for (const auto& l : readLines(dest))
         if (const std::string k = keyFromLine(l); !k.empty()) have.insert(k);
     std::vector<std::string> add;
     int found = 0;
-    for (const auto& l : readLines(fs::u8path(chosen))) {
-        const std::string k = keyFromLine(l);
-        if (k.empty()) continue;
+    for (const auto& l : wiiUKeyLines(fs::u8path(chosen))) {
         ++found;
-        if (have.insert(k).second) add.push_back(l);
+        if (have.insert(keyFromLine(l)).second) add.push_back(l);
     }
     if (found == 0) {
         showMessage("Wii U Keys",
@@ -2307,12 +2376,15 @@ void App::importWiiUKeys() {
     }
     std::error_code ec;
     fs::create_directories(dest.parent_path(), ec);
-    std::ofstream out(dest, std::ios::app);
-    for (const auto& l : add) out << l << "\n";
-    if (!out) {
-        showMessage("Wii U Keys", "Couldn't write " + dest.u8string(), true);
-        return;
+    {
+        std::ofstream out(dest, std::ios::app);
+        for (const auto& l : add) out << l << "\n";
+        if (!out) {
+            showMessage("Wii U Keys", "Couldn't write " + dest.u8string(), true);
+            return;
+        }
     }
+    syncWiiUKeys();
     showMessage("Wii U Keys",
                 add.empty() ? "Those keys were already added."
                             : "Added " + std::to_string(add.size()) + (add.size() == 1 ? " key" : " keys") +
@@ -2373,6 +2445,7 @@ void App::buildMenus() {
     file.items.push_back({"Open Games Folder", "", ActGamesFolder});
     file.items.push_back({"Open Box Covers and Manuals Folder", "", ActCoversFolder});
     file.items.push_back({"Open Saves Folder", "", ActSavesFolder});
+    file.items.push_back({"Open Keys and Firmware Folder", "", ActKeysFolder});
     file.items.push_back({"Close Game", "Ctrl+W", ActCloseGame, game});
     const auto recent = recentGames();
     if (!recent.empty()) {
